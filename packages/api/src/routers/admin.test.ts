@@ -9,6 +9,37 @@ vi.mock('../services/stripe', () => ({ getStripeClient: () => ({
 
 import { adminRouter } from './admin';
 
+/** The per-turn core read through database functions (services/adminActivity.ts): what an idle site answers. */
+const EMPTY_ADMIN_ACTIVITY = {
+  conversations: { total: 0, byModel: [], days: [] }, messages: { user: 0, assistant: 0, days: [] },
+  calls: { finished: 0, failed: 0, avgMs: null, p95Ms: null },
+};
+const EMPTY_ADMIN_DASHBOARD = {
+  users: { total: 0, today: 0, week: 0, month: 0, credits: 0 }, tickets: { total: 0, open: 0, inProgress: 0, closed: 0 },
+  ledger: { byType: {}, spent: 0, days: [] },
+};
+/** An awaitable `.rpc()` answer that also takes the paging calls of a set-returning function. */
+function rpcAnswer(data: unknown, error: unknown = null) {
+  const builder = {
+    order: () => builder,
+    range: () => builder,
+    then: (onFulfilled: (value: unknown) => unknown, onRejected?: (reason: unknown) => unknown) =>
+      Promise.resolve({ data, error }).then(onFulfilled, onRejected),
+  };
+  return builder;
+}
+/** `.rpc()` of an admin client whose core functions answer `answers[name]`, or an idle site when the name is not given. */
+function adminStatsRpc(answers: Record<string, unknown> = {}, calls: Array<{ name: string; args: Record<string, unknown> }> = []) {
+  const idle: Record<string, unknown> = {
+    turn_admin_activity: EMPTY_ADMIN_ACTIVITY, admin_dashboard_stats: EMPTY_ADMIN_DASHBOARD, turn_admin_usage_days: [],
+  };
+  return (name: string, args: Record<string, unknown>) => {
+    calls.push({ name, args });
+    if (!Object.hasOwn(idle, name)) throw new Error(`Unexpected admin function ${name}`);
+    return rpcAnswer(Object.hasOwn(answers, name) ? answers[name] : idle[name]);
+  };
+}
+
 function createAwaitableQueryBuilder(result: Promise<unknown>) {
   return {
     select() {
@@ -428,7 +459,23 @@ describe('adminRouter membership eligibility guard', () => {
   });
 });
 
-describe('adminRouter performance stats aggregation', () => {
+/** Table reads of an admin client by name; anything else (the retired chat tables included) fails the test. */
+function adminStatsTables(tables: Record<string, unknown[]>, reads: Array<{ table: string; filters: unknown[][] }> = []) {
+  return (table: string) => {
+    if (!Object.hasOwn(tables, table)) throw new Error(`Unexpected admin table ${table}`);
+    const read = { table, filters: [] as unknown[][] };
+    reads.push(read);
+    const builder: Record<string, unknown> = {};
+    for (const method of ['select', 'eq', 'gte', 'order', 'range', 'limit']) {
+      builder[method] = (...args: unknown[]) => { read.filters.push([method, ...args]); return builder; };
+    }
+    builder.then = (onFulfilled: (value: unknown) => unknown, onRejected?: (reason: unknown) => unknown) =>
+      Promise.resolve({ data: tables[table], error: null }).then(onFulfilled, onRejected);
+    return builder;
+  };
+}
+
+describe('adminRouter performance stats on the per-turn core', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-03-29T12:00:00.000Z'));
@@ -438,214 +485,106 @@ describe('adminRouter performance stats aggregation', () => {
     vi.useRealTimers();
   });
 
-  it('aggregates recent windows locally without re-querying every time bucket', async () => {
-    const adminQueries: string[] = [];
-    const selectOptions: Array<{ table: string; count?: string; head?: boolean }> = [];
+  const activity = {
+    conversations: {
+      total: 100,
+      byModel: [{ model: 'model-a', count: 70 }, { model: 'model-b', count: 30 }],
+      days: [
+        { date: '2026-03-10', model: 'unknown', count: 1 }, { date: '2026-03-20', model: 'model-b', count: 1 },
+        { date: '2026-03-27', model: 'model-a', count: 1 }, { date: '2026-03-29', model: 'model-a', count: 1 },
+      ],
+    },
+    messages: {
+      user: 120, assistant: 180,
+      days: [
+        { date: '2026-03-05', user: 1, assistant: 0 }, { date: '2026-03-18', user: 1, assistant: 0 },
+        { date: '2026-03-26', user: 0, assistant: 1 }, { date: '2026-03-29', user: 1, assistant: 1 },
+      ],
+    },
+    calls: { finished: 3, failed: 1, avgMs: 200, p95Ms: 300 },
+  };
+  const usageDays = [{
+    model_used: 'model-b', day: '2026-03-28', requests: 4, total_credits: 8, total_cost_usd: '0.03',
+    input_tokens: 20, output_tokens: 10, cached_tokens: 0, cache_creation_tokens: 0,
+  }];
+  const tables = {
+    tickets: [{ status: 'open' }, { status: 'open' }, { status: 'in_progress' }, { status: 'closed' }],
+    ai_models: [
+      { id: 'row-a', name: 'Model A', model_id: 'model-a', provider: 'openai', config: null, is_active: 'true' },
+      { id: 'row-b', name: 'Model B', model_id: 'model-b', provider: 'openai', config: null, is_active: 'true' },
+    ],
+    // One request the retired path left behind; the per-turn core's four requests come from the usage days above.
+    token_stats: [{
+      model_used: 'model-a', total_credits: 3, total_cost_usd: '0.010000', input_tokens: 100, output_tokens: 50,
+      cached_tokens: 10, cache_creation_tokens: 0, created_at: '2026-03-28T08:00:00.000Z',
+    }],
+  };
 
-    const recentConversations = [
-      { model_id: 'model-a', created_at: '2026-03-29T08:00:00.000Z' },
-      { model_id: 'model-a', created_at: '2026-03-27T12:00:00.000Z' },
-      { model_id: 'model-b', created_at: '2026-03-20T12:00:00.000Z' },
-      { model_id: null, created_at: '2026-03-10T12:00:00.000Z' },
-    ];
+  it('counts conversations, messages and calls from the core functions and never reads the retired chat tables', async () => {
+    const reads: Array<{ table: string; filters: unknown[][] }> = [];
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    const caller = createAdminCaller({
+      rpc: adminStatsRpc({ turn_admin_activity: activity, turn_admin_usage_days: usageDays }, calls),
+      from: adminStatsTables(tables, reads),
+    });
 
-    const recentMessages = [
-      { role: 'user', created_at: '2026-03-29T08:00:00.000Z' },
-      { role: 'assistant', created_at: '2026-03-29T08:05:00.000Z' },
-      { role: 'assistant', created_at: '2026-03-27T12:00:00.000Z' },
-      { role: 'user', created_at: '2026-03-20T12:00:00.000Z' },
-      { role: 'assistant', created_at: '2026-03-09T12:00:00.000Z' },
-    ];
-
-    const adminSupabase = {
-      from(table: string) {
-        adminQueries.push(table);
-
-        const state: {
-          table: string;
-          eqField?: string;
-          eqValue?: unknown;
-          gteValue?: string;
-          head?: boolean;
-        } = { table };
-
-        const execute = async () => {
-          switch (state.table) {
-            case 'conversations':
-              if (state.head) {
-                return { data: null, error: null, count: 100 };
-              }
-              return { data: recentConversations, error: null, count: recentConversations.length };
-            case 'messages':
-              if (state.head && state.eqField === 'role' && state.eqValue === 'user') {
-                return { data: null, error: null, count: 120 };
-              }
-              if (state.head && state.eqField === 'role' && state.eqValue === 'assistant') {
-                return { data: null, error: null, count: 180 };
-              }
-              if (state.head) {
-                return { data: null, error: null, count: 300 };
-              }
-              return { data: recentMessages, error: null, count: recentMessages.length };
-            case 'tickets':
-              return {
-                data: [{ status: 'open' }, { status: 'in_progress' }, { status: 'closed' }, { status: 'open' }],
-                error: null,
-              };
-            case 'ai_models':
-              return {
-                data: [
-                  {
-                    id: 'row-a',
-                    name: 'Model A',
-                    model_id: 'model-a',
-                    provider: 'openai',
-                    input_token_cost: 1000,
-                    output_token_cost: 2000,
-                    web_search_cost: 0,
-                    is_active: true,
-                  },
-                  {
-                    id: 'row-b',
-                    name: 'Model B',
-                    model_id: 'model-b',
-                    provider: 'anthropic',
-                    input_token_cost: 500,
-                    output_token_cost: 1000,
-                    web_search_cost: 0,
-                    is_active: true,
-                  },
-                ],
-                error: null,
-              };
-            case 'token_stats':
-              return {
-                data: [
-                  {
-                    model_used: 'model-a',
-                    total_credits: 30,
-                    total_cost_usd: '0.030000',
-                    input_tokens: 1000,
-                    output_tokens: 500,
-                    cached_tokens: 100,
-                    cache_creation_tokens: 20,
-                    created_at: '2026-03-29T08:05:00.000Z',
-                  },
-                  {
-                    model_used: 'model-b',
-                    total_credits: 10,
-                    total_cost_usd: '0.010000',
-                    input_tokens: 200,
-                    output_tokens: 100,
-                    cached_tokens: 0,
-                    cache_creation_tokens: 0,
-                    created_at: '2026-03-20T12:00:00.000Z',
-                  },
-                ],
-                error: null,
-              };
-            case 'ai_usage_logs':
-              return {
-                data: [
-                  { status: 'success', latency_ms: 100, created_at: '2026-03-29T08:05:00.000Z' },
-                  { status: 'success', latency_ms: 300, created_at: '2026-03-27T12:00:00.000Z' },
-                  { status: 'failed', latency_ms: null, created_at: '2026-03-20T12:00:00.000Z' },
-                ],
-                error: null,
-              };
-            default:
-              throw new Error(`Unexpected admin table ${state.table}`);
-          }
-        };
-
-        const builder = {
-          select(_columns?: string, options?: { count?: string; head?: boolean }) {
-            selectOptions.push({ table: state.table, count: options?.count, head: options?.head });
-            state.head = options?.head ?? false;
-            return builder;
-          },
-          eq(field: string, value: unknown) {
-            state.eqField = field;
-            state.eqValue = value;
-            return builder;
-          },
-          gte(_field: string, value: string) {
-            state.gteValue = value;
-            return builder;
-          },
-          order() { return builder; },
-          range() { return builder; },
-          then(onFulfilled: (value: unknown) => unknown, onRejected?: (reason: unknown) => unknown) {
-            return execute().then(onFulfilled, onRejected);
-          },
-          catch(onRejected: (reason: unknown) => unknown) {
-            return execute().catch(onRejected);
-          },
-          finally(onFinally: () => void) {
-            return execute().finally(onFinally);
-          },
-        };
-
-        return builder;
-      },
-    };
-
-    const caller = createAdminCaller(adminSupabase);
     const result = await caller.getPerformanceStats({ timeRange: '14d' });
+
     expect(result.modelUsage[0]?.pricing).toMatchObject({ status: 'unread', label: '未读取', base: null, frozen: null });
     expect(result.modelUsage[0]).not.toHaveProperty('inputTokenCost');
-
-    expect(result.conversations).toMatchObject({
-      total: 100,
-      today: 1,
-      thisWeek: 2,
-      thisMonth: 4,
-      inRange: 3,
-    });
-    expect(result.messages).toMatchObject({
-      total: 300,
-      userMessages: 120,
-      assistantMessages: 180,
-      today: 2,
-      thisWeek: 3,
-      thisMonth: 5,
-      inRange: 4,
-    });
-    expect(result.tickets).toMatchObject({
-      total: 4,
-      open: 2,
-      inProgress: 1,
-      closed: 1,
-    });
-    expect(result.aiPerformance).toMatchObject({
-      totalRequests: 180,
-      rangeRequests: 2,
-      avgResponseTime: 200,
-      p95ResponseTime: 300,
-      errorRate: 33.33,
-      cacheHitRate: 7.7,
+    // Windows start at a UTC day: today 03-29, the week from 03-22, the month from 02-27, the 14-day range from 03-15.
+    expect(result.conversations).toEqual({ total: 100, today: 1, thisWeek: 2, thisMonth: 4, inRange: 3 });
+    expect(result.messages).toEqual({ total: 300, userMessages: 120, assistantMessages: 180, today: 2, thisWeek: 3, thisMonth: 5, inRange: 4 });
+    expect(result.tickets).toEqual({ total: 4, open: 2, inProgress: 1, closed: 1 });
+    // One failed call in three is 33.33%: health follows the error rate, not the duration of a whole model call.
+    expect(result.aiPerformance).toEqual({
+      totalRequests: 180, rangeRequests: 2, avgResponseTime: 200, p95ResponseTime: 300, errorRate: 33.33, cacheHitRate: 7.7,
       healthStatus: 'critical',
     });
-    expect(result.modelUsage).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ id: 'row-a', conversationCount: 2, requestCount: 1 }),
-        expect.objectContaining({ id: 'row-b', conversationCount: 1, requestCount: 1 }),
-      ]),
-    );
+    expect(result.modelUsage).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'row-a', conversationCount: 2, requestCount: 1, creditsConsumed: 3, totalCostUsd: 0.01 }),
+      // A model-and-day group stands for its four requests, not for one.
+      expect.objectContaining({ id: 'row-b', conversationCount: 1, requestCount: 4, creditsConsumed: 8, totalCostUsd: 0.03 }),
+    ]));
+    expect(result.tokenUsage).toMatchObject({ inputTokens: 120, outputTokens: 60, cacheReadTokens: 10 });
+    expect(result.costStats).toMatchObject({ totalCost: 0.04, avgCostPerRequest: 0.008 });
     expect(result.dailyChart).toHaveLength(14);
-    expect(adminQueries).toHaveLength(10);
-    expect(selectOptions.filter((option) => option.head)).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ table: 'conversations', count: 'planned', head: true }),
-        expect.objectContaining({ table: 'messages', count: 'planned', head: true }),
-        expect.objectContaining({ table: 'messages', count: 'planned', head: true }),
-        expect.objectContaining({ table: 'messages', count: 'planned', head: true }),
-      ]),
-    );
+    expect(result.dailyChart.at(-1)).toEqual({ date: '2026-03-29', conversations: 1, messages: 2, requests: 1 });
+
+    expect(reads.map(read => read.table).sort()).toEqual(['ai_models', 'tickets', 'token_stats']);
+    expect(calls).toEqual(expect.arrayContaining([
+      // Charts cover 30 days; finished calls cover the chosen range.
+      { name: 'turn_admin_activity', args: { p_from: '2026-02-27T12:00:00.000Z', p_to: '2026-03-29T12:01:00.000Z', p_calls_from: '2026-03-15T12:00:00.000Z' } },
+      { name: 'turn_admin_usage_days', args: { p_from: '2026-03-15T12:00:00.000Z', p_to: '2026-03-29T12:01:00.000Z', p_daily_from: '2026-03-15T12:00:00.000Z' } },
+    ]));
+    expect(calls).toHaveLength(2);
+  });
+
+  it('is healthy when no call failed, whatever a whole model call takes, and unknown when nothing ran', async () => {
+    const slow = { ...activity, calls: { finished: 200, failed: 0, avgMs: 41_000, p95Ms: 95_000 } };
+    const busy = createAdminCaller({ rpc: adminStatsRpc({ turn_admin_activity: slow }), from: adminStatsTables(tables) });
+    expect((await busy.getPerformanceStats({ timeRange: '7d' })).aiPerformance).toMatchObject({
+      avgResponseTime: 41_000, p95ResponseTime: 95_000, errorRate: 0, healthStatus: 'healthy',
+    });
+    const idle = createAdminCaller({ rpc: adminStatsRpc(), from: adminStatsTables({ ...tables, token_stats: [] }) });
+    const result = await idle.getPerformanceStats({ timeRange: '7d' });
+    expect(result.aiPerformance).toMatchObject({ totalRequests: 0, avgResponseTime: 0, p95ResponseTime: 0, errorRate: 0, healthStatus: 'healthy' });
+    expect(result.conversations).toEqual({ total: 0, today: 0, thisWeek: 0, thisMonth: 0, inRange: 0 });
+    expect(result.costStats).toMatchObject({ totalCost: 0, avgCostPerRequest: 0 });
+  });
+
+  it.each([
+    ['the activity function fails', { turn_admin_activity: null }],
+    ['the usage function answers something that is not a list of days', { turn_admin_usage_days: [{ model_used: 'model-a' }] }],
+  ])('fails instead of showing zeros when %s', async (_name, answers) => {
+    const caller = createAdminCaller({ rpc: adminStatsRpc(answers), from: adminStatsTables(tables) });
+    await expect(caller.getPerformanceStats({ timeRange: '14d' })).rejects.toMatchObject<Partial<TRPCError>>({
+      code: 'INTERNAL_SERVER_ERROR', message: '读取性能统计失败，请稍后重试',
+    });
   });
 });
 
-describe('adminRouter dashboard statistics aggregation', () => {
+describe('adminRouter dashboard statistics from the database summary', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-03-29T12:00:00.000Z'));
@@ -655,242 +594,75 @@ describe('adminRouter dashboard statistics aggregation', () => {
     vi.useRealTimers();
   });
 
-  it('reuses shared datasets for user and conversation rollups', async () => {
-    const adminQueries: string[] = [];
-    const selectOptions: Array<{ table: string; count?: string; head?: boolean }> = [];
-
-    const adminSupabase = {
-      from(table: string) {
-        adminQueries.push(table);
-
-        const state: {
-          table: string;
-          head?: boolean;
-          gteValue?: string;
-        } = { table };
-
-        const execute = async () => {
-          switch (state.table) {
-            case 'profiles':
-              if (state.head) {
-                return { data: null, error: null, count: 0 };
-              }
-              if (state.gteValue === undefined) {
-                return {
-                  data: [
-                    { id: 'u1', created_at: '2026-03-29T08:00:00.000Z', credits: 10 },
-                    { id: 'u2', created_at: '2026-03-27T08:00:00.000Z', credits: 20 },
-                    { id: 'u3', created_at: '2026-03-10T08:00:00.000Z', credits: 30 },
-                  ],
-                  error: null,
-                };
-              }
-              return { data: [], error: null };
-            case 'tickets':
-              return {
-                data: [{ status: 'open' }, { status: 'closed' }, { status: 'in_progress' }],
-                error: null,
-              };
-            case 'conversations':
-              if (state.head) {
-                return { data: null, error: null, count: 40 };
-              }
-              return {
-                data: [
-                  { created_at: '2026-03-29T09:00:00.000Z' },
-                  { created_at: '2026-03-28T09:00:00.000Z' },
-                ],
-                error: null,
-              };
-            case 'credit_transactions':
-              return {
-                data: [
-                  { amount: 50, type: 'addition', created_at: '2026-03-29T09:00:00.000Z' },
-                  { amount: -20, type: 'deduction', created_at: '2026-03-28T09:00:00.000Z' },
-                  { amount: 30, type: 'purchase', created_at: '2026-03-27T09:00:00.000Z' },
-                  { amount: 5, type: 'refund', created_at: '2026-03-26T09:00:00.000Z' },
-                ],
-                error: null,
-              };
-            case 'ai_models':
-              return {
-                data: [
-                  { id: 'm1', name: 'Model 1', model_id: 'model-1', is_active: true },
-                  { id: 'm2', name: 'Model 2', model_id: 'model-2', is_active: true },
-                ],
-                error: null,
-              };
-            default:
-              throw new Error(`Unexpected admin table ${state.table}`);
-          }
-        };
-
-        const builder = {
-          select(_columns?: string, options?: { count?: string; head?: boolean }) {
-            selectOptions.push({ table: state.table, count: options?.count, head: options?.head });
-            state.head = options?.head ?? false;
-            return builder;
-          },
-          order() {
-            return builder;
-          },
-          limit() {
-            return builder;
-          },
-          eq() {
-            return builder;
-          },
-          gte(_field: string, value: string) {
-            state.gteValue = value;
-            return builder;
-          },
-          then(onFulfilled: (value: unknown) => unknown, onRejected?: (reason: unknown) => unknown) {
-            return execute().then(onFulfilled, onRejected);
-          },
-          catch(onRejected: (reason: unknown) => unknown) {
-            return execute().catch(onRejected);
-          },
-          finally(onFinally: () => void) {
-            return execute().finally(onFinally);
-          },
-        };
-
-        return builder;
+  const dashboard = {
+    users: { total: 3, today: 1, week: 2, month: 3, credits: 60 },
+    tickets: { total: 3, open: 1, inProgress: 1, closed: 1 },
+    ledger: {
+      byType: {
+        addition: { count: 2, amount: 30 }, purchase: { count: 1, amount: 100 }, refund: { count: 1, amount: 5 },
+        checkin: { count: 1, amount: 2 }, consumption: { count: 3, amount: -45 }, adjustment: { count: 6, amount: 0 },
       },
-    };
+      spent: 45,
+      days: [{ date: '2026-03-27', granted: 0, spent: 3 }, { date: '2026-03-29', granted: 20, spent: 7 }],
+    },
+  };
+  const activity = {
+    ...EMPTY_ADMIN_ACTIVITY,
+    conversations: { total: 40, byModel: [], days: [{ date: '2026-03-25', model: 'model-b', count: 1 }, { date: '2026-03-29', model: 'model-a', count: 2 }] },
+  };
+  const tables = {
+    profiles: [{ id: 'u1', email: 'u1@example.com', nickname: 'U1', avatar_url: null, role: 'user', credits: 30, created_at: '2026-03-29T08:00:00.000Z' }],
+    ai_models: [{ id: 'm1', name: 'Model A', model_id: 'model-a', is_active: 'true' }],
+  };
 
-    const caller = createAdminCaller(adminSupabase);
+  it('takes users, tickets and the ledger from the summary and conversations from the core, with no whole-table read', async () => {
+    const reads: Array<{ table: string; filters: unknown[][] }> = [];
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    const caller = createAdminCaller({
+      rpc: adminStatsRpc({ admin_dashboard_stats: dashboard, turn_admin_activity: activity }, calls),
+      from: adminStatsTables(tables, reads),
+    });
+
     const result = await caller.getStatistics();
 
-    expect(result.users).toMatchObject({
-      total: 3,
-      today: 1,
-      thisWeek: 2,
-      thisMonth: 3,
+    expect(result.users).toMatchObject({ total: 3, today: 1, thisWeek: 2, thisMonth: 3 });
+    expect(result.users.recentUsers).toHaveLength(1);
+    expect(result.conversations).toEqual({ total: 40, today: 2, thisWeek: 3 });
+    expect(result.tickets).toEqual({ total: 3, open: 1, inProgress: 1, closed: 1 });
+    // Spend is credits actually charged (the core writes them as 'consumption'); reservations are adjustments and are not spend.
+    expect(result.credits).toEqual({
+      totalInSystem: 60,
+      transactions: { totalDeductions: 45, totalAdditions: 30, totalCheckins: 2, totalPurchases: 100, totalRefunds: 5 },
     });
-    expect(result.conversations).toMatchObject({
-      total: 40,
-      today: 1,
-      thisWeek: 2,
-    });
-    expect(result.credits.totalInSystem).toBe(60);
-    expect(result).not.toHaveProperty('invitations');
-    expect(result.tickets).toMatchObject({
-      total: 3,
-      open: 1,
-      inProgress: 1,
-      closed: 1,
-    });
-    expect(result.models.activeCount).toBe(2);
+    expect(result.models).toMatchObject({ activeCount: 1 });
     expect(result.trends).toHaveLength(7);
-    expect(result.trends).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ date: '2026-03-26', additions: 5, deductions: 0 }),
-      ]),
-    );
-    expect(adminQueries).toHaveLength(9);
-    expect(adminQueries).not.toContain('invitations');
-    expect(selectOptions).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ table: 'conversations', count: 'planned', head: true }),
-      ]),
-    );
+    expect(result.trends.at(-1)).toMatchObject({ date: '2026-03-29', additions: 20, deductions: 7 });
+    expect(result.trends.at(-3)).toMatchObject({ date: '2026-03-27', additions: 0, deductions: 3 });
+    expect(result.trends.at(-2)).toMatchObject({ date: '2026-03-28', additions: 0, deductions: 0 });
+    expect(result.systemHealth).toBe('attention');
+
+    // Only the two short user lists and the active models are read as rows; soft-deleted profiles stay out of the lists.
+    expect(reads.map(read => read.table).sort()).toEqual(['ai_models', 'profiles', 'profiles']);
+    for (const read of reads.filter(item => item.table === 'profiles')) {
+      expect(read.filters).toContainEqual(['eq', 'is_deleted', false]);
+      expect(read.filters.some(filter => filter[0] === 'limit')).toBe(true);
+    }
+    expect(calls).toEqual(expect.arrayContaining([
+      { name: 'admin_dashboard_stats', args: { p_today: '2026-03-29T00:00:00.000Z', p_week: '2026-03-22T12:00:00.000Z', p_month: '2026-03-01T00:00:00.000Z' } },
+      { name: 'turn_admin_activity', args: { p_from: '2026-03-22T12:00:00.000Z', p_to: '2026-03-29T12:01:00.000Z', p_calls_from: '2026-03-22T12:00:00.000Z' } },
+    ]));
+    expect(calls).toHaveLength(2);
   });
 
-  it('filters soft-deleted records out of dashboard statistics queries', async () => {
-    const eqCalls: Array<{ table: string; field: string; value: unknown }> = [];
-
-    const adminSupabase = {
-      from(table: string) {
-        const state: {
-          table: string;
-          head?: boolean;
-        } = { table };
-
-        const execute = async () => {
-          switch (state.table) {
-            case 'profiles':
-              return {
-                data: [{ id: 'u1', created_at: '2026-03-29T08:00:00.000Z', credits: 10 }],
-                error: null,
-              };
-            case 'tickets':
-              return {
-                data: [{ status: 'closed' }],
-                error: null,
-              };
-            case 'conversations':
-              if (state.head) {
-                return { data: null, error: null, count: 2 };
-              }
-              return {
-                data: [{ created_at: '2026-03-29T09:00:00.000Z' }],
-                error: null,
-              };
-            case 'credit_transactions':
-              return {
-                data: [],
-                error: null,
-              };
-            case 'ai_models':
-              return {
-                data: [],
-                error: null,
-              };
-            default:
-              throw new Error(`Unexpected admin table ${state.table}`);
-          }
-        };
-
-        const builder = {
-          select(_columns?: string, options?: { count?: string; head?: boolean }) {
-            state.head = options?.head ?? false;
-            return builder;
-          },
-          order() {
-            return builder;
-          },
-          limit() {
-            return builder;
-          },
-          eq(field: string, value: unknown) {
-            eqCalls.push({ table: state.table, field, value });
-            return builder;
-          },
-          gte() {
-            return builder;
-          },
-          then(onFulfilled: (value: unknown) => unknown, onRejected?: (reason: unknown) => unknown) {
-            return execute().then(onFulfilled, onRejected);
-          },
-          catch(onRejected: (reason: unknown) => unknown) {
-            return execute().catch(onRejected);
-          },
-          finally(onFinally: () => void) {
-            return execute().finally(onFinally);
-          },
-        };
-
-        return builder;
-      },
-    };
-
-    const caller = createAdminCaller(adminSupabase);
-    const result = await caller.getStatistics();
-
-    expect(result.tickets).toMatchObject({
-      total: 1,
-      open: 0,
-      inProgress: 0,
-      closed: 1,
+  it.each([
+    ['the summary cannot be read', { admin_dashboard_stats: null }],
+    ['the summary is malformed', { admin_dashboard_stats: { ...dashboard, users: { total: '3' } } }],
+    ['the conversations cannot be read', { turn_admin_activity: null }],
+  ])('fails instead of showing zeros when %s', async (_name, answers) => {
+    const caller = createAdminCaller({ rpc: adminStatsRpc(answers), from: adminStatsTables(tables) });
+    await expect(caller.getStatistics()).rejects.toMatchObject<Partial<TRPCError>>({
+      code: 'INTERNAL_SERVER_ERROR', message: '读取后台统计失败，请稍后重试',
     });
-    expect(eqCalls).toEqual(
-      expect.arrayContaining([
-        { table: 'profiles', field: 'is_deleted', value: false },
-        { table: 'tickets', field: 'is_deleted', value: false },
-        { table: 'conversations', field: 'is_deleted', value: false },
-      ]),
-    );
   });
 });
 
@@ -900,14 +672,16 @@ describe('adminRouter finance stats runtime billing summary', () => {
     'credit_packages',
     'profiles',
     'ai_models',
-    'conversations',
+    // The per-turn core is read through two database functions (services/adminActivity.ts), not the retired chat tables.
+    'turn_admin_activity',
     'token_stats',
     'payment_orders',
-    'ai_usage_logs',
+    'turn_admin_usage_days',
     'billing_history',
     'system_settings',
   ] as const;
   type FinanceTable = typeof financeTables[number];
+  const financeFunctions: readonly string[] = ['turn_admin_activity', 'turn_admin_usage_days'];
 
   function createValidFinanceData(): Record<FinanceTable, unknown[]> {
     return {
@@ -938,11 +712,11 @@ describe('adminRouter finance stats runtime billing summary', () => {
         web_search_cost: 0,
         max_tokens: 8192,
       }],
-      conversations: [{
-        id: 'conversation-1',
-        model_id: 'model-row-1',
-        created_at: '2026-03-29T08:00:00.000Z',
-      }],
+      turn_admin_activity: {
+        conversations: { total: 1, byModel: [{ model: 'model-a', count: 1 }], days: [{ date: '2026-03-29', model: 'model-a', count: 1 }] },
+        messages: { user: 1, assistant: 1, days: [{ date: '2026-03-29', user: 1, assistant: 1 }] },
+        calls: { finished: 1, failed: 0, avgMs: 1200, p95Ms: 1200 },
+      } as unknown as unknown[],
       token_stats: [{
         model_used: 'model-a',
         total_credits: 5,
@@ -957,10 +731,8 @@ describe('adminRouter finance stats runtime billing summary', () => {
         payment_status: 'paid',
         created_at: '2026-03-29T08:00:00.000Z',
       }],
-      ai_usage_logs: [{
-        status: 'success',
-        created_at: '2026-03-29T08:00:00.000Z',
-      }],
+      // No call of the per-turn core by default: the one request is the retired path's token_stats row above.
+      turn_admin_usage_days: [],
       billing_history: [{
         operation_type: 'refund',
         amount: 3,
@@ -982,8 +754,12 @@ describe('adminRouter finance stats runtime billing summary', () => {
     const defaultData = createValidFinanceData();
 
     return {
-      from(table: string) {
-        if (!financeTables.includes(table as FinanceTable)) {
+      rpc(name: string) {
+        if (!financeFunctions.includes(name)) throw new Error(`Unexpected finance function ${name}`);
+        return this.from(name, true);
+      },
+      from(table: string, viaFunction = false) {
+        if (!financeTables.includes(table as FinanceTable) || financeFunctions.includes(table) !== viaFunction) {
           throw new Error(`Unexpected finance table ${table}`);
         }
 
@@ -1049,7 +825,7 @@ describe('adminRouter finance stats runtime billing summary', () => {
 
   it('fails closed when a finance source returns a non-array payload', async () => {
     const caller = createAdminCaller(createFinanceStatsSupabase({
-      conversations: { id: 'not-an-array' },
+      turn_admin_usage_days: { model_used: 'not-an-array' },
     }));
 
     await expect(caller.getFinanceStats()).rejects.toMatchObject<Partial<TRPCError>>({
@@ -1078,7 +854,7 @@ describe('adminRouter finance stats runtime billing summary', () => {
 
   it('fails closed for an invalid required finance date', async () => {
     const caller = createAdminCaller(createFinanceStatsSupabase({
-      ai_usage_logs: [{ status: 'success', created_at: 'not-a-date' }],
+      token_stats: [{ model_used: 'model-a', total_credits: 5, total_cost_usd: '0.125000', cached_tokens: 0, created_at: 'not-a-date' }],
     }));
 
     await expect(caller.getFinanceStats()).rejects.toMatchObject<Partial<TRPCError>>({
@@ -1189,8 +965,12 @@ describe('adminRouter finance stats runtime billing summary', () => {
   });
 
   it('accepts genuinely empty datasets and keeps missing-setting fallbacks', async () => {
+    const emptyActivity = {
+      conversations: { total: 0, byModel: [], days: [] }, messages: { user: 0, assistant: 0, days: [] },
+      calls: { finished: 0, failed: 0, avgMs: null, p95Ms: null },
+    };
     const emptyOverrides = Object.fromEntries(
-      financeTables.map((table) => [table, []]),
+      financeTables.map((table) => [table, table === 'turn_admin_activity' ? emptyActivity : []]),
     ) as Partial<Record<FinanceTable, unknown>>;
     const caller = createAdminCaller(createFinanceStatsSupabase(emptyOverrides));
 
@@ -1230,6 +1010,29 @@ describe('adminRouter finance stats runtime billing summary', () => {
       searchSurchargeCredits: null,
       newUserCredits: 500,
     });
+  });
+
+  it('adds the per-turn core to what the retired path left: credits, cost and requests per model, days only for the chart', async () => {
+    const unknownTokens = { input_tokens: null, output_tokens: null, cached_tokens: null, cache_creation_tokens: null };
+    const caller = createAdminCaller(createFinanceStatsSupabase({
+      turn_admin_usage_days: [
+        // Everything older than the 30-day chart comes folded into one row per model (no day).
+        { model_used: 'model-a', day: null, requests: 10, total_credits: 40, total_cost_usd: '0.5', ...unknownTokens },
+        { model_used: 'model-a', day: '2026-03-28', requests: 3, total_credits: 12, total_cost_usd: '0.25', ...unknownTokens },
+      ],
+    }));
+
+    const result = await caller.getFinanceStats();
+
+    // 5 credits of the retired path's row, plus 40 and 12 of the core.
+    expect(result.transactions.totalDeductions).toBe(57);
+    expect(result.dailyChart.find(day => day.date === '2026-03-28')?.deductions).toBe(12);
+    expect(result.dailyChart.find(day => day.date === '2026-03-29')?.deductions).toBe(5);
+    expect(result.dailyChart.reduce((sum, day) => sum + day.deductions, 0)).toBe(17);
+    // A group stands for its requests; the folded row counts in the total only.
+    expect(result.apiStats).toEqual({ totalRequests: 14, totalConversations: 1, messagesThisMonth: 4, messagesThisWeek: 4 });
+    expect(result.modelStats[0]).toMatchObject({ conversationCount: 1, requestCount: 14, creditsConsumed: 57, costUsd: 0.875 });
+    expect(result.financeOverview).toMatchObject({ recordedCostUsd: 0.875, creditsConsumed: 57 });
   });
 
   it('preserves the established successful finance result shape and calculations', async () => {
@@ -1296,6 +1099,7 @@ describe('adminRouter finance stats runtime billing summary', () => {
     const selectCalls: Array<{ table: string; columns?: string }> = [];
 
     const adminSupabase = {
+      rpc: adminStatsRpc(),
       from(table: string) {
         const state: { table: string; columns?: string } = { table };
 
@@ -1354,13 +1158,9 @@ describe('adminRouter finance stats runtime billing summary', () => {
                 ],
                 error: null,
               };
-            case 'conversations':
-              return { data: [], error: null };
             case 'token_stats':
               return { data: [], error: null };
             case 'payment_orders':
-              return { data: [], error: null };
-            case 'ai_usage_logs':
               return { data: [], error: null };
             case 'billing_history':
               return { data: [], error: null };
