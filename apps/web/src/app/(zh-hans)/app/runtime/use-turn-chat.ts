@@ -57,6 +57,17 @@ export function neverOpened(outcome: { state: 'refused' } | { state: 'finished';
   return last.type === 'error' && last.turnId === undefined && !OPEN_UNKNOWN.has(last.code ?? '');
 }
 export type SendAnswer = 'done' | 'kept' | 'unknown';
+/**
+ * The notice of a code that proves the message was not stored (turn-notices `kept`: the positioning guide, no credits, too long, ...), or
+ * null. The page says such a refusal the moment it knows of it: reading the conversation again can show nothing new for it, so the
+ * notice never waits for that read, nor for the stream to close after its last event (走查 26: the server refused in 3 s, the page
+ * kept "正在思考…").
+ */
+export function refusalNotice(code: string | null | undefined): { code: string; text: string } | null {
+  if (!code || code === 'TURN_REQUEST_REPLAYED') return null;
+  const { text, kept } = turnCodeNotice(code);
+  return kept ? { code, text } : null;
+}
 
 /** One function for the page's life: `read` depends on it, and a new one per render would read without end. */
 const browserFetch: typeof fetch = (...args) => globalThis.fetch(...args);
@@ -134,8 +145,11 @@ export function useTurnChat(sessionId: string, onSettled: () => void, fetcher: t
   const run = useCallback(async (body: Record<string, unknown>): Promise<SendAnswer> => {
     setSending(true); setNotice(null); setLive({ text: '', trimmed: [], rows: [], steps: [] });
     let tools: ToolAvailability | undefined, made: WorkItem[] = [], seen: ReplyStep[] = [];
+    const refusal: { said: ReturnType<typeof refusalNotice> } = { said: null };
     const outcome = await runTurn({ sessionId, ...body }, event => {
       if (!alive.current) return;
+      // A definite refusal is shown when its event arrives: nothing follows it but the end of the stream.
+      if (event.type === 'error') { refusal.said = refusalNotice(event.code); if (refusal.said) { setNotice(refusal.said); setLive(null); } }
       if (event.type === 'opened') { tools = event.tools;
         setLive(old => ({ text: old?.text ?? '', trimmed: trimmedToolNotices(tools), rows: old?.rows ?? [], steps: old?.steps ?? [] })); }
       if (event.type === 'research_call') {
@@ -149,17 +163,21 @@ export function useTurnChat(sessionId: string, onSettled: () => void, fetcher: t
       const turnId = outcome.last.turnId;
       setStepsByTurn(old => new Map(old).set(turnId, seen));
     }
-    await read();
+    const code = outcome.state === 'refused' ? outcome.code
+      : outcome.state === 'finished' && outcome.last.type === 'error' ? outcome.last.code : null;
+    // Refused before the stream (no event carried it): the same notice, as soon as the answer is in.
+    const said = refusal.said ?? refusalNotice(code);
+    // The conversation is read again either way (the balance and the list follow it), but a definite refusal does not wait for it.
+    if (said) { setNotice(said); void read(); } else await read();
     if (!alive.current) return 'unknown';
     setSending(false); setLive(null); settle();
     if (outcome.state === 'lost') return 'unknown';
-    const code = outcome.state === 'refused' ? outcome.code : outcome.last.type === 'error' ? outcome.last.code : null;
     if (!code || code === 'TURN_REQUEST_REPLAYED') return 'done';
-    const { text: said, kept } = turnCodeNotice(code);
-    setNotice({ code, text: said });
+    if (said) return 'kept';
+    setNotice({ code, text: turnCodeNotice(code).text });
     // An error event carries its turn only once one is open: without it (or refused before the stream) nothing was stored or charged,
     // whatever the code says, so the words and any claim made for them are given back instead of waiting to be verified.
-    return kept || neverOpened(outcome) ? 'kept' : 'unknown';
+    return neverOpened(outcome) ? 'kept' : 'unknown';
   }, [sessionId, fetcher, read, settle]);
   const send = useCallback((text: string, requestId: string, chosen: TurnChoice = {}) =>
     run({ kind: 'chat', requestId, text, ...chosen }), [run]);
