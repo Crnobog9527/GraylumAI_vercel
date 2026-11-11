@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 
-/** Deep review 2026-11-11 item 5 (migration 9999): a WeChat Pay / Alipay credit pack refunded outside Graylum is recorded like
+/** Deep review 2026-11-11 item 5 (migration 0515): a WeChat Pay / Alipay credit pack refunded outside Graylum is recorded like
  * a card pack (Owner 2026-10-14: record only, a person settles): full refund -> 'pack_review', the pack's credits held, the
  * manual settlement (item 14 entry) takes back or keeps them once. Before, an undisputed wallet pack was refused here and
  * fell to the old path (nothing recorded, nothing held, no alert). */

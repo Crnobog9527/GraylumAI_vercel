@@ -52,7 +52,7 @@ export async function handleCardRefund(db: SupabaseClient, stripe: RefundStripe,
   if (match && !match.order.fulfilled_at
     && await closeRefundedTestClockOrder(db, stripe as Stripe, scope, match.order.id)) return true;
   // Wallet credit packs (WeChat Pay, Alipay) are recorded here like card packs (deep review 2026-11-11 item 5, migration
-  // 9999): an external refund is held for a person to settle and alerted. Our own approved pack refunds (tagged with
+  // 0515): an external refund is held for a person to settle and alerted. Our own approved pack refunds (tagged with
   // refundIntentId) still go back to the package refund reconciliation below.
   let oursHandled = 0;
   for (const refund of match ? ours : []) {
