@@ -4,16 +4,17 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const state = vi.hoisted(() => ({ compare: {} as Record<string, unknown>, entitlements: {} as Record<string, unknown>,
-  rows: [] as Array<Record<string, unknown>>, error: false, notRunnable: new Set<string>(), windowFails: false }));
+  rows: [] as Array<Record<string, unknown>>, error: false, notRunnable: new Set<string>(), windowFails: false,
+  settingsReads: 0, optionArgs: [] as unknown[][] }));
 vi.mock('./settings', async original => ({ ...(await original<typeof import('./settings')>()),
-  readFusionSettings: async () => ({ version: 1, review: {}, compare: state.compare }) }));
+  readFusionSettings: async () => { state.settingsReads += 1; return { version: 1, review: {}, compare: state.compare }; } }));
 vi.mock('../membershipEntitlements', async original => ({ ...(await original<typeof import('../membershipEntitlements')>()),
   readMembershipEntitlements: async () => state.entitlements }));
 vi.mock('../turn/settings/stagingPolicy', async original => ({ ...(await original<typeof import('../turn/settings/stagingPolicy')>()),
   loadStagingPolicy: async () => { if (state.windowFails) throw new Error('RUNTIME_STAGING_WINDOW_UNAVAILABLE'); return { id: id(900), callPolicies: [] }; } }));
 vi.mock('./settingsAdmin', () => ({
-  fusionModelOptions: async () => ({ models: [id(1), id(2), id(3)].map(modelId => ({ id: modelId, name: 'n', review: true, summary: true,
-    compare: !state.notRunnable.has(modelId) })) }) }));
+  fusionModelOptions: async (...args: unknown[]) => { state.optionArgs.push(args); return { models: [id(1), id(2), id(3)].map(modelId => (
+    { id: modelId, name: 'n', review: true, summary: true, compare: !state.notRunnable.has(modelId) })) }; } }));
 import { compareOptions } from './compareOptions';
 
 const admin = { from: () => ({ select: () => ({ in: async () => state.error ? { data: null, error: { code: 'x' } } : { data: state.rows, error: null } }) }) } as unknown as SupabaseClient;
@@ -23,10 +24,26 @@ beforeEach(() => {
   state.rows = [{ id: id(1), name: 'Claude Sonnet 5.5', model_id: 'anthropic/claude-sonnet-5.5', is_active: 'true' },
     { id: id(2), name: 'Gemini 3.8 Flash', model_id: 'google/gemini-3.8-flash', is_active: 'true' },
     { id: id(3), name: 'GPT-6.1 Sol', model_id: 'openai/gpt-6.1-sol', is_active: 'true' }];
-  state.error = false; state.notRunnable = new Set(); state.windowFails = false;
+  state.error = false; state.notRunnable = new Set(); state.windowFails = false; state.settingsReads = 0; state.optionArgs = [];
 });
 
 describe('compare picker options', () => {
+  it('reads the settings once and asks for the compare purpose only, with those settings and the window it loaded', async () => {
+    await compareOptions(admin, id(50));
+    expect(state.settingsReads).toBe(1);
+    expect(state.optionArgs).toHaveLength(1);
+    const [, actor, , window, options] = state.optionArgs[0]!;
+    expect(actor).toBe(id(50));
+    expect(window).toMatchObject({ id: id(900) });
+    expect(options).toEqual({ only: 'compare', settings: { version: 1, review: {}, compare: state.compare } });
+  });
+  it('makes no model or window read when the switch is off or the plan does not allow it', async () => {
+    state.compare.enabled = false;
+    await compareOptions(admin, id(50));
+    state.compare.enabled = true; state.entitlements.allowFusionCompare = false;
+    await compareOptions(admin, id(50));
+    expect(state.optionArgs).toEqual([]);
+  });
   it('lists the allowed models by their real configured names, with the administrator defaults and the bounds', async () => {
     const options = await compareOptions(admin, id(50));
     expect(options).toEqual({ enabled: true, usable: true, minModels: 2, maxModels: 4, defaultModelIds: [id(1), id(2)],

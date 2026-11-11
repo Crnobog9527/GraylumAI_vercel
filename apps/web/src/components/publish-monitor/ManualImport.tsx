@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { trpc } from '@/trpc/client';
-import { MAX_ROWS_PER_CALL } from '@repo/api/src/services/publishMonitor/manualImport';
+import { MAX_ROWS_PER_CALL } from '@repo/api/src/shared/publishMonitorManual';
 import { FIELDS, buildRows, suggestMapping, type Field, type Mapping } from '@/lib/publish-monitor/table-import/mapping';
 import { TableImportError, parseTable, type Grid } from '@/lib/publish-monitor/table-import/table';
 import type { Brand } from './brands';

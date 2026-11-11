@@ -3,31 +3,15 @@ import { describe, expect, it, vi } from 'vitest';
 import { logger } from '../lib/logger';
 import { userRouter } from './user';
 
-function createQueryBuilder(result: Promise<unknown>) {
-  return {
-    select() {
-      return this;
-    },
-    update() {
-      return this;
-    },
-    eq() {
-      return this;
-    },
-    single() {
-      return result;
-    },
-    then: result.then.bind(result),
-    catch: result.catch.bind(result),
-    finally: result.finally.bind(result),
-  };
-}
+const USAGE = { conversations: 4, messages: 31, usageDays: 3 };
+const MONTH = { totalEarned: 500, totalSpent: 42, transactionCount: 9, byType: {}, byLedgerType: {} };
+type StatsOptions = { rpcErrors?: Record<string, unknown>; rpcCalls?: Array<{ name: string; args: Record<string, unknown> }>; admin?: boolean };
 
 function createUserCaller(
   profileUpdateResult: unknown,
   updates: unknown[] = [],
   tables: string[] = [],
-  tableErrors: Record<string, unknown> = {},
+  stats: StatsOptions = {},
 ) {
   let profilesSingleCallCount = 0;
 
@@ -66,13 +50,20 @@ function createUserCaller(
         };
       }
 
-      if (['conversations', 'credit_transactions', 'messages'].includes(table)) {
-        const error = tableErrors[table] ?? null;
-        const result = Promise.resolve({ data: error ? null : [], error, count: error ? null : 0 });
-        return { ...createQueryBuilder(result), gte() { return this; } };
-      }
-
       throw new Error(`Unexpected table ${table}`);
+    },
+  };
+  // The service-role client: usage stats are read through two database functions and no table.
+  const supabaseAdmin = {
+    from(table: string) {
+      tables.push(table);
+      throw new Error(`Unexpected service-role table ${table}`);
+    },
+    rpc(name: string, args: Record<string, unknown>) {
+      stats.rpcCalls?.push({ name, args });
+      const error = stats.rpcErrors?.[name] ?? null;
+      const data = error ? null : name === 'usage_stats_for_user' ? USAGE : name === 'usage_credit_summary_for_user' ? MONTH : null;
+      return Promise.resolve({ data, error });
     },
   };
 
@@ -89,8 +80,8 @@ function createUserCaller(
     supabase,
     supabaseAuth: supabase,
     supabasePublic: {},
-    supabaseAdmin: {},
-    hasSupabaseAdminPrivileges: false,
+    supabaseAdmin,
+    hasSupabaseAdminPrivileges: stats.admin ?? true,
   } as any);
 }
 
@@ -143,14 +134,32 @@ describe('userRouter error sanitization', () => {
     expect(updates).toEqual([]);
   });
 
-  it('builds usage stats without querying the module-less ai_usage_logs table', async () => {
+  it('reads usage stats from the per-turn core and the ledger functions, never from the retired chat tables', async () => {
     const tables: string[] = [];
-    const caller = createUserCaller({ data: null, error: null }, [], tables);
+    const rpcCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-11-18T09:30:00.000Z'));
+    try {
+      const caller = createUserCaller({ data: null, error: null }, [], tables, { rpcCalls });
 
-    await expect(caller.getUserUsageStats()).resolves.toMatchObject({
-      topModules: [{ name: 'AI 智能对话', count: 0 }],
-    });
-    expect(tables).not.toContain('ai_usage_logs');
+      await expect(caller.getUserUsageStats()).resolves.toEqual({
+        totalConversations: 4,
+        totalMessages: 31,
+        monthlyCreditsUsed: 42,
+        usageDays: 3,
+        topModules: [{ name: 'AI 智能对话', count: 0 }],
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+    // Only the caller's own profile lookup touches a table; conversations, messages, credit_transactions and ai_usage_logs are not read.
+    expect(tables.filter((table) => table !== 'profiles')).toEqual([]);
+    expect(rpcCalls).toEqual(expect.arrayContaining([
+      { name: 'usage_stats_for_user', args: { p_user_id: 'user-1' } },
+      // "本月" is the calendar month in UTC, the same month the credit cards use.
+      { name: 'usage_credit_summary_for_user', args: { p_user_id: 'user-1', p_from: '2026-11-01T00:00:00.000Z' } },
+    ]));
+    expect(rpcCalls).toHaveLength(2);
   });
 
   it('no longer exposes the duplicate getUserCredits balance endpoint', () => {
@@ -187,12 +196,12 @@ describe('userRouter error sanitization', () => {
     });
   });
 
-  it.each(['conversations', 'credit_transactions', 'messages'])(
+  it.each(['usage_stats_for_user', 'usage_credit_summary_for_user'])(
     'reports usage stats as unavailable instead of zeros when %s cannot be read',
-    async (table) => {
+    async (name) => {
       const logSpy = vi.spyOn(logger, 'error').mockImplementation(() => undefined);
       const caller = createUserCaller({ data: null, error: null }, [], [], {
-        [table]: { code: '42501', message: 'private detail for user@example.com' },
+        rpcErrors: { [name]: { code: '42501', message: 'private detail for user@example.com' } },
       });
 
       await expect(caller.getUserUsageStats()).rejects.toMatchObject<Partial<TRPCError>>({
@@ -204,4 +213,14 @@ describe('userRouter error sanitization', () => {
       logSpy.mockRestore();
     },
   );
+
+  it('reports usage stats as unavailable when the service-role client is not configured', async () => {
+    const logSpy = vi.spyOn(logger, 'error').mockImplementation(() => undefined);
+    const rpcCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    const caller = createUserCaller({ data: null, error: null }, [], [], { admin: false, rpcCalls });
+
+    await expect(caller.getUserUsageStats()).rejects.toMatchObject<Partial<TRPCError>>({ code: 'SERVICE_UNAVAILABLE' });
+    expect(rpcCalls).toEqual([]);
+    logSpy.mockRestore();
+  });
 });

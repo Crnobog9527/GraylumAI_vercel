@@ -43,6 +43,36 @@ describe('trend charts', () => {
     expect(renderToStaticMarkup(<TrendCharts gold={false} />)).toContain('role="alert"');
   });
 
+  it('shows the headline numbers of the latest week that has a value, with the change only when the week before has one', () => {
+    const html = text(renderToStaticMarkup(<TrendCharts gold />));
+    // Followers: 120 in both the last two weeks. Views: the last week is too new, so the week ending 10-19 is shown, and
+    // the week before it has no record, so there is no change to show.
+    expect(html).toContain('粉丝120持平比上一周 · 截至 11-02');
+    expect(html).toContain('每条播放/浏览中位数300截至 10-19');
+    expect(html).toContain('最近一周发布2 条持平比上一周 · 截至 11-02');
+    state.trend = ok({ windowDays: 30, series: [series({ gaps: { followers: 'not_provided' } })] });
+    expect(text(renderToStaticMarkup(<TrendCharts gold={false} />))).toContain('粉丝—平台不提供');
+  });
+
+  it('with several accounts shows one at a time behind an account switch (platforms are never mixed)', () => {
+    state.trend = ok({ windowDays: 90, series: [series(), series({ connectionId: 'c2', platform: 'douyin', businessName: '探店' })] });
+    const html = renderToStaticMarkup(<TrendCharts gold />);
+    expect(html).toContain('aria-label="选择账号"');
+    expect(html.match(/aria-pressed="true"/g)).toHaveLength(1);
+    expect(text(html)).toContain('探店 · 抖音');
+    expect(html.match(/<figure/g)).toHaveLength(4);
+    // One account needs no switch.
+    state.trend = ok({ windowDays: 90, series: [series()] });
+    expect(renderToStaticMarkup(<TrendCharts gold />)).not.toContain('选择账号');
+  });
+
+  it('the empty state says what to do next when the page can open the other tabs', () => {
+    state.trend = ok({ windowDays: 30, series: [] });
+    const html = text(renderToStaticMarkup(<TrendCharts gold={false} onOpenTab={() => {}} />));
+    expect(html).toContain('连接账号');
+    expect(html).toContain('用表格导入');
+  });
+
   it('while reading shows a wordless skeleton, never loading text or a spinner', () => {
     state.trend = { isPending: true };
     const html = renderToStaticMarkup(<TrendCharts gold={false} />);

@@ -4,7 +4,8 @@ import { describe, expect, it, vi } from 'vitest';
 
 const state = vi.hoisted(() => ({ result: {} as Record<string, unknown> }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ replace: vi.fn() }), usePathname: () => '/admin/settings' }));
-vi.mock('@/trpc/client', () => ({ trpc: { admin: { getStatistics: { useQuery: () => state.result } } } }));
+// Only admin.access exists here: a guard that asked for the dashboard statistics again (nine queries per admin page) would throw.
+vi.mock('@/trpc/client', () => ({ trpc: { admin: { access: { useQuery: () => state.result } } } }));
 vi.mock('./AdminSidebar', () => ({ default: () => <nav>admin-sidebar</nav>, getAdminPageMeta: () => ({ title: '系统设置' }) }));
 
 const { default: AdminGuard } = await import('./AdminGuard');
@@ -24,7 +25,7 @@ describe('admin settings are only rendered for admins', () => {
   });
 
   it('renders the settings for an admin', () => {
-    state.result = { data: {}, isLoading: false, error: null };
+    state.result = { data: { admin: true }, isLoading: false, error: null };
     expect(render()).toContain('membership-permissions');
   });
 });

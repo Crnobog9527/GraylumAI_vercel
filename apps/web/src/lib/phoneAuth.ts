@@ -42,7 +42,9 @@ export async function requestPhoneCode(body: PhoneSendRequest, doFetch: typeof f
     const data = await response.json().catch(() => null) as { ok?: boolean; code?: string } | null;
     if (response.ok && data?.ok) return null;
     const code = data?.code;
-    return code && Object.hasOwn(PHONE_SEND_MESSAGES, code) ? PHONE_SEND_MESSAGES[code as PhoneSendCode] : PHONE_SEND_MESSAGES.SMS_FAILED;
+    if (code && Object.hasOwn(PHONE_SEND_MESSAGES, code)) return PHONE_SEND_MESSAGES[code as PhoneSendCode];
+    // The proxy's own per-IP limit answers 429 without a code.
+    return response.status === 429 ? PHONE_SEND_MESSAGES.RATE_LIMITED : PHONE_SEND_MESSAGES.SMS_FAILED;
   } catch {
     return PHONE_SEND_MESSAGES.SMS_FAILED;
   }

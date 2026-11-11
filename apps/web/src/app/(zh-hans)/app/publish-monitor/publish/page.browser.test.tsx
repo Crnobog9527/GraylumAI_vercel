@@ -31,7 +31,8 @@ const job = (state: string, status: string) => ({ id: JOB, state, businessId: BI
 beforeAll(async () => {
   const require = createRequire(import.meta.url);
   const { build } = await import(pathToFileURL(createRequire(require.resolve('vitest/package.json')).resolve('vite')).href);
-  const pageFile = fileURLToPath(new URL('./page.tsx', import.meta.url));
+  // The page's content without the workbench frame around it (page.tsx only adds the frame).
+  const pageFile = fileURLToPath(new URL('./publish-view.tsx', import.meta.url));
   const client = fileURLToPath(new URL('../../../../../trpc/client.ts', import.meta.url));
   const bundle = await build({ configFile: false, logLevel: 'silent',
     define: { 'process.env.NODE_ENV': JSON.stringify('development') },

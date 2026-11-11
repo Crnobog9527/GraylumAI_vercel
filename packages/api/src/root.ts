@@ -9,7 +9,7 @@ import { skillTranslationsRouter } from './routers/skillTranslations';
 import { opcRouter } from './routers/opc';
 import { runtimeRouter } from './routers/runtime';
 import { workbenchRouter } from './routers/workbench';
-import { router } from './trpc';
+import { mergeRouters, router } from './trpc';
 import { runtimeRateLimitsRouter } from './routers/runtimeRateLimits';
 import { modelIdentityRouter } from './routers/modelIdentity';
 import { platformSecretsRouter } from './routers/platformSecrets';
@@ -26,6 +26,7 @@ import { modelReasoningRouter } from './routers/modelReasoning';
 import { modelPricingRouter } from './routers/modelPricing';
 import { billingReportRouter } from './routers/billingReport';
 import { adminRouter } from './routers/admin';
+import { adminAccessRouter } from './routers/adminAccess';
 import { modulesRouter } from './routers/modules';
 import { diagnosticsRouter } from './routers/diagnostics';
 import { costsRouter } from './routers/costs';
@@ -71,7 +72,7 @@ export const appRouter = router({
   paymentDisputes: paymentDisputesRouter,
   researchTools: researchToolsRouter,
   research: researchRouter,
-  admin: adminRouter,
+  admin: mergeRouters(adminRouter, adminAccessRouter),
   modules: modulesRouter,
   diagnostics: diagnosticsRouter,
   costs: costsRouter,

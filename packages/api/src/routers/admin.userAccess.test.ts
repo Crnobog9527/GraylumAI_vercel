@@ -42,7 +42,10 @@ function createRecordingSupabase(options: { activityInsertError?: { code: string
       Promise.resolve(result()).then(resolve, reject);
     return builder;
   };
-  return { supabase: { from }, calls };
+  // getUserDetails counts usage through two database functions (services/usageStats.ts); they select no columns.
+  const rpc = async (name: string) => ({ error: null, data: name === 'usage_stats_for_user' ? { conversations: 0, messages: 0, usageDays: 0 }
+    : { totalEarned: 0, totalSpent: 0, transactionCount: 0, byType: {}, byLedgerType: {} } });
+  return { supabase: { from, rpc }, calls };
 }
 
 function createCaller(adminSupabase: unknown) {

@@ -19,8 +19,9 @@ BEGIN
   updated_at=clock_timestamp()
  WHERE actor_id=a AND provider_account_id IS NOT NULL AND status<>'deleting';
  GET DIAGNOSTICS n=ROW_COUNT;total:=total+n;
- UPDATE social_publish_jobs SET business_id=NULL,work_item_id=NULL,updated_at=clock_timestamp()
- WHERE actor_id=a AND state IN ('claimed','dispatching','unknown') AND (business_id IS NOT NULL OR work_item_id IS NOT NULL);
+ UPDATE social_publish_jobs SET business_id=NULL,work_item_id=NULL,caption_preview=NULL,updated_at=clock_timestamp()
+ WHERE actor_id=a AND state IN ('claimed','dispatching','scheduled','unknown')
+  AND (business_id IS NOT NULL OR work_item_id IS NOT NULL OR caption_preview IS NOT NULL);
  GET DIAGNOSTICS n=ROW_COUNT;total:=total+n;
  UPDATE social_connect_requests SET business_id=NULL,target_account_project_id=NULL
  WHERE actor_id=a AND (state IN ('awaiting_callback','pending_confirm') OR cleaned_at IS NULL

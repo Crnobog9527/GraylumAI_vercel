@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { TRPCError } from '@trpc/server';
 import { withStepConfirmation } from '../../shared/opcStepConfirmation';
-import { withReportFlag } from './reportFlag';
+import { withFrozenRound, withReportFlag } from './reportFlag';
 
 type Field = { id?: unknown; title?: unknown };
 type Value = { value?: unknown; status?: unknown; nature?: unknown };
@@ -84,15 +84,24 @@ export async function draftReadResponse(raw: any, rpc: (name: string, args: Reco
   return withStepConfirmation(await withReportFlag(raw, rpc));
 }
 
-type Clients = { auth: { getUser(): Promise<{ data: { user: { id: string } | null } }> } };
-/** CORE-PATH-V2 V2-10: with the draft's module, which the page names on a mentor turn. A read-only draft has no turn. */
+/**
+ * CORE-PATH-V2 V2-10: with the draft's module, which the page names on a mentor turn. A read-only draft has no turn.
+ * The module comes from the same frozen-round lookup as the report flag (it was asked for twice, a second round trip for the
+ * same row). `actor` is this request's signed-in account; only a read whose own ids are not the snapshot's is looked up again.
+ */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- the RPC result is the untyped opc_query projection.
-export async function draftReadWithModule(raw: any, rpc: (name: string, args: Record<string, unknown>) => Promise<unknown>, user: Clients,
+export async function draftReadWithModule(raw: any, rpc: (name: string, args: Record<string, unknown>) => Promise<unknown>,
+  actor: () => Promise<string | undefined>,
   admin: { rpc(name: string, args: Record<string, unknown>): PromiseLike<{ data: { moduleId?: string } | null }> }) {
-  const response = await draftReadResponse(raw, rpc);
-  if (raw.conversationDeleted) return { ...response, moduleId: null };
-  const actor = (await user.auth.getUser()).data.user?.id;
-  const resolved = actor ? await admin.rpc('artifact_query', { p_actor_id: actor, p_action: 'resolve', p_project_id: raw.projectId,
+  if (raw?.conversationDeleted) return { ...await draftReadResponse(raw, rpc), moduleId: null };
+  const frozen = await withFrozenRound(raw, rpc);
+  const response = withStepConfirmation(frozen.draft);
+  if (frozen.round !== undefined && frozen.projectId === raw.projectId && frozen.roundId === raw.roundId) {
+    const moduleId = frozen.round?.moduleId;
+    return { ...response, moduleId: typeof moduleId === 'string' && moduleId ? moduleId : null };
+  }
+  const actorId = await actor();
+  const resolved = actorId ? await admin.rpc('artifact_query', { p_actor_id: actorId, p_action: 'resolve', p_project_id: raw.projectId,
     p_round_id: raw.roundId }) : null;
   return { ...response, moduleId: resolved?.data?.moduleId ?? null };
 }

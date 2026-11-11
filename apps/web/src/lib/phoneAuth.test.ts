@@ -17,6 +17,8 @@ describe('phone sign-in helpers (PHONE-OTP)', () => {
     expect(ok).toHaveBeenCalledWith(PHONE_SEND_PATH, expect.objectContaining({ method: 'POST', headers: { 'Content-Type': 'application/json' } }));
     const refused = async () => Response.json({ ok: false, code: 'SMS_DAILY_LIMIT' }, { status: 429 });
     expect(await requestPhoneCode({ phone: 'x', createUser: true }, refused)).toBe(PHONE_SEND_MESSAGES.SMS_DAILY_LIMIT);
+    const proxyLimit = async () => Response.json({ error: 'Too Many Requests', retryAfter: 30 }, { status: 429 });
+    expect(await requestPhoneCode({ phone: 'x', createUser: true }, proxyLimit)).toBe(PHONE_SEND_MESSAGES.RATE_LIMITED);
     const odd = async () => Response.json({ ok: false, code: '<b>raw</b>' }, { status: 500 });
     expect(await requestPhoneCode({ phone: 'x', createUser: true }, odd)).toBe(PHONE_SEND_MESSAGES.SMS_FAILED);
     expect(await requestPhoneCode({ phone: 'x', createUser: true }, async () => { throw new Error('offline'); })).toBe(PHONE_SEND_MESSAGES.SMS_FAILED);

@@ -4,6 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 import { runLibraryCleanup } from '@repo/api/src/services/library/cleanup';
 import { validateCronRequest } from '@/lib/cron-auth';
 import { checkLibraryBacklog, flushAlerts } from '@/lib/erasure-backlog-alert';
+import { checkRecoveryHeartbeat } from '@/lib/recovery-heartbeat-alert';
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 export async function GET(request: Request) {
@@ -17,8 +18,9 @@ export async function GET(request: Request) {
     global: { fetch: (input, init) => fetch(input, { ...init, signal: AbortSignal.timeout(5000) }) },
   });
   try {
-    // The 24-hour promise is watched first, so this run's own length or failure cannot skip the alert.
-    await checkLibraryBacklog(client);
+    // The 24-hour promise is watched first, so this run's own length or failure cannot skip the alert. The same goes for the
+    // every-minute recovery job's heartbeat, which is watched from here because a stopped job cannot report itself.
+    await Promise.all([checkLibraryBacklog(client), checkRecoveryHeartbeat(client)]);
     const result = await runLibraryCleanup(client);
     // Cursor is operational metadata, not returned to HTTP clients.
     const success = result.failed === 0 && result.unknownPaths === 0 && result.storageGuard === true;

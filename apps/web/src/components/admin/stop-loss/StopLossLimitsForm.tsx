@@ -8,9 +8,13 @@ import { Label } from '@/components/ui/label';
 import { StaleDataNotice } from './StaleDataNotice';
 import { STOP_LOSS_QUERY_OPTIONS, formatUsd, parseUsdInput, reachedLimit, stopLossErrorMessage } from './stopLossFormat';
 
+// What each number does on the current conversation path (CORE-PATH-V2): neither daily limit refuses a call any more. The check that
+// did (runtime_stop_loss_assert) has no caller left; the site limit only raises an alert when the daily diagnostic runs
+// (runtime_stop_loss_observe), and that run never looks at one user. The limit that does refuse new calls is the
+// core_path_v2 setting stopLoss.limitUsd (turn_open / turn_call_begin), which this page does not edit.
 const AMOUNT_FIELDS = [
-  ['userDailyUsd', '每位用户每日上限（美元）', '某位用户当天实际成本达到后，该用户的新调用被拒绝。'],
-  ['siteDailyUsd', '全站每日上限（美元）', '全站当天实际成本达到后，所有新调用被拒绝。'],
+  ['userDailyUsd', '每位用户每日上限（美元）', '目前不生效：现在的对话不按单个用户的美元成本拦截，也不为它告警。'],
+  ['siteDailyUsd', '全站每日上限（美元）', '只告警，不拒绝调用：每日检查发现全站当天实际成本达到它时，记一条止损告警。'],
   ['siteAlertUsd', '全站每日提醒线（美元）', '只记录告警，不拒绝调用。'],
   ['providerBalanceAlertUsd', '供应商余额提醒线（美元）', '手动记录的余额低于或等于它、或超过 24 小时没有记录时告警。'],
 ] as const;
@@ -35,7 +39,7 @@ function UsageSummary({ config, usage, stale }: { config: Config; usage: Usage |
   const site = typeof usage.siteUsd === 'string' ? usage.siteUsd : null;
   const reserved = typeof usage.reservedUsd === 'string' ? usage.reservedUsd : null;
   const line = (limit: string | null, label: string) => {
-    if (limit === null) return <p>{label}：未设置，不拦截。</p>;
+    if (limit === null) return <p>{label}：未设置，不告警。</p>;
     const reached = site !== null && reachedLimit(site, limit);
     return <p>{label}：{formatUsd(limit)}{reached ? '（已达到）' : ''}</p>;
   };
@@ -46,10 +50,10 @@ function UsageSummary({ config, usage, stale }: { config: Config; usage: Usage |
     {line(config.siteDailyUsd, '全站每日上限')}
     {line(config.siteAlertUsd, '全站每日提醒线')}
     <p>
-      每位用户每日上限：{config.userDailyUsd === null ? '未设置，不拦截。' : formatUsd(config.userDailyUsd)}
-      （这里只看全站汇总，不列出单个用户的用量）
+      每位用户每日上限：{config.userDailyUsd === null ? '未设置' : formatUsd(config.userDailyUsd)}
+      （目前不生效，也不列出单个用户的用量）
     </p>
-    <p className="text-xs">成本按已结束回合里已知的调用费用计算，不含还在进行中的调用，也不含预占，所以可能略微超过上限。</p>
+    <p className="text-xs">成本按已结束回合里已知的调用费用计算，不含还在进行中的调用，也不含预占。</p>
   </div>;
 }
 
@@ -74,7 +78,7 @@ export function StopLossLimitsForm() {
   const channel = current?.notificationChannel.trim() ?? '';
   const valid = parsed.every(([, result]) => result.ok) && [...channel].length <= 100;
   const zeroLimit = parsed.some(([key, result]) => result.ok && result.value !== null
-    && (key === 'userDailyUsd' || key === 'siteDailyUsd') && Number(result.value) === 0);
+    && key === 'siteDailyUsd' && Number(result.value) === 0);
 
   function edit(key: keyof Draft, value: string) {
     if (!current || !config) return;
@@ -122,7 +126,10 @@ export function StopLossLimitsForm() {
 
   return <section aria-labelledby="stop-loss-limits-title" className="space-y-3 rounded-md border p-4">
     <h3 id="stop-loss-limits-title" className="font-medium">每日美元上限</h3>
-    <p className="text-sm">留空表示不设置、不拦截。填 0 表示当天不允许任何新的计费调用。最多 12 位小数。</p>
+    <p className="text-sm">
+      留空表示不设置。这里的两个每日上限现在都不会拒绝调用：全站每日上限只用于告警，每位用户每日上限目前不生效。
+      真正会拒绝新调用的全站每日上限是系统配置 core_path_v2 里的 stopLoss.limitUsd，不在本页修改。最多 12 位小数。
+    </p>
     {settings.error && config && <StaleDataNotice onRetry={() => { void settings.refetch(); }} />}
     {settings.error && !config ? <div role="alert" className="space-y-2">
       <p>{stopLossErrorMessage(settings.error, 'read')}</p>
@@ -150,7 +157,7 @@ export function StopLossLimitsForm() {
           </p>
         </div>
       </div>
-      {zeroLimit && <p role="alert">上限填 0 会让对应范围当天的新计费调用全部被拒绝，请确认这是你想要的。</p>}
+      {zeroLimit && <p role="alert">全站每日上限填 0，每日检查每次都会记一条“已达到”的告警；它不会拒绝任何调用。</p>}
       <div className="flex flex-wrap gap-2">
         <Button disabled={busy || !valid || !draft} onClick={() => { void submit(); }}>
           {busy ? '保存中…' : '保存止损设置'}

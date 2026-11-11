@@ -11,7 +11,7 @@ AS $function$
 DECLARE j social_publish_jobs;target text;
 BEGIN
  SELECT * INTO j FROM social_publish_jobs WHERE provider_post_id=p_provider_post_id;
- IF j.id IS NULL OR j.state NOT IN ('dispatching','unknown') OR p_success IS NULL THEN RETURN false; END IF;
+ IF j.id IS NULL OR j.state NOT IN ('dispatching','scheduled','unknown') OR p_success IS NULL THEN RETURN false; END IF;
  SELECT t->>'connectionId' INTO target FROM jsonb_array_elements(j.targets) t WHERE t->>'providerAccountId'=p_provider_account_id;
  IF target IS NULL OR j.results ? target THEN RETURN false; END IF;
  PERFORM publish_monitor_publish_record(j.id,p_provider_post_id,jsonb_build_object(target,
