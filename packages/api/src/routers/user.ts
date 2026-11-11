@@ -6,7 +6,9 @@ import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { logger } from '../lib/logger';
 import { createSafeInternalError, createSafeServiceUnavailableError } from '../lib/publicError';
-import { countsAsCreditSpend } from '../services/creditLedger';
+import {
+  readCreditSummary, readUsageStats, utcMonthStart, UsageStatsReadError, type CreditSummary, type UsageStats,
+} from '../services/usageStats';
 import { applyEntryReplyLanguage, setReplyLanguage } from '../services/replyLanguageSetting';
 import { effectiveReplyLocale, replyLocale } from '../shared/replyLanguage';
 
@@ -120,58 +122,28 @@ export const userRouter = router({
    * - 最常使用功能 Top 3
    */
   getUserUsageStats: protectedProcedure.query(async ({ ctx }) => {
-    // 计算本月开始时间
-    const now = new Date();
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-
-    const [conversationsResult, monthlyTransactionsResult, messageCountResult] = await Promise.all([
-      ctx.supabase
-        .from('conversations')
-        .select('created_at')
-        .eq('user_id', ctx.profileId),
-      ctx.supabase
-        .from('credit_transactions')
-        .select('*')
-        .eq('user_id', ctx.profileId)
-        .gte('created_at', monthStart),
-      ctx.supabase
-        .from('messages')
-        .select('id, conversations!inner(user_id)', { count: 'exact', head: true })
-        .eq('is_deleted', 'false')
-        .eq('conversations.user_id', ctx.profileId),
-    ]);
-
-    // 任一查询失败时报错，不返回 0 冒充真实统计
-    const readError = conversationsResult.error ?? monthlyTransactionsResult.error ?? messageCountResult.error;
-    if (readError) {
-      logger.error('auth', 'user_usage_stats_fetch_failed', { code: readError.code ?? null });
-      throw createSafeServiceUnavailableError(readError, '使用统计暂时无法读取，请稍后重试');
+    // Counted in the database from the per-turn core and the ledger (services/usageStats.ts): the old chat tables get no new
+    // rows, and an unpaged ledger read is cut at the row cap. A failed read is an error, never a 0 that looks real.
+    let usage: UsageStats;
+    let month: CreditSummary;
+    try {
+      if (!ctx.hasSupabaseAdminPrivileges) throw new UsageStatsReadError(null);
+      [usage, month] = await Promise.all([
+        readUsageStats(ctx.supabaseAdmin, ctx.profileId),
+        readCreditSummary(ctx.supabaseAdmin, ctx.profileId, utcMonthStart(new Date())),
+      ]);
+    } catch (error) {
+      logger.error('auth', 'user_usage_stats_fetch_failed', { code: error instanceof UsageStatsReadError ? error.code : null });
+      throw createSafeServiceUnavailableError(error, '使用统计暂时无法读取，请稍后重试');
     }
-    const conversations = conversationsResult.data ?? [];
-    const monthlyTransactions = monthlyTransactionsResult.data ?? [];
-    const messageCount = messageCountResult.count ?? 0;
-
-    // 4. 计算使用天数（有对话的天数）
-    const uniqueDays = new Set(conversations.map(c => new Date(c.created_at).toDateString()));
-
-    // ai_usage_logs has no module_name column and no writer records modules, so there is no
-    // per-user module source to rank; keep the placeholder instead of a query that always fails.
-    const topModules: Array<{ name: string; count: number }> = [];
-
-    // 计算本月消耗积分总和
-    const monthlyCreditsUsed = monthlyTransactions.reduce(
-      (sum, tx) => sum + (countsAsCreditSpend(tx) ? Math.abs(tx.amount) : 0),
-      0
-    );
 
     return {
-      totalConversations: conversations?.length ?? 0,
-      totalMessages: messageCount ?? 0,
-      monthlyCreditsUsed,
-      usageDays: uniqueDays.size,
-      topModules: topModules.length > 0 ? topModules : [
-        { name: 'AI 智能对话', count: 0 },
-      ],
+      totalConversations: usage.conversations,
+      totalMessages: usage.messages,
+      monthlyCreditsUsed: month.totalSpent,
+      usageDays: usage.usageDays,
+      // No writer records which module a turn used, so there is nothing to rank per user; the placeholder row stays.
+      topModules: [{ name: 'AI 智能对话', count: 0 }],
     };
   }),
 });
