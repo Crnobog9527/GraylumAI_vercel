@@ -5,5 +5,5 @@ import { ScheduleView } from '@/components/publish-schedule/ScheduleView';
 
 /** PUBLISH-SCHEDULE: the "发布排期" page (scheduled, sent, failed and cancelled posts of a week). */
 export default function PublishSchedulePage() {
-  return <WorkspaceFrame area="review"><ScheduleView /></WorkspaceFrame>;
+  return <WorkspaceFrame area="schedule"><ScheduleView /></WorkspaceFrame>;
 }
