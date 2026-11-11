@@ -26,6 +26,12 @@ describe('turn notices', () => {
     for (const code of ['TURN_PROVIDER_402', 'TURN_PROVIDER_BUSY'])
       expect(turnCodeNotice(code)).toMatchObject({ kept: false, text: expect.stringContaining('全额退回') });
   });
+  it('says a model held for a price check ended the round with the credits back, in words, not as a bare code', () => {
+    const notice = turnCodeNotice('TURN_MODEL_METERING_BLOCKED');
+    expect(notice).toMatchObject({ kept: false, text: expect.stringContaining('这个模型暂时停用') });
+    expect(notice.text).toContain('积分已退回');
+    expect(notice.text).not.toContain('TURN_MODEL_METERING_BLOCKED');
+  });
   it('says a round paused for credits can be continued and is refunded after 24 hours', () => {
     expect(turnCodeNotice('TURN_PAUSED_FOR_CREDITS')).toMatchObject({ kept: false, text: expect.stringContaining('点继续') });
     expect(turnCodeNotice('TURN_PAUSED_FOR_CREDITS').text).toContain('24 小时');

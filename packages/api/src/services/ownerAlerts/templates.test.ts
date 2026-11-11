@@ -15,6 +15,7 @@ const EXAMPLES: { [K in OwnerAlertKind]: OwnerAlertFacts[K] } = {
   stop_loss: { alertId: '42', line: '全站成本提醒线已达到：当天实际 $41.20，提醒线 $40（统计日 2026-11-08 UTC）' },
   stop_loss_reached: { utcDate: '2026-11-08' },
   provider_402: { provider: 'openrouter' },
+  model_blocked: { modelId: '00000000-0000-4000-8000-000000000020' },
   platform_absorb: { model: 'anthropic/claude-sonnet-5.5', utcDate: '2026-11-07', usd: '12.304000000000', thresholdUsd: '10' },
   ops_backlog: { code: 'ERASURE_BACKLOG', level: 'error' },
   error_spike: { count: 23, minutes: 10 },
@@ -47,6 +48,15 @@ describe('renderAlert', () => {
     const unknown = renderAlert('refund', { ...EXAMPLES.refund, creditsTakenBack: null, creditsShortfall: null }, ctx);
     expect(unknown).toContain('积分扣回情况请到后台看');
     expect(unknown).not.toContain('没有要扣回');
+  });
+
+  it('tells the Owner a model is off for everyone, where to check it and what to click', () => {
+    const [line, link] = renderAlert('model_blocked', EXAMPLES.model_blocked, ctx).split('\n');
+    expect(line).toMatch(/^【模型已暂停】/);
+    expect(line).toContain('暂停所有用户对这个模型的新调用');
+    expect(line).toContain('系统设置 → 成本止损');
+    expect(line).toContain('已核对价格，恢复调用');
+    expect(link).toBe('去后台看：https://www.graylum.com/admin/settings');
   });
 
   it('gives an unknown code a plain fallback instead of the code', () => {
@@ -82,6 +92,9 @@ describe('dedupeKey', () => {
     expect(dedupeKey('refund', EXAMPLES.refund, now)).toBe('refund:refunded:6f1c2a9e-1111-4c3b-9d1e-000000000000:re_1');
     expect(dedupeKey('billing_review', EXAMPLES.billing_review, now)).toBe('billing_review:PAY_STRIPE_MP_RECONCILIATION_REVIEW_REQUIRED:2026-11-08');
     expect(dedupeKey('error_spike', EXAMPLES.error_spike, now)).toBe('error_spike:site');
+    // A condition per model: the same model is one message a window, another model is its own.
+    expect(dedupeKey('model_blocked', EXAMPLES.model_blocked, now)).toBe('model_blocked:00000000-0000-4000-8000-000000000020');
+    expect(RULES.model_blocked.ttlSeconds).toBe(3600);
     expect(dedupeKey('platform_absorb', EXAMPLES.platform_absorb, now)).toBe('platform_absorb:anthropic_claude-sonnet-5.5:2026-11-07');
     expect(money(123456, 'eur')).toBe('1234.56 EUR');
   });

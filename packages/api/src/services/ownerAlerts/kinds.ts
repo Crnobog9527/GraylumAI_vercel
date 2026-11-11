@@ -36,6 +36,8 @@ export type OwnerAlertFacts = {
   stop_loss_reached: { utcDate: string };
   /** The AI provider answered 402: the platform account could not pay, so the call failed (never charged). */
   provider_402: { provider: string };
+  /** A model is refused for every user: one of its receipts cost more than the bound frozen for it (turn_call_begin). */
+  model_blocked: { modelId: string };
   /** A model's platform-absorbed cost for a day went over its alert line (billing_platform_absorb_alert). */
   platform_absorb: { model: string; utcDate: string; usd: string; thresholdUsd: string };
   /** Privacy deletion or Post for Me work is falling behind (the cron checks that used to reach the Owner via Sentry). */
@@ -74,6 +76,8 @@ export const RULES: { [K in OwnerAlertKind]: Rule<K> } = {
   stop_loss: { key: f => f.alertId, ttlSeconds: 8 * DAY },
   stop_loss_reached: { key: f => f.utcDate, ttlSeconds: 2 * DAY },
   provider_402: { key: f => f.provider, ttlSeconds: HOUR / 2 },
+  // A condition: while the model stays off, once an hour per model (the admin's review ends it).
+  model_blocked: { key: f => f.modelId, ttlSeconds: HOUR },
   // Acknowledging in the admin ends the alert; until then once per model and day.
   platform_absorb: { key: f => `${f.model}:${f.utcDate}`, ttlSeconds: 8 * DAY },
   // A new, worse level is a new message; the same level at most every six hours.

@@ -102,6 +102,13 @@ async function call<T>(client: Pick<SupabaseClient, 'rpc'>, name: string, args: 
     if (code === 'STOP_LOSS_REACHED') {
       await notifyOwner('stop_loss_reached', { utcDate: new Date().toISOString().slice(0, 10) }, { budgetMs: OWNER_ALERT_TURN_BUDGET_MS });
     }
+    // ALERT-FEISHU: a model is refused for every user since one of its receipts went above its frozen bound (turn_call_begin); it
+    // stays off until an administrator reviews it (admin_metering_review). Told at the first refusal, then at most once an hour
+    // per model; same 2 s budget, never throws, no database work.
+    if (code === 'TURN_MODEL_METERING_BLOCKED') {
+      const modelId = typeof args.p_model_id === 'string' ? args.p_model_id : 'unknown';
+      await notifyOwner('model_blocked', { modelId }, { budgetMs: OWNER_ALERT_TURN_BUDGET_MS });
+    }
     throw new TurnDatabaseError(code);
   }
   return schema.parse(data);
