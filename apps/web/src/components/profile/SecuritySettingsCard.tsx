@@ -102,9 +102,9 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
   return (
     <>
       <div
-        className="rounded-2xl p-6"
+        className="rounded-xl p-6"
         style={{
-          background: 'var(--bg-secondary)',
+          background: 'var(--gl-surface, #fff)',
           border: '1px solid var(--border-primary)',
           boxShadow: 'none',
         }}
@@ -360,8 +360,8 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
               onClick={handleChangePassword}
               disabled={passwordLoading}
               style={{
-                background: 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%)',
-                color: 'var(--bg-primary)',
+                background: 'var(--gl-action, #262626)',
+                color: 'var(--gl-action-text, #fff)',
               }}
             >
               {passwordLoading ? (

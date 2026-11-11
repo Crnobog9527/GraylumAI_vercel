@@ -11,6 +11,7 @@ import {
   recordAdminActivity,
   withUnrecordedLoginFields,
 } from '../services/adminUserAccess';
+import { readCreditSummary, readUsageStats } from '../services/usageStats';
 import { createAdminOperationError, logAdminEndpointMetric } from './adminShared';
 
 // Part of the admin router (merged in ./admin.ts): the procedure paths stay `admin.<name>`.
@@ -251,29 +252,16 @@ export const adminUserProcedures = {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'User not found' });
       }
 
-      // Get usage statistics
-      const [
-        conversationsResult,
-        creditsSpentResult,
-        ticketsResult,
-        recentLogsResult,
-      ] = await Promise.all([
-        ctx.supabase
-          .from('conversations')
-          .select('id')
-          .eq('user_id', input.userId),
-
-        // Credits spent (deductions)
-        ctx.supabase
-          .from('credit_transactions')
-          .select('amount')
-          .eq('user_id', input.userId)
-          .eq('type', 'deduction'),
-
+      // Usage comes from the per-turn core and the ledger, counted in the database (the functions the user's own profile page
+      // uses): the retired chat tables get no new rows, an unpaged read is cut at the row cap, and spend is credits actually
+      // charged (the core writes them as 'consumption', never as 'deduction').
+      const [usage, credits, ticketsResult, recentLogsResult] = await Promise.all([
+        readUsageStats(ctx.supabase, input.userId),
+        readCreditSummary(ctx.supabase, input.userId, null),
         // Tickets created
         ctx.supabase
           .from('tickets')
-          .select('id')
+          .select('id', { count: 'exact', head: true })
           .eq('user_id', input.userId),
 
         ctx.supabase
@@ -282,53 +270,29 @@ export const adminUserProcedures = {
           .eq('user_id', input.userId)
           .order('created_at', { ascending: false })
           .limit(10),
-      ]);
+      ]).catch((error: unknown) => { throw createAdminOperationError('读取用户详情', error); });
 
-      if (conversationsResult.error) {
-        throw createAdminOperationError('读取用户详情', conversationsResult.error);
-      }
-      if (creditsSpentResult.error) {
-        throw createAdminOperationError('读取用户详情', creditsSpentResult.error);
-      }
-      if (ticketsResult.error) {
+      if (ticketsResult.error || typeof ticketsResult.count !== 'number') {
         throw createAdminOperationError('读取用户详情', ticketsResult.error);
       }
       if (recentLogsResult.error) {
         throw createAdminOperationError('读取用户详情', recentLogsResult.error);
       }
 
-      // Calculate total credits spent
-      const totalCreditsSpent = creditsSpentResult.data?.reduce(
-        (sum, t) => sum + Math.abs(t.amount), 0
-      ) ?? 0;
-
-      const conversationIds = (conversationsResult.data ?? []).map((conversation) => conversation.id);
-      const messageCountResult = conversationIds.length > 0
-        ? await ctx.supabase
-            .from('messages')
-            .select('id', { count: 'planned', head: true })
-            .in('conversation_id', conversationIds)
-        : { count: 0, error: null };
-
-      if (messageCountResult.error) {
-        throw createAdminOperationError('读取用户详情', messageCountResult.error);
-      }
-
       const result = {
         profile: withUnrecordedLoginFields(profile),
         stats: {
-          totalConversations: conversationsResult.data?.length ?? 0,
-          totalMessages: messageCountResult.count ?? 0,
-          totalCreditsSpent,
-          totalTickets: ticketsResult.data?.length ?? 0,
+          totalConversations: usage.conversations,
+          totalMessages: usage.messages,
+          totalCreditsSpent: credits.totalSpent,
+          totalTickets: ticketsResult.count,
         },
         recentActivity: recentLogsResult.data ?? [],
       };
 
       logAdminEndpointMetric('admin.getUserDetails', startedAt, {
-        queryCount: conversationIds.length > 0 ? 5 : 4,
-        countStrategy: conversationIds.length > 0 ? 'mixed' : 'local_only',
-        hasMessagesCount: conversationIds.length > 0,
+        queryCount: 5,
+        countStrategy: 'database',
         recentActivityCount: result.recentActivity.length,
       });
 
