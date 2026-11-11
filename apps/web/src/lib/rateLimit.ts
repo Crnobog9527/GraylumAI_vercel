@@ -29,7 +29,8 @@ export type RateLimitType =
   | 'auth'
   | 'anonymous'
   | 'ip'
-  | 'ip_session';
+  | 'ip_session'
+  | 'phone_send';
 
 // ============================================
 // Redis 客户端
@@ -125,6 +126,19 @@ function getRateLimiter(type: RateLimitType): Ratelimit | null {
         redis,
         limiter: Ratelimit.slidingWindow(600, '1 m'),
         prefix: 'graylum:middleware:session:',
+        analytics: false,
+        timeout: 0,
+      });
+      break;
+
+    // Deep review 11-11 item 7: every SMS code request from one IP, counted before the per-number limits in the
+    // database and never given back, so failed hCaptcha attempts count too. The database gives a request refused
+    // before the SMS hook back, so without this a failing loop from one IP cost nothing and kept the number busy.
+    case 'phone_send':
+      limiter = new Ratelimit({
+        redis,
+        limiter: Ratelimit.slidingWindow(10, '10 m'),
+        prefix: 'graylum:ratelimit:phone_send:',
         analytics: false,
         timeout: 0,
       });
