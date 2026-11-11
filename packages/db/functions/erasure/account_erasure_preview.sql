@@ -16,10 +16,13 @@ AS $function$
       SELECT max(s.current_period_end) FROM public.user_subscriptions s
       WHERE s.user_id = p_profile_id
         AND lower(s.status) IN ('active', 'trialing', 'past_due', 'incomplete', 'unpaid', 'paused')),
+    -- A released checkout (0512) still reads status 'pending' but is final: the same test as the financial proof.
     'pendingPayments', (SELECT count(*) FROM public.payment_orders o
-      WHERE o.user_id = p_profile_id AND o.status = 'pending'),
+      WHERE o.user_id = p_profile_id AND o.status = 'pending' AND NOT public.erasure_payment_terminal(to_jsonb(o))),
     -- CORE-PATH-V2 V2-12 F: the core-path turns still open or settling are the only money in flight.
     'runsInFlight', (SELECT count(*) FROM public.turns t WHERE t.actor_id = p_profile_id AND (t.state <> 'closed' OR t.settlement = 'pending')),
-    'closed', EXISTS (SELECT 1 FROM public.account_erasure_requests e WHERE e.profile_id = p_profile_id)
+    'closed', EXISTS (SELECT 1 FROM public.account_erasure_requests e WHERE e.profile_id = p_profile_id),
+    -- 0512 (item 13): erasure cannot start while a refund request is being handled.
+    'refundRequestOpen', public.account_erasure_refund_open(p_profile_id)
   );
 $function$;
