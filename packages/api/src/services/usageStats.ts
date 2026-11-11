@@ -2,7 +2,7 @@
 import { z } from 'zod';
 
 /*
- * One account's usage counts and credit totals, summed in the database (migration `profile_usage_stats`).
+ * One account's usage counts and credit totals, summed in the database (migration 0513_profile_usage_stats).
  *  - The counts come from the per-turn core (`turns`, `session_messages`): the tables the retired chat path wrote
  *    (`conversations`, `messages`) get no new rows, and the core tables are not readable by any API role.
  *  - The totals are not summed in Node any more: an unpaged `credit_transactions` read is cut at PostgREST's row cap, so an
