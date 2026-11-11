@@ -80,7 +80,7 @@ BILL-PAYG 本次只做 [PR-A 计费核心](https://github.com/Crnobog9527/Graylu
 - 改对话、定位、Agent 行为：`packages/api/src/services/runtime`、`services/opc`、`apps/web/src/app/positioning`
 - 改计费：`packages/api/src/services/bill2` 和相关迁移（敏感改动，按 AGENTS.md 第 4 节在测试模式下验证；staging 由 AI 验证后合并，上正式环境须 Owner 批准）
 - 改 Skill 上传发布：`packages/api/src/services/skills`、`apps/web/src/app/admin/prompts`
-- 改后台统计和设置：`packages/api/src/routers/admin.ts`、`routers/settings.ts`、`apps/web/src/app/admin/*`
+- 改后台统计和设置：`packages/api/src/routers/admin.ts`（只是清单，接口按后台栏目分在同目录的 `admin*.ts` 里）、`routers/settings.ts`、`apps/web/src/app/admin/*`
 
 ## 6) 常用命令
 
