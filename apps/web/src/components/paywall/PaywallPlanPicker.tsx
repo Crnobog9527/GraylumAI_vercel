@@ -6,7 +6,7 @@ import { Check, Minus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { trpc } from '@/trpc/client';
 import {
-  PLAN_EARLY_ACCESS, PLAN_FIT, PLAN_SUPPORT, formatUsd, monthlyCredits, packDiscountLabel, paywallQuote, yearlyBadge,
+  PLAN_EARLY_ACCESS, PLAN_FIT, PLAN_SUPPORT, formatUsd, monthlyCredits, packDiscountLabel, paywallQuote, profileLimitLabel, yearlyBadge,
   type PaywallBilling, type PaywallLevel, type PaywallPlan, type PaywallQuoteOptions,
 } from './paywallPlans';
 
@@ -91,6 +91,8 @@ export function PaywallPlanPicker({ plans, billing, selected, disabled, quoteOpt
 /**
  * Pro/Gold comparison; only rows the backend or an Owner decision backs (no unlaunched features). The publishing-and-
  * data rows (paywall v25 "发布与数据") follow the admin switches; one-click publishing has its own, off until it ships.
+ * The jury and model-comparison rows follow each plan's entitlement switch. The positioning-profile count is each plan's
+ * own number from the catalog, and the row waits until the catalog sends it.
  */
 export function PaywallCompareTable({ plans }: { plans: PaywallPlan[] }) {
   const features = trpc.publishMonitor.features.useQuery(undefined, { retry: false, staleTime: 300_000 }).data;
@@ -99,10 +101,19 @@ export function PaywallCompareTable({ plans }: { plans: PaywallPlan[] }) {
   const no = <Minus className="inline h-4 w-4" aria-label="没有" style={{ color: 'var(--text-disabled)' }} />;
   const rows: Array<[string, (plan: PaywallPlan) => ReactNode]> = [
     ['每月积分', plan => monthlyCredits(plan).toLocaleString('en-US')],
+    // Shown once every plan in the table carries its limit (the public catalog returns it from #1903 on).
+    ...(plans.every(plan => profileLimitLabel(plan)) ? [['定位档案数量',
+      (plan: PaywallPlan) => profileLimitLabel(plan)] as [string, (plan: PaywallPlan) => ReactNode]] : []),
     ...(features?.publish ? [['一键发布到海外平台（TikTok、Instagram、YouTube 等）', () => yes] as [string, () => ReactNode]] : []),
     ...(features?.ownData ? [['查看海外平台自有账号近 30 天作品数据', () => yes] as [string, () => ReactNode]] : []),
     ...(features?.weeklyReview ? [['对标账号监控、90 天趋势、每周自动复盘',
       (plan: PaywallPlan) => (plan.level === 'gold' ? yes : no)] as [string, (plan: PaywallPlan) => ReactNode]] : []),
+    // Owner 2026-11-12 (MASTER_PLAN §2.1, walkthrough item 10): the jury and the model comparison are named here too. Each row
+    // follows the plans' own entitlement switches: it shows while a plan on sale carries the tool, and marks which plan does.
+    ...(plans.some(plan => plan.allowFusionReview) ? [['多模型专家评审团（审阅运营策略报告）',
+      (plan: PaywallPlan) => (plan.allowFusionReview ? yes : no)] as [string, (plan: PaywallPlan) => ReactNode]] : []),
+    ...(plans.some(plan => plan.allowFusionCompare) ? [['多模型对比',
+      (plan: PaywallPlan) => (plan.allowFusionCompare ? yes : no)] as [string, (plan: PaywallPlan) => ReactNode]] : []),
     ['积分包', plan => packDiscountLabel(plan.discount)],
     ['客服回复', plan => PLAN_SUPPORT[plan.level]],
     ['优先体验内测新功能', plan => (PLAN_EARLY_ACCESS[plan.level] ? yes : no)],
