@@ -31,7 +31,7 @@ export default function HomePage(){
   {/* The shared top bar of the workbench (GlobalHeader); the home page has no rail, so its phone menu button is hidden in home.module.css. */}
   <GlobalHeader area="search" end={<div className={styles.headerEnd}><LanguageSwitch className={styles.language}/><Link href="/app/profile?tab=subscription">{credits.status==='ready'?credits.credits:'—'} 积分</Link><Link href="/app/profile" aria-label="个人中心" className={styles.avatar}>{(name??'我').slice(0,1)}</Link></div>}/>
   <main className={styles.page}>
-   <section className={styles.account}><div><strong>{name?`欢迎回来，${name}`:'欢迎回来'}</strong><span>{membershipText(profile)}</span></div><Link href="/app/profile?tab=subscription">账户与积分 →</Link></section>
+   <section className={styles.account}><div><strong>{name?`你好，${name}`:'你好'}</strong><span>{membershipText(profile)}</span></div><Link href="/app/profile?tab=subscription">账户与积分 →</Link></section>
    <section className={styles.value}><h1>让你的业务，<br/>拥有清楚的内容方向</h1><p>从找到自己的位置，到持续做出有价值的内容。<br/>Graylum 和你一起分析、判断和创作，让每一步都有依据。</p></section>
    {/* Owner-approved promotional method introduction; not the executed /positioning workflow. */}
    <section className={styles.method} aria-label="我们怎样帮你做定位">

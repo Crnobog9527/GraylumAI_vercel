@@ -9,12 +9,18 @@ import { readPaymentFacts } from './waffoPayments';
 import { deliverWaffoOneTime } from './waffoOneTimeDelivery';
 
 type Provider = Pick<WaffoOperationsClient, 'merchant' | 'mode' | 'storeId' | 'findOneTimeOrders' | 'findOrderPayments' | 'readChargebacks'>;
+/** Deep review 2026-11-11 item 4: a checkout the buyer left creates no Waffo order at all, and was blocked for good (any
+ * channel, any item). Once its checkout expired an hour ago, a complete lookup finding no order and no payment for it is
+ * the provider's own word that nothing was or can be charged: it is released, as a Stripe checkout verified absent an hour
+ * after its expiry is (pay_waffo_close_uncreated). */
+export const WAFFO_ABSENT_AFTER_MS = 60 * 60 * 1000;
 /** A local expiry never proves no charge. Only a complete, authoritative lookup proving all original
- * provider orders canceled and every payment terminal unpaid can release a bound checkout. No match,
- * incomplete lookup, processing cash, or lost checkout identity stays blocked for manual reconciliation. */
+ * provider orders canceled and every payment terminal unpaid, or (an hour past the checkout's expiry) no order and no
+ * payment at all, can release a bound checkout. A fresh no-match, an incomplete lookup, processing cash, an order in any
+ * other state, or lost checkout identity stays blocked for manual reconciliation. */
 export async function recoverWaffoOneTimeCheckouts(db: Pick<SupabaseClient, 'from' | 'rpc'>, provider: Provider,
   userId?: string, afterFulfillment?: (orderId: string) => Promise<unknown>, deadline = Date.now() + 20_000) {
-  let query = db.from('payment_orders').select('id,user_id').eq('payment_channel', 'waffo').eq('mode', 'payment')
+  let query = db.from('payment_orders').select('id,user_id,method_checkout_expires_at').eq('payment_channel', 'waffo').eq('mode', 'payment')
     .eq('auto_renew', false).eq('payment_mode', provider.mode).eq('merchant_namespace', provider.merchant)
     .eq('payment_status', 'unpaid').eq('qualification_state', 'reserved').is('purchase_closed_at', null)
     .lt('method_checkout_expires_at', new Date().toISOString()).order('created_at', { ascending: true });
@@ -23,7 +29,7 @@ export async function recoverWaffoOneTimeCheckouts(db: Pick<SupabaseClient, 'fro
   if (due.error) throw new Error('PAY_WAFFO_PERSISTENCE_UNAVAILABLE');
   let closed = 0;
   const blocked: string[] = [];
-  for (const row of (due.data ?? []) as { id: string; user_id: string }[]) {
+  for (const row of (due.data ?? []) as { id: string; user_id: string; method_checkout_expires_at: string | null }[]) {
     if (Date.now() >= deadline) { blocked.push(row.id); continue; }
     try {
       const orders = await provider.findOneTimeOrders(row.id, deadline);
@@ -42,8 +48,10 @@ export async function recoverWaffoOneTimeCheckouts(db: Pick<SupabaseClient, 'fro
         } else paidUnresolved = true;
       }
       if (paidApplied === 1 && !paidUnresolved && payments.every(p => ['succeeded', 'failed', 'canceled'].includes(p.status))) continue;
-      if (!orders.length || orders.some(o => o.status !== 'canceled')
-        || payments.some(p => !['failed', 'canceled'].includes(p.status))) { blocked.push(row.id); continue; }
+      const expiredAt = Date.parse(row.method_checkout_expires_at ?? '');
+      const absent = !orders.length && !payments.length && Number.isFinite(expiredAt) && expiredAt + WAFFO_ABSENT_AFTER_MS < Date.now();
+      if (!absent && (!orders.length || orders.some(o => o.status !== 'canceled')
+        || payments.some(p => !['failed', 'canceled'].includes(p.status)))) { blocked.push(row.id); continue; }
       const checkout = await db.from('payment_provider_refs').select('external_id').eq('order_id', row.id).eq('channel', 'waffo')
         .eq('merchant_namespace', provider.merchant).eq('mode', provider.mode).eq('object_type', 'checkout').maybeSingle();
       if (checkout.error || !checkout.data) { blocked.push(row.id); continue; }

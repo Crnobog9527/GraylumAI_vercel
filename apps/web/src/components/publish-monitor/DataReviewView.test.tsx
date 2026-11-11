@@ -1,4 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 
@@ -77,6 +79,15 @@ describe('data review page access follows the server', () => {
     expect(html).toContain('aria-hidden="true"');
     expect(html).not.toContain('role="tab"');
     expect(text(html)).not.toMatch(/读取中|加载/);
+  });
+  // Walkthrough 2026-11-11, item 30: a visitor without the plan saw the five tab names for a few seconds, then the upgrade notice.
+  it('while the first read runs, the five tab names are placeholders (sized by the text, not painted) and none is marked current', () => {
+    state.data = { isPending: true };
+    const html = renderToStaticMarkup(<DataReviewView />);
+    expect(html.match(/data-tab-placeholder/g)).toHaveLength(5);
+    expect(html).not.toContain('data-state="active"');
+    const css = readFileSync(fileURLToPath(new URL('./data-review.module.css', import.meta.url)), 'utf8');
+    expect(css).toMatch(/\.skTab \{[^}]*color: transparent;/);
   });
   it('a read failure is announced and offers a retry', () => {
     state.data = failed('PUBLISH_MONITOR_UNAVAILABLE');

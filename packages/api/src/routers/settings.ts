@@ -471,7 +471,7 @@ export const settingsRouter = router({
       level: plan.level,
       allowFusionReview: plan.allow_fusion_review,
       allowFusionCompare: plan.allow_fusion_compare,
-      libraryStorageBytes: plan.library_storage_bytes,
+      libraryStorageBytes: plan.library_storage_bytes, positioningProfileLimit: plan.positioning_profile_limit,
       price: {
         monthly: (plan.monthly_price ?? 0) / 100, // 从分转换为美元
         yearly: (plan.yearly_price ?? 0) / 100,

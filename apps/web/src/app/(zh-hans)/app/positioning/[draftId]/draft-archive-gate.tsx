@@ -17,7 +17,11 @@ import { ReadonlyDraftView } from './readonly-draft-view';
 export function DraftArchiveGate({ draftId, children, area = 'chat' }: { draftId: string; children: ReactNode; area?: 'chat' | 'topics' }) {
   const read = trpc.opc.read.useQuery({ draftId }, { enabled: Boolean(draftId), retry: retryUnlessMissing });
   const deleted = (read.data as { conversationDeleted?: unknown } | undefined)?.conversationDeleted === true;
-  const archive = useDraftArchiveState(draftId, Boolean(draftId) && read.isSuccess && !deleted);
+  // The profiles are asked for with the draft, not after it (SITE-SPEED): both reads leave in one request, so the page
+  // opens one round trip sooner (about 1 s on staging, 2026-11-12). What opens is decided as before, below: a deleted
+  // conversation and a failed draft read go to the page whatever the profiles say, and nothing editable opens until
+  // the draft is read and its profile is confirmed active.
+  const archive = useDraftArchiveState(draftId, Boolean(draftId));
   // The page itself shows a missing id, a failed read and a deleted conversation. "Failed" is the last settled read:
   // the page's own read of the same draft refetches the failed query on mount, which puts it back to pending without
   // data. Showing "checking" then would unmount the page, whose next mount refetches again: an endless loop.

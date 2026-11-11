@@ -53,6 +53,11 @@ BEGIN
       -- later as ok (the verdict stays on the receipt, also when the saved answer is deleted, turn_fusion_record / _output).
       AND c.answer_verdict = 'usable';
   END IF;
+  -- Owner 2026-11-11: a turn that was cut off (a call over its time limit, a function the platform stopped, a turn recovery had to end)
+  -- saved no answer, so the user pays nothing for it, whatever its receipts say. The receipts keep their costs: they are Graylum's
+  -- (absorbed_credits, the stop-loss). What was saved and delivered stays charged by the rules above: a compare column with a usable
+  -- answer, a jury by its own rule.
+  IF p_kind = 'interrupted' AND NOT p_delivered AND t.kind <> 'compare' THEN RETURN 0; END IF;
   IF p_kind = 'expired' AND NOT p_delivered THEN RETURN 0; END IF;
   IF p_kind = 'stopped' THEN
     -- 10-27: the first two stops within 24 hours are free; from the third, what was generated, at most the fixed price.

@@ -14,9 +14,13 @@ describe('login return notice', () => {
     expect(markup).not.toContain('buy=gold');
   });
 
-  it('shows the plain return path otherwise and nothing for the default', () => {
-    expect(render('/app/positioning')).toContain('登录完成后将返回 <span class="font-mono">/app/positioning</span>');
-    expect(render('/app/profile?buy=platinum&cycle=monthly')).toContain('登录完成后将返回');
+  it('says in words that login continues to the page the visitor was opening, never its address, and nothing for the default', () => {
+    for (const target of ['/app/positioning', '/app/library?tab=documents', '/app/profile?buy=platinum&cycle=monthly']) {
+      const markup = render(target);
+      expect(markup).toContain('登录后会直接带你去刚才要打开的页面');
+      expect(markup).not.toContain('/app/');
+      expect(markup).not.toContain('font-mono');
+    }
     expect(render('/app/profile')).toBe('');
   });
 });

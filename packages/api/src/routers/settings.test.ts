@@ -699,6 +699,32 @@ describe('public catalog availability', () => {
     },
   );
 
+  // The pricing page states how many positioning profiles each plan allows (Free 1 / Pro 3 / Gold 6): read from the plan row.
+  // This is a public read (no sign-in): the answer is the plan's own figures and nothing else of the row.
+  it('returns each plan\'s positioning profile allowance, and only the public fields of a plan row', async () => {
+    const plan = (level: string, limit: number, n: number) => ({ ...validMembershipPlan, level, positioning_profile_limit: limit,
+      id: `123e4567-e89b-42d3-a456-42661417411${n}`, name: level,
+      // columns a plan row also carries, which the public answer must not repeat
+      stripe_monthly_price_id: 'price_secret_m', stripe_yearly_price_id: 'price_secret_y', created_by: 'someone', internal_note: 'n' });
+    const caller = createPublicCatalogCaller('membership_plans',
+      Promise.resolve({ data: [plan('free', 1, 1), plan('pro', 3, 2), plan('gold', 6, 3)], error: null }));
+
+    const plans = await caller.getMembershipPlans();
+
+    expect(plans.map(item => [item.level, item.positioningProfileLimit])).toEqual([['free', 1], ['pro', 3], ['gold', 6]]);
+    for (const item of plans) {
+      expect(Object.keys(item).sort()).toEqual(['allowFusionCompare', 'allowFusionReview', 'checkoutReady', 'credits', 'discount', 'features',
+        'highlight', 'id', 'level', 'libraryStorageBytes', 'name', 'paymentChannel', 'positioningProfileLimit', 'price', 'recommended']);
+      expect(JSON.stringify(item)).not.toMatch(/price_secret|someone|internal_note/);
+    }
+  });
+
+  it.each([0, -1, 1.5, null, undefined, '3'])('marks the plans unavailable when a plan\'s allowance is %j, rather than publishing a wrong figure', async (limit) => {
+    const caller = createPublicCatalogCaller('membership_plans',
+      Promise.resolve({ data: [{ ...validMembershipPlan, positioning_profile_limit: limit }], error: null }));
+    await expect(caller.getMembershipPlans()).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
+  });
+
   it('returns [] only for a successful catalog with no active membership plans', async () => {
     const caller = createPublicCatalogCaller(
       'membership_plans',

@@ -107,6 +107,19 @@ describe('the schedule page', () => {
     expect(html).toContain('要改内容，请取消后重新排期');
     expect(html).not.toContain('继续定位');
   });
+
+  it('names every platform in Chinese where it has a Chinese name, never its code (抖音, 小红书)', () => {
+    const at = inHours(2);
+    state.list = ok([{ id: 'j3', state: 'failed', at, scheduledAt: at, captionPreview: '平台名', cancelReason: null, errorCode: null,
+      manualReview: false, holdCredits: null, chargedCredits: null, targets: [
+        { connectionId: 'c1', platform: 'douyin', status: 'failed' }, { connectionId: 'c2', platform: 'xiaohongshu', status: 'failed' },
+        { connectionId: 'c3', platform: 'instagram', status: 'failed' }] }]);
+    const html = text(renderToStaticMarkup(<ScheduleView />));
+    expect(html).toContain('抖音 · 失败');
+    expect(html).toContain('小红书 · 失败');
+    expect(html).toContain('Instagram · 失败');
+    expect(html).not.toMatch(/douyin|xiaohongshu/);
+  });
 });
 
 describe('who is new, and where 继续定位 goes', () => {

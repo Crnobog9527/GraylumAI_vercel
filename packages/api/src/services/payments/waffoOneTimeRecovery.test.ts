@@ -4,15 +4,15 @@
  * This code is proprietary and confidential.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { recoverWaffoOneTimeCheckouts } from './waffoOneTimeRecovery';
+import { recoverWaffoOneTimeCheckouts, WAFFO_ABSENT_AFTER_MS } from './waffoOneTimeRecovery';
 import { closeExpiredWaffoCheckouts } from './waffoCardCheckout';
 import { fakeDb, payment } from './waffoTestHarness';
 const orderId = '00000000-0000-4000-8000-000000000001';
-function setup() {
+function setup(expiresAt = '2026-10-01T00:30:00.000Z') {
   const rpc = vi.fn(async (fn: string) => ({ data: fn === 'pay_failover_fulfill' ? { state: 'fulfilled' } : 'released', error: null }));
   const db = fakeDb({ payment_orders: [{ id: orderId, user_id: 'buyer', payment_channel: 'waffo', mode: 'payment', auto_renew: false,
     payment_method: 'card', payment_mode: 'test', merchant_namespace: 'fixture', qualification_state: 'reserved', payment_status: 'unpaid',
-    purchase_closed_at: null, method_checkout_expires_at: '2026-10-01T00:30:00.000Z', created_at: '2026-10-01T00:00:00.000Z',
+    purchase_closed_at: null, method_checkout_expires_at: expiresAt, created_at: '2026-10-01T00:00:00.000Z',
     checkout_request: { purchaseMode: 'payment' }, price_ref_id: 'price-1', item_type: 'credit_package' }],
     payment_provider_refs: [{ order_id: orderId, object_type: 'checkout', channel: 'waffo', mode: 'test', merchant_namespace: 'fixture', external_id: 'cs_original' },
     { id: 'price-1', object_type: 'price', channel: 'waffo', mode: 'test', merchant_namespace: 'fixture', external_id: 'PROD_once' }],
@@ -35,12 +35,37 @@ describe('one-time recovery never treats local timeout as no charge', () => {
       p_order: orderId, p_checkout: 'cs_original', p_state: 'closed_unpaid', p_payment: null, p_amount: 0 }));
   });
   it.each(['missing', 'pending', 'unknown', 'lookup_failure'])('keeps %s results blocked without closing or reopening a channel', async kind => {
-    const f = setup();
+    // Within the hour after the checkout expired, so a missing order is not yet proof of absence.
+    const f = setup(new Date(Date.now() - WAFFO_ABSENT_AFTER_MS / 2).toISOString());
     if (kind === 'missing') f.provider.findOneTimeOrders.mockResolvedValueOnce([]);
     else if (kind === 'lookup_failure') f.provider.findOrderPayments.mockRejectedValueOnce(new Error('incomplete'));
     else f.provider.findOrderPayments.mockResolvedValueOnce([payment({ status: kind })]);
     expect(await recoverWaffoOneTimeCheckouts(f.db, f.provider)).toEqual({ closed: 0, blocked: [orderId] });
     expect(f.rpc).not.toHaveBeenCalledWith('pay_waffo_observe_qualification', expect.anything());
+  });
+  it('item 4: an hour past expiry, no order and no payment at Waffo releases the left checkout; anything else stays blocked', async () => {
+    const f = setup();
+    f.provider.findOneTimeOrders.mockResolvedValue([]);
+    expect(await recoverWaffoOneTimeCheckouts(f.db, f.provider)).toEqual({ closed: 1, blocked: [] });
+    expect(f.rpc).toHaveBeenCalledWith('pay_waffo_observe_qualification', expect.objectContaining({
+      p_order: orderId, p_checkout: 'cs_original', p_state: 'closed_unpaid', p_payment: null, p_amount: 0 }));
+    // A payment without an order, an order not canceled, or a failed lookup never counts as absence.
+    for (const arrange of [
+      (g: ReturnType<typeof setup>) => g.provider.findOrderPayments.mockResolvedValue([payment({ status: 'failed' })]),
+      (g: ReturnType<typeof setup>) => g.provider.findOneTimeOrders.mockResolvedValue([{ id: 'ORD_fixture1', status: 'pending',
+        storeId: 'STO_fixture', testMode: true, orderMerchantExternalId: orderId }]),
+      (g: ReturnType<typeof setup>) => g.provider.findOneTimeOrders.mockRejectedValue(new Error('PAY_WAFFO_RECONCILIATION_REQUIRED')),
+    ]) {
+      const g = setup();
+      g.provider.findOneTimeOrders.mockResolvedValue([]);
+      arrange(g);
+      expect(await recoverWaffoOneTimeCheckouts(g.db, g.provider)).toEqual({ closed: 0, blocked: [orderId] });
+      expect(g.rpc).not.toHaveBeenCalledWith('pay_waffo_observe_qualification', expect.anything());
+    }
+    // An order whose checkout expiry is unknown is never released by absence.
+    const unknown = setup('');
+    unknown.provider.findOneTimeOrders.mockResolvedValue([]);
+    expect(await recoverWaffoOneTimeCheckouts(unknown.db, unknown.provider)).toMatchObject({ closed: 0 });
   });
   it('recovers already paid cash before a second-channel purchase and does not report it as unresolved', async () => {
     const f = setup(); f.provider.findOrderPayments.mockResolvedValueOnce([payment({ periodNumber: null, subscriptionOrder: null,

@@ -38,6 +38,7 @@ export const PROFILE_ARCHIVE_TEXT = {
   loadFailed: '定位档案暂时读不出来，请稍后再试。',
   limitReached: '定位档案名额用完了。把不再更新的档案归档，就能空出名额；也可以升级会员。',
   limitHint: '名额用完了，可以把不再更新的档案归档。',
+  resume: '继续已有的定位',
   readonlyTitle: '定位分析（已归档）',
   readonlyNotice: '这个定位档案已归档，只能查看和导出，不能继续对话或生成报告。',
   archivedRefusal: '这个定位档案已经归档了，只能查看和导出，不能继续对话或生成报告。刷新页面就能看到只读版本。',
@@ -77,3 +78,10 @@ export function splitProfiles(businesses: readonly ProfileBusiness[] | undefined
 }
 
 export const profileName = (row: { name?: string | null }) => row.name?.trim() || PROFILE_ARCHIVE_TEXT.unnamed;
+
+/**
+ * The draft to go back to: of the profiles that can still be worked on (`splitProfiles().active`, in the server's order, oldest
+ * first), the newest that has one. Null when there is none.
+ */
+export const resumableDraftId = (active: readonly ProfileRow[]): string | null =>
+  active.map(row => row.draftId).filter(Boolean).at(-1) ?? null;

@@ -131,8 +131,12 @@ export function TurnWorkspace({ sessionId }: { sessionId: string }) {
   // The guide card's first button depends on whether a positioning is already under way: read only once the card shows.
   const gated = chat.notice?.text === POSITIONING_REQUIRED_NOTICE;
   const profiles = useProfileBusinesses(gated);
+  // The same read the profile list makes (shared cache): with the allowance used, the card does not offer to import another.
+  const entitlements = trpc.user.getEntitlements.useQuery(undefined, { enabled: gated, retry: false, staleTime: 60_000 });
+  const allowance = entitlements.isPending ? 'reading' as const : entitlements.data?.positioningProfileLimit ?? null;
   const notices = gated
-    ? [positioningRequiredNotice('turn-positioning', undefined, existingPositioning(profiles.businesses, Boolean(profiles.error)))]
+    ? [positioningRequiredNotice('turn-positioning', undefined,
+      existingPositioning(profiles.businesses, Boolean(profiles.error), allowance))]
     : chat.notice && !paused ? [{ id: 'turn-notice', tone: 'warning' as const, text: chat.notice.text }]
     : paused ? [{ id: 'turn-paused', tone: 'warning' as const, text: chat.notice?.text ?? TURN_PAUSED_NOTICE,
       actions: [{ label: TURN_CONTINUE, onClick: () => void chat.resume() }] }] : [];

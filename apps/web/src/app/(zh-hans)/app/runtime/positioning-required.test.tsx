@@ -57,8 +57,10 @@ describe('positioning guide card for an account with a positioning under way', (
     ({ businessId, name: businessId, isArchived, archivedAt: isArchived ? '2026-11-01' : null, drafts: draftIds.map(draftId => ({ draftId })) });
 
   it('finds the newest profile that can still be worked on; archived ones and ones without a draft are not it', () => {
-    expect(existingPositioning([profile('old', ['d-old']), profile('new', ['d-new'])], false)).toEqual({ state: 'draft', draftId: 'd-new' });
-    expect(existingPositioning([profile('live', ['d-live']), profile('gone', ['d-gone'], true)], false)).toEqual({ state: 'draft', draftId: 'd-live' });
+    expect(existingPositioning([profile('old', ['d-old']), profile('new', ['d-new'])], false))
+      .toEqual({ state: 'draft', draftId: 'd-new', full: false });
+    expect(existingPositioning([profile('live', ['d-live']), profile('gone', ['d-gone'], true)], false))
+      .toEqual({ state: 'draft', draftId: 'd-live', full: false });
     expect(existingPositioning([profile('gone', ['d-gone'], true), profile('empty', [])], false)).toEqual({ state: 'none' });
     expect(existingPositioning([], false)).toEqual({ state: 'none' });
   });
@@ -86,5 +88,25 @@ describe('positioning guide card for an account with a positioning under way', (
     const markup = renderToStaticMarkup(createElement(ChatNoticeList, { notices: [notice] }));
     expect(markup).toContain('本次没有扣积分');
     expect(markup).not.toContain('<button');
+  });
+
+  // With the allowance used, importing would start another profile and be refused: only the way back is offered.
+  it('knows when the profile allowance is used: archived profiles do not count, an unreadable allowance hides nothing', () => {
+    const one = [profile('p', ['d'])], withArchived = [profile('p', ['d']), profile('gone', ['d-gone'], true)];
+    expect(existingPositioning(one, false, 1)).toEqual({ state: 'draft', draftId: 'd', full: true });
+    expect(existingPositioning(withArchived, false, 1)).toEqual({ state: 'draft', draftId: 'd', full: true });
+    expect(existingPositioning(one, false, 3)).toEqual({ state: 'draft', draftId: 'd', full: false });
+    expect(existingPositioning(one, false, null)).toEqual({ state: 'draft', draftId: 'd', full: false });
+    // not known yet: no buttons until it is, so the import entry never appears and then goes away
+    expect(existingPositioning(one, false, 'reading')).toEqual({ state: 'checking' });
+    // nothing to go back to: the allowance is not asked about, the ordinary entries show
+    expect(existingPositioning([], false, 'reading')).toEqual({ state: 'none' });
+  });
+
+  it('leaves out 导入已有定位 when the allowance is used, and keeps it below the allowance', () => {
+    const labels = (full: boolean) => positioningRequiredNotice('n', vi.fn(), { state: 'draft', draftId: 'd-1', full })
+      .actions!.map(action => action.label);
+    expect(labels(true)).toEqual([POSITIONING_ACTIONS.resume]);
+    expect(labels(false)).toEqual([POSITIONING_ACTIONS.resume, POSITIONING_ACTIONS.manual]);
   });
 });
