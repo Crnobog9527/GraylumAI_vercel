@@ -17,9 +17,9 @@ describe('played stages and scenarios are remembered only while the page is open
     expect(read('LaterStepsL.tsx')).not.toMatch(/localStorage\.(getItem|setItem)/);
   });
 
-  it('still remembers in this browser who has seen step one and region 6, so they may skip them', () => {
-    expect(read('StepsL.tsx')).toMatch(/localStorage\.getItem\(SEEN_KEY\)/);
-    expect(read('StepsL.tsx')).toContain("'graylum-landing-l-step-one-seen'");
+  it('still remembers in this browser who has seen region 6, so they may skip it; step one holds nobody, so it stores nothing', () => {
+    // Owner 2026-11-11: step one no longer holds the scroll, so there is nothing to skip and nothing to remember.
+    for (const name of ['StepsL.tsx', 'StepOneFlowL.tsx', 'FlowModuleL.tsx', 'use-loop-l.ts']) expect(read(name), name).not.toMatch(/localStorage|sessionStorage/);
     expect(read('ScenariosL.tsx')).toMatch(/localStorage\.getItem\(SEEN_KEY\)/);
     expect(read('ScenariosL.tsx')).toContain("'graylum-landing-l-scenarios-seen'");
   });

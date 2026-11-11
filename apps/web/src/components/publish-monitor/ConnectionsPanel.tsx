@@ -1,11 +1,14 @@
 'use client';
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { useState } from 'react';
+import { Link2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { trpc } from '@/trpc/client';
 import { accountIndex, type Brand } from './brands';
 import { ConnectForm } from './ConnectForm';
+import styles from './data-review.module.css';
+import { StateBlock } from './StateBlock';
 import {
   CONNECTION_STATUS, SOURCE_LABEL, dataErrorMessage, errorCode, formatTime, platformName,
 } from './labels';
@@ -33,8 +36,9 @@ export function blockingProjectIds(own: Connection[]): Set<string> {
  * another brand account, and (Gold) the benchmark accounts. Every check is repeated on the server; the buttons are
  * only entry points.
  */
-export function ConnectionsPanel({ brands, connections, refresh, gold, onChanged }: { brands: Brand[];
-  connections: Connection[]; refresh: Map<string, RefreshState>; gold: boolean; onChanged: () => void }) {
+export function ConnectionsPanel({ brands, connections, refresh, gold, onChanged, onOpenTab }: { brands: Brand[];
+  connections: Connection[]; refresh: Map<string, RefreshState>; gold: boolean; onChanged: () => void;
+  onOpenTab?: (tab: 'import') => void }) {
   const [adding, setAdding] = useState(false), [preselect, setPreselect] = useState('');
   const [upgrade, setUpgrade] = useState(false);
   const own = connections.filter(c => c.role === 'own');
@@ -43,20 +47,25 @@ export function ConnectionsPanel({ brands, connections, refresh, gold, onChanged
   const blocking = blockingProjectIds(own);
   // Adding publishing to a live connection goes through the same form, so that one account must stay selectable.
   const connected = upgrade ? new Set([...blocking].filter(id => id !== preselect)) : blocking;
+  const toggleForm = () => { setPreselect(''); setUpgrade(false); setAdding(value => !value); };
   return (
-    <section className="space-y-4" aria-labelledby="pm-accounts">
-      <div className="flex items-center justify-between gap-2">
-        <h2 id="pm-accounts" className="text-base font-semibold">我的账号</h2>
-        <Button variant="outline" onClick={() => { setPreselect(''); setUpgrade(false); setAdding(value => !value); }}>{adding ? '收起' : '连接账号'}</Button>
+    <section className={styles.cardStack} aria-labelledby="pm-accounts">
+      <div className={styles.sectionHead}>
+        <h2 id="pm-accounts">我的账号</h2>
+        {(own.length > 0 || adding) && <button type="button" className={adding ? styles.buttonQuiet : styles.button}
+          onClick={toggleForm}>{adding ? '收起' : '连接账号'}</button>}
       </div>
       {adding && <ConnectForm key={`${preselect}:${upgrade}`} brands={brands} connected={connected}
         initialProjectId={preselect} initialPublish={upgrade}
         onConnected={() => { setAdding(false); onChanged(); }} onAccountAdded={onChanged} />}
-      {own.length === 0 ? (
-        <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-          还没有连接账号。海外 9 个平台授权后读取你自己作品的数据；小红书、抖音贴主页链接读取公开数据；其他平台可以用表格导入。</p>
-      ) : (
-        <ul className="divide-y rounded-lg border" style={{ borderColor: 'var(--border-primary)' }}>
+      {own.length === 0 ? (!adding && (
+        <StateBlock icon={<Link2 size={20} aria-hidden />} title="还没有连接账号"
+          text="海外 9 个平台授权后读取你自己作品的数据；小红书、抖音贴主页链接读取公开数据；其他平台可以用表格导入。">
+          <button type="button" className={styles.button} onClick={toggleForm}>连接账号</button>
+          {onOpenTab && <button type="button" className={styles.buttonQuiet} onClick={() => onOpenTab('import')}>用表格导入</button>}
+        </StateBlock>
+      )) : (
+        <ul className={styles.accounts}>
           {own.map(c => {
             const account = c.accountProjectId ? accounts.get(c.accountProjectId) : undefined;
             return <ConnectionRow key={c.id} connection={c} refresh={refresh.get(c.id)} onChanged={onChanged}
@@ -78,6 +87,13 @@ function stateLine(c: Connection, refresh: RefreshState | undefined): string {
   return `最后更新于 ${formatTime(c.lastSuccessAt)}`;
 }
 
+/** The colour of the state line: something to act on, something to keep an eye on, or fine. Decides nothing else. */
+export function stateTone(c: Connection, refresh: RefreshState | undefined): 'ok' | 'warning' | 'error' {
+  if (c.status !== 'connected' || refresh?.refreshError) return 'error';
+  if (refresh?.delayed || (c.source === 'postforme' && c.lastSuccessAt && c.postCount === 0)) return 'warning';
+  return 'ok';
+}
+
 function ConnectionRow({ connection: c, refresh, title, onChanged, onReauthorize }: { connection: Connection;
   refresh: RefreshState | undefined; title: string; onChanged: () => void;
   onReauthorize: (projectId: string, publish: boolean) => void }) {
@@ -88,17 +104,20 @@ function ConnectionRow({ connection: c, refresh, title, onChanged, onReauthorize
   const needsReauth = c.source === 'postforme' && (c.status === 'reauth_required' || c.status === 'quarantined');
   const canAddPublish = c.source === 'postforme' && c.status === 'connected' && !c.consentPublish;
   return (
-    <li className="space-y-2 p-3 text-sm">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <strong>{title}</strong>
-        <span style={{ color: 'var(--text-secondary)' }}>{SOURCE_LABEL[c.source]} · {c.postCount} 条作品</span>
+    <li className={styles.account}>
+      <span className={styles.tile} aria-hidden="true">{platformName(c.platform).slice(0, 1).toUpperCase()}</span>
+      <div className={styles.accountMain}>
+        <div className={styles.accountName}>
+          <strong>{title}</strong>
+          <span>{SOURCE_LABEL[c.source]} · {c.postCount} 条作品</span>
+        </div>
+        <p className={styles.accountState} data-tone={stateTone(c, refresh)}>
+          {stateLine(c, refresh)}{c.status === 'connected' && !c.consentAutoTrack ? ' · 没有打开每天自动更新' : ''}</p>
+        {doRefresh.data && <p role="status" className={styles.hint}>{doRefresh.data.inserted > 0 ? `读到 ${doRefresh.data.inserted} 条新作品。`
+          : doRefresh.data.outcome === 'partial' ? '已读取一部分，剩下的会在下次更新时接着读。' : '已刷新。'}</p>}
+        {error && <p role="alert" className={styles.error}>{dataErrorMessage(errorCode(error))}</p>}
       </div>
-      <p style={{ color: c.status === 'connected' && !refresh?.refreshError ? 'var(--text-secondary)' : 'var(--color-error)' }}>
-        {stateLine(c, refresh)}{c.status === 'connected' && !c.consentAutoTrack ? ' · 没有打开每天自动更新' : ''}</p>
-      {doRefresh.data && <p role="status">{doRefresh.data.inserted > 0 ? `读到 ${doRefresh.data.inserted} 条新作品。`
-        : doRefresh.data.outcome === 'partial' ? '已读取一部分，剩下的会在下次更新时接着读。' : '已刷新。'}</p>}
-      {error && <p role="alert" style={{ color: 'var(--color-error)' }}>{dataErrorMessage(errorCode(error))}</p>}
-      <div className="flex flex-wrap gap-2">
+      <div className={`${styles.rowActions} ${styles.accountActions}`}>
         {c.source === 'postforme' && c.status === 'connected' && (
           <Button size="sm" variant="outline" disabled={doRefresh.isPending}
             onClick={() => doRefresh.mutate({ connectionId: c.id }, { onSuccess: onChanged })}>
@@ -108,11 +127,11 @@ function ConnectionRow({ connection: c, refresh, title, onChanged, onReauthorize
         {canAddPublish && c.accountProjectId && <Button size="sm" variant="outline"
           onClick={() => onReauthorize(c.accountProjectId!, true)}>允许一键发布</Button>}
         {confirming ? <>
-          <span className="self-center">断开后不再读取这个账号，已读到的作品数据会一起删除。确定吗？</span>
+          <span className={styles.quietNote}>断开后不再读取这个账号，已读到的作品数据会一起删除。确定吗？</span>
           <Button size="sm" variant="destructive" disabled={disconnect.isPending}
             onClick={() => disconnect.mutate({ connectionId: c.id }, { onSuccess: onChanged })}>确定断开</Button>
           <Button size="sm" variant="outline" onClick={() => setConfirming(false)}>取消</Button>
-        </> : <Button size="sm" variant="ghost" onClick={() => setConfirming(true)}>断开并删除</Button>}
+        </> : <button type="button" className={`${styles.textButton} ${styles.pushRight}`} onClick={() => setConfirming(true)}>断开并删除</button>}
       </div>
     </li>
   );
@@ -125,16 +144,15 @@ function Benchmarks({ brands, benchmarks, onChanged }: { brands: Brand[]; benchm
   const remove = trpc.publishMonitor.disconnect.useMutation();
   const brandName = (id: string) => brands.find(b => b.businessId === id)?.name ?? '品牌';
   return (
-    <section className="space-y-2" aria-labelledby="pm-benchmarks">
-      <h3 id="pm-benchmarks" className="text-sm font-semibold">对标账号（Gold）</h3>
-      <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-        读取对标账号的公开数据，每次读取按实际费用扣积分。</p>
+    <section className={`${styles.card} ${styles.cardStack}`} aria-labelledby="pm-benchmarks">
+      <h3 id="pm-benchmarks" className={styles.subTitle}>对标账号（Gold）</h3>
+      <p className={styles.hint}>读取对标账号的公开数据，每次读取按实际费用扣积分。</p>
       {benchmarks.length > 0 && (
-        <ul className="divide-y rounded-lg border text-sm" style={{ borderColor: 'var(--border-primary)' }}>
+        <ul className={styles.accounts}>
           {benchmarks.map(b => (
-            <li key={b.id} className="flex flex-wrap items-center justify-between gap-2 p-2">
+            <li key={b.id} className={styles.benchmarkRow}>
               <span>{brandName(b.businessId)} · {platformName(b.platform)} · {b.displayHint ?? '对标账号'}
-                <small className="ml-2" style={{ color: 'var(--text-secondary)' }}>最后更新于 {formatTime(b.lastSuccessAt)}</small></span>
+                <small>最后更新于 {formatTime(b.lastSuccessAt)}</small></span>
               <Button size="sm" variant="ghost" disabled={remove.isPending}
                 onClick={() => remove.mutate({ connectionId: b.id }, { onSuccess: onChanged })}>移除</Button>
             </li>
@@ -142,9 +160,8 @@ function Benchmarks({ brands, benchmarks, onChanged }: { brands: Brand[]; benchm
         </ul>
       )}
       {brands.length > 0 && (
-        <div className="grid gap-2 sm:grid-cols-[auto_1fr_auto_auto]">
-          <select aria-label="对标挂在哪个品牌" className="rounded-md border px-2 py-1.5 text-sm"
-            style={{ borderColor: 'var(--border-primary)' }} value={businessId} onChange={e => setBusinessId(e.target.value)}>
+        <div className={styles.benchmarkForm}>
+          <select aria-label="对标挂在哪个品牌" className={styles.select} value={businessId} onChange={e => setBusinessId(e.target.value)}>
             {brands.map(b => <option key={b.businessId} value={b.businessId}>{b.name}</option>)}
           </select>
           <Input aria-label="对标账号主页链接" placeholder="对标账号的主页链接" value={link} maxLength={2048}
@@ -155,9 +172,8 @@ function Benchmarks({ brands, benchmarks, onChanged }: { brands: Brand[]; benchm
               { onSuccess: () => { setLink(''); setHint(''); onChanged(); } })}>添加</Button>
         </div>
       )}
-      {(add.error ?? remove.error) && <p role="alert" className="text-sm" style={{ color: 'var(--color-error)' }}>
+      {(add.error ?? remove.error) && <p role="alert" className={styles.error}>
         {dataErrorMessage(errorCode(add.error ?? remove.error))}</p>}
     </section>
   );
 }
-

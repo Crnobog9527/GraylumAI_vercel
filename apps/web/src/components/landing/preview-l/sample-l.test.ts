@@ -33,8 +33,6 @@ import { countOf, OverviewL } from './OverviewL';
 import { numberSources } from '@/components/research/benchmark-table-model';
 import { L_BENCHMARK_ROWS } from './RealPartsL';
 import { scenarioAt } from './ScenariosL';
-import { PositioningPictureL } from './PositioningPictureL';
-import { linePhases, momentAt } from '@/lib/landing/step-one-timeline';
 import { SampleL } from './SampleL';
 
 const ALL_ON = Object.fromEntries(Object.keys(LANDING_FEATURES).map(key => [key, true])) as LandingFlags;
@@ -70,11 +68,17 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
     expect(html).not.toContain('data-plan=');
   });
 
-  it('keeps only the first screen\'s text, centred, with no picture beside it (round four)', () => {
+  // Owner 2026-11-11 (MASTER_PLAN 2.1, #1867): the first screen carries the product's conversation window again, under the
+  // text, in place of round four's text-only first screen. Round four's three-step picture stays gone.
+  it('keeps the first screen\'s text first and centred, with the product window under it and no three-step picture', () => {
     const html = render();
     const hero = html.slice(html.indexOf('id="hero-title"'), html.indexOf('id="voice-title"'));
     for (const text of [L_HERO_FLOW.youSay.text, L_HERO_FLOW.youGet.text]) expect(hero).not.toContain(text);
     expect(hero).not.toContain('<figure');
+    // `hero` starts inside the title; the button's note closes the text block, and the window comes after it, once.
+    expect(hero.indexOf(escape(data.heroNote))).toBeGreaterThan(0);
+    expect(hero.indexOf(escape(data.heroNote))).toBeLessThan(hero.indexOf('data-region="首屏产品窗口"'));
+    expect(hero.split('data-region="首屏产品窗口"')).toHaveLength(2);
   });
 
   it('shows every voice, unfolded, each with its region and never a guessed country', () => {
@@ -104,65 +108,37 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
     }
   });
 
-  it('plays step one as sample J\'s whole flow on the real product\'s parts, no lead-in before its notes', () => {
+  it('shows step one as four modules on the real product\'s parts, a name and one line each (Owner 2026-11-11)', () => {
     const html = render();
     const steps = html.slice(html.indexOf('id="steps-title"'), html.indexOf('id="jury-title"'));
     // The region's own title first, then 第一步 under it (round five).
     expect(steps.indexOf(HOW.title)).toBeGreaterThanOrEqual(0);
     expect(steps.indexOf(HOW.title)).toBeLessThan(steps.indexOf(L_STEPS.one.title));
-    for (const real of ['我的定位分析', '定位清单', 'AI 自媒体陪跑教练 · 主动引导 · 了解你', 'aria-label="添加资料"', 'aria-label="发送"']) {
-      expect(steps).toContain(real);
-    }
-    // It opens with the coach, never with a message of the person's.
-    expect(steps.indexOf('data-message-role="assistant"')).toBeLessThan(steps.indexOf('data-message-role="user"'));
+    expect(steps.match(/data-region="流程模块"/g)).toHaveLength(L_STEPS.one.stages.length);
     for (const stage of L_STEPS.one.stages) { expect(steps).toContain(stage.label); expect(steps).toContain(escape(stage.note)); }
-    expect(steps).not.toContain('为什么不是正确的废话');
-    // The research stage shows the product's own search record and benchmark table; the report its dialog, written.
-    for (const real of ['aria-label="搜索记录"', '对标账号 A', '对标账号 G', '完整运营策略报告']) expect(steps).toContain(real);
-    expect(steps).not.toContain('AB 测试');
-  });
-
-  it('plays step one in time: typed out, the question folded then docked, the option picked on the card and sent', () => {
-    // Round seven (T2, T8): the clock decides what shows. Phases of a coach line: think, stream, (card), hold. Round
-    // eleven (X1): the only card is the direction question, answered by picking its recommended option on the card.
-    const lines = L_POSITIONING_MOMENTS[1].lines;
-    const picture = (ms: number | null) => renderToStaticMarkup(withTrpc(createElement(PositioningPictureL,
-      { moment: 1, at: ms === null ? null : momentAt(lines, ms) })));
-    const [[, think], [, stream], [, card], [, hold]] = linePhases(lines[0]);
-    // At the very start the coach is about to write: nothing in the conversation yet.
-    const writing = picture(0);
-    expect(writing).not.toContain('data-question-card');
-    // Half way through writing, part of the question shows, not all of it, and no card yet.
-    const half = picture(think + stream / 2);
-    expect(half).toContain('前面你说了两件事');
-    expect(half).not.toContain('或者说说你的想法');
-    expect(half).not.toContain('data-question-card');
-    // Written: first folded into one line while it is read, then docked on the message box.
-    expect(picture(think + stream + card + hold * 0.1)).toContain('data-question-card="folded"');
-    const open = picture(think + stream + card + hold * 0.8);
-    expect(open).toContain('data-question-card="open"');
-    expect(open.indexOf('data-question-card="open"')).toBeGreaterThan(open.indexOf('role="log"'));
-    // The answer is not typed: the recommended option is highlighted, then pressed, on the docked card.
-    expect(lines[1]).toMatchObject({ role: 'user', pick: 0, text: L_DIRECTION_CARD.options[0] });
-    const [[phase, pick]] = linePhases(lines[1]);
-    expect(phase).toBe('pick');
-    const start = think + stream + card + hold;
-    expect(picture(start + pick * 0.1)).not.toContain('data-pick=');
-    const over = picture(start + pick * 0.5);
-    expect(over).toContain('data-pick="0" data-state="over"');
-    expect(over).not.toContain('data-message-role="user"');
-    const pressed = picture(start + pick * 0.9);
-    expect(pressed).toContain('data-pick="0" data-state="pressed"');
-    expect(pressed).toContain('data-question-card="open"');
-    expect(pressed).not.toContain('data-message-role="user"');
-    // Sent: the card closes and the option's own words are the person's message; the message box stays empty.
-    const sent = picture(start + pick + 10);
-    expect(sent).not.toContain('data-question-card="open"');
-    expect(sent).toContain('data-message-role="user"');
-    expect(sent).toContain(escape(L_DIRECTION_CARD.options[0]));
-    const answered = picture(null);
-    expect(answered).toContain('data-message-role="user"');
-    expect(answered).not.toContain('data-question-card="open"');
+    // The server's HTML is every picture finished, on the product's own parts: the mentor's bubbles and the checklist,
+    // the benchmark table, the step summary with its confirm area, the report above the workbench's own button.
+    for (const real of ['AI 自媒体陪跑教练 · 了解你', 'data-message-role="user"', 'aria-label="定位清单"', '对标账号 A', '对标账号 G',
+      'aria-label="本步小结卡"', '完整运营策略报告', '生成完整报告']) {
+      expect(steps, real).toContain(real);
+    }
+    // Nothing holds the scroll any more: no held stage, no progress bar, no "看过了，跳过这段" in step one.
+    for (const gone of ['role="progressbar"', L_STEPS.skip, 'position:sticky', '为什么不是正确的废话', 'AB 测试']) expect(steps).not.toContain(gone);
+    // The report module ends its line on "查看样例报告" (Owner 2026-11-11), a link to the sample reports on this page,
+    // outside the picture (which is inert), once; the address it names exists; without the samples there is no link.
+    expect(steps.match(/查看样例报告/g)).toHaveLength(1);
+    const link = steps.indexOf(`<a href="#${L_SAMPLES_REDO.anchor}"`);
+    const report = steps.indexOf(escape(L_STEPS.one.stages[3].note));
+    expect(link).toBeGreaterThan(report);
+    expect(link).toBeLessThan(steps.indexOf(' inert=""', report));
+    expect(html).toContain(`<section id="${L_SAMPLES_REDO.anchor}" aria-labelledby="samples-title"`);
+    for (const [, id] of html.matchAll(/href="#([^"]+)"/g)) expect(html, id).toContain(`id="${id}"`);
+    const without = render(ALL_ON, false);
+    expect(without).not.toContain(L_STEPS.samplesLink);
+    expect(without).not.toContain(`href="#${L_SAMPLES_REDO.anchor}"`);
+    // The pictures are examples: inert, and none of their titles is a heading of the page.
+    expect(steps).not.toMatch(/<h[12][^>]*>(?:我的定位分析|完整运营策略报告)/);
+    expect(steps.match(/ inert=""/g)?.length).toBe(L_STEPS.one.stages.length);
   });
 
   it('shows a question card only where the person answers by picking it: the next message is one of its options (round eleven, X1)', () => {
@@ -181,9 +157,7 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
     const know = L_POSITIONING_MOMENTS[0].lines;
     expect(know.every(line => line.card === undefined || line.card === 'confirm')).toBe(true);
     const typed = know.filter(line => line.role === 'user');
-    expect(typed.every(line => line.pick === undefined && linePhases(line)[0][0] === 'compose')).toBe(true);
-    const page = renderToStaticMarkup(withTrpc(createElement(PositioningPictureL, { moment: 0, at: null })));
-    expect(page).not.toContain('data-question-card');
+    expect(typed.every(line => line.pick === undefined)).toBe(true);
   });
 
   it('orders step two as the creation Skill does: topic, title and cover, material and voice, script (round nine, V2)', () => {
@@ -199,13 +173,14 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
     const on = render();
     for (const step of [L_LATER.two, L_LATER.three]) {
       expect(on).toContain(step.title);
-      for (const stage of step.stages) expect(on).toContain(`${stage.label}</button>`);
+      // Each stage is a module: its name, its one line (Owner 2026-11-11), no tab to press.
+      for (const stage of step.stages) { expect(on).toContain(stage.label); expect(on).toContain(escape(stage.note)); }
     }
     // Which stages show the product's real components and which the plan: every stage says so.
     for (const stage of [...L_LATER.two.stages, ...L_LATER.three.stages]) expect(['real', 'planned']).toContain(stage.source);
     // The full launched version: no picture says a feature is not there yet.
     for (const word of ['待接入', '即将上线', '未开放', '敬请期待']) expect(on).not.toContain(word);
-    expect(renderToStaticMarkup(withTrpc(createElement(PositioningPictureL, { moment: 0, at: null })))).not.toContain('待接入');
+    expect(on).not.toContain('role="tablist" aria-label="这一步的几个环节"');
     for (const part of L_JURY.title.split(/(?<=，)/)) expect(on).toContain(part);
     expect(on).toContain(`href="${L_JURY.href}"`);
     for (const word of ['世界最强', '没有分歧', '再辩一轮', '最多两轮']) expect(on).not.toContain(word);
@@ -387,9 +362,6 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
     // What the first summary lists, the person said before it.
     const said = know.lines.filter(line => line.role === 'user').map(line => line.text).join('');
     for (const fact of ['一年后', 'TikTok', 'Instagram', '长视频', '二十多道', '常问', '不知道该找谁', '支架']) expect(said).toContain(fact);
-    const picture = renderToStaticMarkup(withTrpc(createElement(PositioningPictureL, { moment: 0, at: null })));
-    expect(picture).toContain(escape(L_SKILL_OPENING));
-    expect(picture).not.toContain('<h1');
   });
 
   it('shows only figures the connected accounts and public data really give, every cell filled (round twelve, D1–D4)', () => {

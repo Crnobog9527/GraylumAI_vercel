@@ -87,23 +87,47 @@ describe('PAY-STRIPE-MP card checkout adapter', () => {
     expect(mocks.build).toHaveBeenCalledWith(expect.objectContaining({ testClockCustomerId: customerId,
       card: expect.objectContaining({ testClockCustomerId: customerId, managedPayments: method === 'card' }) }));
   });
-  it.each(['card', 'card_cn'] as const)('preserves the first-checkout alignment guard for %s', async method => {
-    for (const offset of [-301, 301, 31 * 86400]) {
+  // The guard refuses a clock more than 300 seconds from now (stripeMethodCheckout.ts). With the real clock, frozen_time
+  // (whole seconds) and the milliseconds the run takes moved a 301-second fixture to 300 or below now and then (CI flake on
+  // #1856, 2026-11-11). Date is pinned to a whole second here, so the line is tested exactly: 300 accepted, 301 refused.
+  const pinnedNow = Date.parse('2026-11-11T12:00:00.000Z');
+  const clockCheckout = (method: 'card' | 'card_cn', offset: number) => {
     allowTestClockStaging();
     const f = fixture(method);
     const customerId = 'cus_clockcustomer123';
     const retrieve = vi.fn().mockResolvedValue({ id: customerId, object: 'customer', livemode: false,
       metadata: { graylum_user_id: id }, test_clock: 'clock_fixture' });
     const clock = { id: 'clock_fixture', object: 'test_helpers.test_clock', livemode: false, status: 'ready',
-      frozen_time: Math.floor(Date.now() / 1000) + offset };
+      frozen_time: pinnedNow / 1000 + offset };
     const checkoutInput = { ...f.input, stripeTestClockCustomerId: customerId,
       stripe: { customers: { retrieve }, testHelpers: { testClocks: { retrieve: vi.fn().mockResolvedValue(clock) } } } as unknown as Stripe };
-    await expect(createStripeCardCheckout(checkoutInput)).rejects.toThrow('PAY_WAFFO_TEST_CLOCK_NOT_ALIGNED');
-    expect(mocks.prepare).not.toHaveBeenCalled();
-    expect(f.rpc).not.toHaveBeenCalled();
-    expect(mocks.dispatch).not.toHaveBeenCalled();
+    f.rpc.mockResolvedValue({ data: { dispatch: true, request: { providerRequest: { expires_at: 9999999999,
+      discounts: [{ coupon: 'coupon_first' }], customer: customerId } } }, error: null });
+    return { f, checkoutInput };
+  };
+  const withPinnedDate = async (run: () => Promise<void>) => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(pinnedNow);
+    try { await run(); } finally { vi.useRealTimers(); }
+  };
+  it.each(['card', 'card_cn'] as const)('accepts a %s test clock exactly 300 seconds away on either side', method => withPinnedDate(async () => {
+    for (const offset of [-300, 300, 0]) {
+      vi.clearAllMocks();
+      const { checkoutInput } = clockCheckout(method, offset);
+      await expect(createStripeCardCheckout(checkoutInput)).resolves.toMatchObject({ state: 'open' });
+      expect(mocks.prepare).toHaveBeenCalledTimes(1);
     }
-  });
+  }));
+  it.each(['card', 'card_cn'] as const)('preserves the first-checkout alignment guard for %s', method => withPinnedDate(async () => {
+    for (const offset of [-301, 301, 31 * 86400]) {
+      vi.clearAllMocks();
+      const { f, checkoutInput } = clockCheckout(method, offset);
+      await expect(createStripeCardCheckout(checkoutInput)).rejects.toThrow('PAY_WAFFO_TEST_CLOCK_NOT_ALIGNED');
+      expect(mocks.prepare).not.toHaveBeenCalled();
+      expect(f.rpc).not.toHaveBeenCalled();
+      expect(mocks.dispatch).not.toHaveBeenCalled();
+    }
+  }));
   it.each(['card', 'card_cn'] as const)('refuses another account’s %s test customer before reserving an order', async method => {
     allowTestClockStaging();
     const f = fixture(method);

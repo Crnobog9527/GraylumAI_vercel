@@ -6,11 +6,17 @@
 // (preload.cjs) and the "Compiling <route>" lines of the server, and ties them to the test that was running (a test starts with /__sim/reset).
 // It measures and reports; it changes nothing about how the tests run.
 
+// One log line per refusal, under a name per limiter (redisRateLimiter.ts, and the web proxy's lib/rateLimit.ts): the per-minute limiter
+// says `minute_rate_limit_unavailable_denying_request`, the supplier one `vendor_rate_limit_unavailable_denying_request`, the others
+// `…rate_limit_backend_unavailable_denying_request`. Counting only the last spelling left the per-minute refusals out, which are the ones a
+// stalled turn start meets (2026-11-11: a run whose journey failed on them reported none of them). Any name of this shape is counted.
+const DENIAL = /(\w*rate_limit\w*_denying_request)/;
+
 /** @param {() => number[]} resetTimes epoch ms of every /__sim/reset so far: the first is the warm-up, the n-th the start of test n */
 export function createStallWatch(resetTimes) {
   const pending = new Map();
   const loop = [], gc = [], compiles = [];
-  let denials = 0;
+  const denials = [];
   const read = (line, receivedAt) => {
     const stall = /\[sim-preload\] loop_stall_ms=(\d+) cpu_ms=(\d+) at=(\d+)/.exec(line);
     if (stall) loop.push({ ms: Number(stall[1]), cpu: Number(stall[2]), at: Number(stall[3]) });
@@ -18,9 +24,11 @@ export function createStallWatch(resetTimes) {
     if (pause) gc.push({ ms: Number(pause[1]), at: Number(pause[2]) });
     const compile = /Compiling (\S+)/.exec(line);
     if (compile) compiles.push({ route: compile[1], at: receivedAt });
-    if (line.includes('rate_limit_backend_unavailable_denying_request')) denials += 1;
+    const denial = DENIAL.exec(line);
+    if (denial) denials.push({ name: denial[1], at: receivedAt });
   };
   const testAt = at => resetTimes().filter(time => time <= at).length;
+  const tally = keys => { const counts = {}; for (const key of keys) counts[key] = (counts[key] ?? 0) + 1; return counts; };
   return {
     feed(text, stream = 'out') {
       const lines = ((pending.get(stream) ?? '') + text).split('\n');
@@ -42,7 +50,10 @@ export function createStallWatch(resetTimes) {
           busy: loop.filter(item => item.cpu >= 0.7 * item.ms).length, idle: loop.filter(item => item.cpu < 0.7 * item.ms).length,
           longest: [...loop].sort((a, b) => b.ms - a.ms).slice(0, 5).map(item => ({ test: testAt(item.at), ms: item.ms, cpuMs: item.cpu })) },
         gcPauses: { count: gc.length, maxMs: Math.max(0, ...gc.map(item => item.ms)) },
-        appRateLimitDenials: denials,
+        // Every refusal, the web proxy's included (run.mjs also counts those by their kind); by log name, and by the test it fell in.
+        appRateLimitDenials: denials.length,
+        rateLimitDenialsByName: tally(denials.map(item => item.name)),
+        rateLimitDenialsByTest: tally(denials.map(item => testAt(item.at))),
         stallsByTest: byTest,
         // The first test is the warm-up: whatever compiles after it was not warmed.
         compiledAfterWarmup: compiles.map(item => ({ test: testAt(item.at), route: item.route })).filter(item => item.test >= 2),

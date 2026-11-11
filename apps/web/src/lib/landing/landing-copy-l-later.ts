@@ -13,23 +13,22 @@ export type LaterStage = {
 };
 
 export const L_LATER = {
-  /** NEW: the stages' tab list label, and the pause control. */
-  label: '这一步的几个环节',
   two: {
     title: '第二步：每周带你做内容',
     // Round nine (V2, Owner 2026-10-18): the creation Skill's order — topic, then title and cover, then the material and
     // the person's voice, then the script and storyboard.
-    lede: '定位定下来以后，每周在同一个对话里：\n先选题，再定标题和封面，然后找资料、按你的写作风格写稿、出分镜。',
+    // Owner 2026-11-11 ("文字也太多了"): the lede and every stage's note cut to one line, out of the words they had.
+    lede: '定位定下来以后，每周在同一个对话里做内容。',
     stages: [
       { id: 'topics', label: '选题', needs: ['content'], source: 'real',
-        note: '按你的定位、上周的数据和对标账号的近况，挑出这周最值得拍的几条，每条写清理由。' },
+        note: '按你的定位和上周的数据，挑出这周最值得拍的几条。' },
       { id: 'cover', label: '标题和封面', needs: ['content'], source: 'real',
-        note: '围绕选好的题，出 10 个从不同角度吸引人的标题和 10 种封面做法，教练标出推荐和理由；选定的写到右边。' },
+        note: '出 10 个标题和 10 种封面做法，教练标出推荐和理由。' },
       // Round ten (W2, Owner 2026-10-18: "你就写【资料库和写作风格】").
       { id: 'material', label: '资料库和写作风格', needs: ['content', 'library', 'voice'], source: 'planned',
-        note: '先在资料库里找这个选题的资料，再加载你的写作风格，稿子按你平时说话的样子写。' },
+        note: '先在资料库里找资料，再按你平时说话的样子写稿。' },
       { id: 'script', label: '口播稿和分镜', needs: ['content'], source: 'real',
-        note: '稿子出现在对话里的"建议稿"，右边是正文稿件和分镜；你改哪句，它就接着改哪句。' },
+        note: '你改哪句，它就接着改哪句。' },
     ] as readonly LaterStage[],
   },
   three: {
@@ -37,11 +36,11 @@ export const L_LATER = {
     lede: '拍完以后，发出去、盯数据、每周复盘；复盘的结论，就是下一轮的选题。',
     stages: [
       { id: 'publish', label: '一键发到多个平台', needs: ['publish'], source: 'planned',
-        note: '连接你的账号后，一条视频一键分发到 TikTok、YouTube、Instagram 等 9 个主流平台。（暂不支持中国大陆的社交媒体平台）' },
+        note: '一条视频一键分发到 9 个主流平台。（暂不支持中国大陆的社交媒体平台）' },
       { id: 'monitor', label: '替你盯数据', needs: ['publish'], source: 'planned',
-        note: '一键获取你各个平台账号的数据，告别人工手动收集数据变化。' },
+        note: '一键获取你各个平台账号的数据。' },
       { id: 'review', label: '每周复盘', needs: ['publish'], source: 'planned',
-        note: '每周把这周的作品和你平时的水平比，说清哪条有效、为什么；给出下周三个能直接变成选题的建议。' },
+        note: '说清哪条有效、为什么，给出下周三个能直接变成选题的建议。' },
     ] as readonly LaterStage[],
   },
 } as const;

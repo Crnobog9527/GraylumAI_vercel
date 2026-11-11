@@ -50,8 +50,21 @@ const nextConfig: NextConfig = {
   // Development server only, and only for the simulated-model browser tests (scripts/e2e-sim/run.mjs sets the switch): `next dev` drops a page it
   // compiled once the page has been idle for a minute (and keeps only the last few), so a route warmed up at the start was compiled again in the
   // middle of a later journey, stalling the server's event loop for seconds (first CI run with stall measurements, #1794). With the switch, the
-  // pages compiled in a run stay compiled. Not set anywhere else; a build or a deployed app never reads this option.
-  ...(process.env.SIM_KEEP_COMPILED === "1" ? { onDemandEntries: { maxInactiveAge: 6 * 60 * 60 * 1000, pagesBufferLength: 200 } } : {}),
+  // pages compiled in a run stay compiled.
+  // The same switch stops the development compiler from writing its cache to disk. Webpack writes everything it compiled to .next/cache once
+  // the compiler has been idle (a minute after the last compile; a second after a large one), and reads it back afterwards: over a gigabyte
+  // here, serialised on the server's own thread. The event loop stood still for 5 to 14 seconds each time, in whichever journey was running a
+  // minute after the warm-up, and the rate limiter's fixed deadline refused that journey's request (2026-11-11: the first journey of
+  // 02-failures, now and then). A test run starts without that cache and throws it away, so nothing ever read what was written; what is
+  // compiled stays in memory (Next's own memory cache), so nothing compiles twice. A deployed app has no compiler at all.
+  // Not set anywhere else; a build or a deployed app never reads these options.
+  ...(process.env.SIM_KEEP_COMPILED === "1" ? {
+    onDemandEntries: { maxInactiveAge: 6 * 60 * 60 * 1000, pagesBufferLength: 200 },
+    webpack: (config: { cache?: unknown }, { dev }: { dev: boolean }) => {
+      if (dev) config.cache = false;
+      return config;
+    },
+  } : {}),
   // Single host (E1): old addresses and, once switched on, the old hosts. The rules and why are in
   // src/lib/single-host-redirects; the host rules come first so an old host goes to www in one step.
   async redirects() {
