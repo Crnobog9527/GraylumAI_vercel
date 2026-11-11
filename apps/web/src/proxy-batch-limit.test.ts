@@ -65,6 +65,15 @@ describe('tRPC batch size (ARCH-FIX A1)', () => {
     expect(checkRateLimit.mock.calls.map(c => (c as unknown[])[1])).toEqual(['ip', 'ip_session', 'ip_session', 'ip']);
   });
 
+  it('puts SMS code requests under the per-IP limit (deep review 11-11 item 7)', async () => {
+    const send = () => new NextRequest('https://auth-staging.graylum.com/api/auth/phone/send',
+      { method: 'POST', headers: { 'x-forwarded-for': '203.0.113.9' } });
+    expect((await proxy(send())).status).not.toBe(429);
+    checkRateLimit.mockResolvedValueOnce({ success: false, limit: 60, remaining: 0, reset: 0, retryAfter: 30 } as never);
+    expect((await proxy(send())).status).toBe(429);
+    expect(checkRateLimit).toHaveBeenCalledWith('203.0.113.9', 'ip');
+  });
+
   it('an image suffix on the last call does not lift the batch cap or the IP limit (deep review 11-11 item 8)', async () => {
     const calls = Array.from({ length: 300 }, () => 'settings.getSystemSettings').join(',');
     const refused = await proxy(new NextRequest(`https://auth-staging.graylum.com/api/trpc/${calls},x.png?batch=1`));

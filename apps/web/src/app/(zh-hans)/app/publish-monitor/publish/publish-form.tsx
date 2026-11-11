@@ -1,5 +1,5 @@
 'use client';
-
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
@@ -15,6 +15,7 @@ import { clearAttempt, loadAttempt, saveAttempt, sameFiles, type StoredAttempt }
 import { mediaDigest, MediaUploadError, uploadPublishFiles } from '@/lib/publish-monitor/upload-media';
 import { trpc } from '@/trpc/client';
 import { MediaPicker, type PickedMedia } from './media-picker';
+import styles from './publish.module.css';
 
 /**
  * PUBLISH-MONITOR PR-5 (plan §2.1, §6): pick targets, files, cover and caption; nothing is uploaded until the user
@@ -63,6 +64,8 @@ export function PublishForm({ businessId, workItemId, contextKey, targets, initi
   const canPublish = targetCount > 0 && hold !== null && caption.trim().length > 0 && !tooLongForServer && mediaIssue === null
     && !busy;
   const changed = <T,>(set: (value: T) => void) => (value: T) => { if (!locked) set(value); };
+  // Shown with the accounts that can publish now first; the order decides nothing else.
+  const listed = [...targets].sort((a, b) => Number(b.ready) - Number(a.ready));
   // In recovery the covers are the saved ones (they are part of the request), shown on the files picked again.
   const pick = (items: PickedMedia[]) => setMedia(recovered
     ? items.map((item, i) => ({ ...item, coverMs: recovered.media[i]?.coverMs ?? null })) : items);
@@ -142,64 +145,82 @@ export function PublishForm({ businessId, workItemId, contextKey, targets, initi
   }
 
   return (
-    <div className="space-y-6">
-      <section aria-labelledby="targets" className="space-y-2">
-        <h2 id="targets" className="font-medium">发到哪些账号</h2>
-        {targets.length === 0 ? (
-          <p className="text-sm text-[var(--text-secondary)]">
-            这个品牌还没有可以一键发布的账号：先在账号连接页连接海外平台账号；只显示已经开放一键发布的平台。</p>
-        ) : (
-          <ul className="space-y-2">
-            {targets.map(target => (
-              <li key={target.id} className="flex flex-wrap items-center gap-2 text-sm">
-                <label className="flex items-center gap-2">
-                  <Checkbox checked={selected.includes(target.id)} disabled={!target.ready || busy || locked}
-                    onCheckedChange={value => changed(setSelected)(value === true
-                      // One account per platform: picking one replaces another account of the same platform.
-                      ? [...selected.filter(id => targets.find(t => t.id === id)?.platform !== target.platform), target.id]
-                      : selected.filter(id => id !== target.id))} />
-                  {platformName(target.platform)}{target.displayHint ? ` · ${target.displayHint}` : ''}
-                </label>
-                {!target.ready && (authorizeHere(target.platform) && target.accountProjectId
-                  ? <Button size="sm" variant="outline" disabled={busy} onClick={() => authorize(target)}>授权发布</Button>
-                  : <span className="text-[var(--text-secondary)]">还没授权发布：到<Link className="underline"
-                    href="/app/publish-monitor">数据复盘</Link>的“我的账号”里，在这个账号旁点“允许一键发布”。</span>)}
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+    <div className={styles.layout}>
+      <div className={styles.steps}>
+        <section aria-labelledby="targets" className={styles.card}>
+          <h2 id="targets"><span className={styles.stepNumber} aria-hidden>1</span>发到哪些账号</h2>
+          {targets.length === 0 ? (
+            <div className={styles.steps}>
+              <p className={styles.hint}>
+                这个品牌还没有可以一键发布的账号：先在账号连接页连接海外平台账号；只显示已经开放一键发布的平台。</p>
+              <div className={styles.rowActions}><Link className={styles.linkQuiet} href="/app/publish-monitor">去连接账号</Link></div>
+            </div>
+          ) : (
+            <ul className={styles.accounts}>
+              {listed.map(target => (
+                <li key={target.id} className={styles.account} data-selected={selected.includes(target.id)} data-ready={target.ready}>
+                  <span className={styles.tile} aria-hidden>{platformName(target.platform).slice(0, 1).toUpperCase()}</span>
+                  <label>
+                    <Checkbox checked={selected.includes(target.id)} disabled={!target.ready || busy || locked}
+                      onCheckedChange={value => changed(setSelected)(value === true
+                        // One account per platform: picking one replaces another account of the same platform.
+                        ? [...selected.filter(id => targets.find(t => t.id === id)?.platform !== target.platform), target.id]
+                        : selected.filter(id => id !== target.id))} />
+                    {platformName(target.platform)}{target.displayHint ? ` · ${target.displayHint}` : ''}
+                  </label>
+                  {!target.ready && (authorizeHere(target.platform) && target.accountProjectId
+                    ? <Button size="sm" variant="outline" disabled={busy} onClick={() => authorize(target)}>授权发布</Button>
+                    : <span className={styles.accountNote}>还没授权发布：到<Link
+                      href="/app/publish-monitor">数据复盘</Link>的“我的账号”里，在这个账号旁点“允许一键发布”。</span>)}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
 
-      <section aria-labelledby="media" className="space-y-2">
-        <h2 id="media" className="font-medium">图片或视频</h2>
-        <MediaPicker items={media} onChange={pick} disabled={busy} lockCover={locked} />
-      </section>
+        <section aria-labelledby="media" className={styles.card}>
+          <h2 id="media"><span className={styles.stepNumber} aria-hidden>2</span>图片或视频<span className={styles.tag}>可不选</span></h2>
+          <MediaPicker items={media} onChange={pick} disabled={busy} lockCover={locked} />
+        </section>
 
-      <section aria-labelledby="caption" className="space-y-2">
-        <h2 id="caption" className="font-medium">文案</h2>
-        <Textarea aria-labelledby="caption" value={caption} disabled={busy || locked} rows={8} maxLength={MAX_CAPTION}
-          onChange={event => changed(setCaption)(event.target.value)} />
-        {tooLongForServer && <p role="alert" className="text-sm text-[var(--color-error)]">
-          文案超过 {MAX_CAPTION} 字，请先删减再发布。</p>}
-        {mediaIssue && chosen.length > 0 && <p role="alert" className="text-sm text-[var(--color-error)]">{mediaIssue}</p>}
-        {tooLong.length > 0 && <p className="text-sm text-[var(--text-secondary)]">
-          文案超过了 {tooLong.map(platformName).join('、')} 的字数上限，平台可能拒绝或截断。</p>}
-      </section>
+        <section aria-labelledby="caption" className={styles.card}>
+          <h2 id="caption"><span className={styles.stepNumber} aria-hidden>3</span>文案</h2>
+          <Textarea className={styles.caption} aria-labelledby="caption" value={caption} disabled={busy || locked} rows={8} maxLength={MAX_CAPTION}
+            onChange={event => changed(setCaption)(event.target.value)} />
+          <div className={styles.count} data-over={tooLongForServer}>
+            <span>{tooLong.length > 0 ? `文案超过了 ${tooLong.map(platformName).join('、')} 的字数上限，平台可能拒绝或截断。` : ''}</span>
+            <span>{caption.length} / {MAX_CAPTION} 字</span>
+          </div>
+          {(tooLongForServer || (mediaIssue && chosen.length > 0)) && (
+            <div className={styles.stack}>
+              {tooLongForServer && <p role="alert" className={styles.error}>文案超过 {MAX_CAPTION} 字，请先删减再发布。</p>}
+              {mediaIssue && chosen.length > 0 && <p role="alert" className={styles.error}>{mediaIssue}</p>}
+            </div>
+          )}
+        </section>
 
-      {locked && <div role="status" className="space-y-2 rounded border border-[var(--border-default)] p-3 text-sm">
-        <p>上一次提交还没有确认结果，可能已经发出。为了不重复发布和扣费，现在不能改账号和文案：请{recovered
-          ? (recovered.media.length > 0 ? '按原来的顺序选择同样的文件，' : '')+'再点一次发布' : '再点一次发布'}，系统会认出是同一次。</p>
-        <Button size="sm" variant="outline" disabled={busy} onClick={discardEarlier}>
-          放弃上一次，重新开始（请先去平台确认是否已发出）</Button>
-      </div>}
-      {error && <p role="alert" className="text-sm text-[var(--color-error)]">{error}</p>}
-      <div className="flex items-center gap-3">
-        <Button disabled={!canPublish} onClick={() => { setAccepted(false); setConfirming(true); }}>
+        {locked && <div role="status" className={styles.note}>
+          <p>上一次提交还没有确认结果，可能已经发出。为了不重复发布和扣费，现在不能改账号和文案：请{recovered
+            ? (recovered.media.length > 0 ? '按原来的顺序选择同样的文件，' : '')+'再点一次发布' : '再点一次发布'}，系统会认出是同一次。</p>
+          <Button size="sm" variant="outline" disabled={busy} onClick={discardEarlier}>
+            放弃上一次，重新开始（请先去平台确认是否已发出）</Button>
+        </div>}
+        {error && <p role="alert" className={styles.error}>{error}</p>}
+      </div>
+
+      <aside className={styles.summary} aria-labelledby="summary">
+        <h2 id="summary">发布摘要</h2>
+        <dl>
+          <div><dt>账号</dt><dd>{recovered ? `${targetCount} 个账号（和上一次相同）`
+            : chosen.length > 0 ? chosen.map(t => platformName(t.platform)).join('、') : '还没有选'}</dd></div>
+          <div><dt>素材</dt><dd>{media.length > 0 ? `${media.length} 个文件` : '不带图片或视频'}</dd></div>
+        </dl>
+        {hold !== null && targetCount > 0 && <p className={styles.hold}>
+          最多 {hold} 积分，只按发布成功的平台扣，失败不扣</p>}
+        <Button className={styles.primary} disabled={!canPublish} onClick={() => { setAccepted(false); setConfirming(true); }}>
           {phase === 'uploading' ? '正在上传素材……' : phase === 'submitting' ? '正在提交……'
             : recovered ? '再试一次（同一次发布，不会重复发）' : '发布'}</Button>
-        {hold !== null && targetCount > 0 && <span className="text-sm text-[var(--text-secondary)]">
-          最多 {hold} 积分，只按发布成功的平台扣，失败不扣</span>}
-      </div>
+      </aside>
 
       <Dialog open={confirming} onOpenChange={setConfirming}>
         <DialogContent>

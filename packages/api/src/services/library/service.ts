@@ -4,7 +4,7 @@ import { TRPCError } from '@trpc/server';
 import type { z } from 'zod';
 import { checkRateLimitAsync } from '../../middleware/securityChecks';
 import { beginInput, formatFor, formats, textSegments, verifyHeader, type Format } from './content';
-import { cleanupLibrary } from './cleanup';
+import { sweepLibrary } from './cleanup';
 import { pdfUpload } from './pdfUpload';
 import { wordUpload } from './wordUpload';
 import { libraryRecognition } from './recognition';
@@ -30,11 +30,11 @@ export function libraryService(client: SupabaseClient, actorId: string, storage:
   const read = (documentId: string, ready = true) => libraryRpc<Document>(client, 'library_document_read', {
     a: actorId, did: documentId, require_ready: ready,
   });
-  const sweep = () => cleanupLibrary(client, { actorId, limit: 4, budgetMs: 5000, storage });
+  const sweep = () => sweepLibrary(client, { actorId, limit: 4, budgetMs: 5000, storage });
   const remove = async (documentId: string, unfinishedOnly = false) => {
     const result = await libraryRpc<{ status: string }>(client, 'library_delete', { a: actorId, did: documentId, unfinished_only: unfinishedOnly });
     if (result.status === 'deleting') scheduleErasureManifestSync(client);
-    await cleanupLibrary(client, { actorId, documentId, limit: 1, storage });
+    await sweepLibrary(client, { actorId, documentId, limit: 1, storage });
     return result;
   };
   return {

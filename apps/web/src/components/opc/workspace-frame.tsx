@@ -15,7 +15,7 @@ import { ContentErasureDialog } from './content-erasure-dialog';
 import { ConversationDeleteDialog } from './conversation-delete-dialog';
 import { ConversationRow } from './conversation-row';
 import { DraftRow, type UnassignedDraft } from './draft-row';
-import { draftMark, latestByDraft } from '@/components/fusion-review/review-adapter';
+import { useSidebarReviewMarks } from './use-sidebar-review-marks';
 import { useConversationRename } from '@/hooks/use-conversation-rename';
 import { useConversationErasure } from '@/hooks/use-conversation-erasure';
 import { useContentErasureSync } from '@/hooks/use-content-erasure';
@@ -108,6 +108,8 @@ export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,acti
  const profile=trpc.user.getUserProfile.useQuery();
  // PUBLISH-MONITOR PR-7: 数据复盘 becomes a link once its admin switch is on (public booleans, no user data).
  const publishMonitor=trpc.publishMonitor.features.useQuery(undefined,{staleTime:300_000,...READ_RETRY});
+ // The jury's mark on a draft row, asked with the lists above (use-sidebar-review-marks.ts).
+ const reviewMarks=useSidebarReviewMarks(),reviewNote=reviewMarks.note;
  const historyRef=useRef<HTMLDivElement>(null);
  const sidebarActor=profile.data?.id;
  const [restoredActor,setRestoredActor]=useState<string>();
@@ -170,10 +172,6 @@ export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,acti
  }
  const assigned=new Set([...platforms.values()].flat().map(account=>account.strategyDraftId).filter(Boolean));
  const unassigned=((drafts.data?.drafts??[]) as Draft[]).filter(draft=>!assigned.has(draft.draftId));
- // The jury's mark on a draft row; the jury may be off or unreachable, which simply shows no mark.
- const reviews=trpc.fusionReview.mine.useQuery({limit:50},{enabled:unassigned.length>0||assigned.size>0,staleTime:30_000,...READ_RETRY});
- const reviewMarks=latestByDraft(Array.isArray(reviews.data)?reviews.data:[]);
- const reviewNote=(draftId:string)=>{const mark=draftMark(reviewMarks.get(draftId))?.label;return mark?' · '+mark:'';};
  async function changeRecord(item:Item,action:'rename'|'pin'|'unpin'|'archive'|'restore'|'delete',name?:string){
   if(changeWorkUi.isPending)return;
   const key='opc-work-ui:'+item.workItemId;
@@ -253,7 +251,7 @@ export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,acti
       onOpenMenu={event=>openRowMenu(event,'conversation:'+conversation.sessionId)} onCloseMenu={()=>setMenuId('')}
       onDelete={()=>setDeletingConversation({id:conversation.sessionId,
        name:conversationRename.titleOf(conversation.sessionId,conversation.title)})} rename={conversationRename}/>)}</RailGroup>}
-     {!archiveView&&unassigned.length>0&&<RailGroup title="待归类" open={groupOpen.unassigned??true} onToggle={next=>setGroupOpen(current=>current.unassigned===next?current:{...current,unassigned:next})}>{unassigned.map(draft=><DraftRow key={draft.draftId} draft={draft} review={draftMark(reviewMarks.get(draft.draftId))?.label}
+     {!archiveView&&unassigned.length>0&&<RailGroup title="待归类" open={groupOpen.unassigned??true} onToggle={next=>setGroupOpen(current=>current.unassigned===next?current:{...current,unassigned:next})}>{unassigned.map(draft=><DraftRow key={draft.draftId} draft={draft} review={reviewMarks.label(draft.draftId)}
       menuOpen={menuId==='draft:'+draft.draftId} menuPosition={menuPosition} onCloseMenu={()=>setMenuId('')}
       onOpenMenu={event=>openRowMenu(event,'draft:'+draft.draftId)}
       onDeleteConversation={(id,name)=>setDeletingConversation({id,name,related:[draft.draftId]})}

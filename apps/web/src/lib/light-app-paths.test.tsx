@@ -10,12 +10,11 @@ describe('light first paint', () => {
   it.each([
     '/app', '/app/positioning', '/app/positioning/abc', '/app/positioning/abc/topics', '/app/positioning/abc/review/r1',
     '/app/runtime', '/app/library', '/app/publish-monitor', '/app/workbench/marketplace', '/app/workbench/search', '/app/runtime/',
-    '/app/profile', '/app/profile/',
+    '/app/profile', '/app/profile/', '/app/publish-monitor/connect', '/app/publish-monitor/publish', '/app/publish-monitor/',
   ])('%s is light', path => expect(isLightAppPath(path)).toBe(true));
 
   it.each([
-    '/app/expert-consult', '/app/library/scan-check', '/app/publish-monitor/connect',
-    '/app/publish-monitor/publish', '/app/workbench/agent-first-preview', '/login', '/', null,
+    '/app/expert-consult', '/app/library/scan-check', '/app/workbench/agent-first-preview', '/app/publish-monitorx', '/login', '/', null,
   ])('%s keeps the dark body', path => expect(isLightAppPath(path)).toBe(false));
 
   it('the marker renders as server HTML and globals.css turns the body light for it, with no script', () => {
@@ -35,7 +34,7 @@ describe('light first paint', () => {
       '/app/positioning/', '/app/runtime', '/app/runtime/', '/app/library', '/app/library/scan-check', '/app/library/scan-check/x',
       '/app/publish-monitor', '/app/publish-monitor/connect', '/app/publish-monitor/publish', '/app/workbench/marketplace',
       '/app/workbench/search', '/app/workbench/agent-first-preview', '/app/profile', '/app/expert-consult',
-      '/app/positioningx', '/login', '/', '/pricing'];
+      '/app/positioningx', '/app/publish-monitorx', '/login', '/', '/pricing'];
     for (const path of paths) {
       const marked: string[] = [];
       new Function('location', 'document', LIGHT_FIRST_PAINT_SCRIPT)({ pathname: path },

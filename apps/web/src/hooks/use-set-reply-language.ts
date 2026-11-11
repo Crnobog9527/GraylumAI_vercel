@@ -2,7 +2,7 @@
 'use client';
 
 import { useState } from 'react';
-import type { ReplyLocale } from '@repo/api/src/shared/replyLanguage';
+import type { ReplyLocale } from '@repo/api/src/shared/replyLocales';
 import { clearEntryChange } from '@/lib/entry-language';
 import { trpc } from '@/trpc/client';
 
