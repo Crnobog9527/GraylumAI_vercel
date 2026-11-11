@@ -1,4 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 const state = vi.hoisted(() => ({ library: {} as Record<string, unknown>, profile: {} as Record<string, unknown> }));
@@ -62,4 +64,11 @@ it('greets without claiming a return visit, and shows a phone account without a 
  state.profile={data:{nickname:'user-0a1b2c3d',membership_level:'free',phone_masked:'138****5678'},isError:false};
  const html=renderToStaticMarkup(<HomePage/>);
  expect(html).toContain('你好，手机尾号 5678');expect(html).not.toContain('user-0a1b2c3d');expect(html).not.toContain('欢迎回来');
+});
+// Review of #1894: the two used to share one rule; changing the four boxes must not touch the six method steps (Owner 2026-11-12).
+it('the six method steps keep their cards; only the four items at the foot of the page lose the box',()=>{
+ const css=readFileSync(fileURLToPath(new URL('./home.module.css',import.meta.url)),'utf8');
+ expect(css).toContain('.method li{border:1px solid #eee;border-radius:10px;padding:18px}');
+ expect(css).toContain('.capabilities article{border-top:1px solid #eee;padding:14px 0 0}');
+ expect(css).not.toMatch(/\.method li,[^{]*\.capabilities article/);
 });
