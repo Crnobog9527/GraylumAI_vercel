@@ -114,7 +114,10 @@ export default function PositioningHome() {
   });
   function chooseTopics(){setIntent('topics');setShowSource(true);if(!startInput.trim()){const value='请基于当前账号定位，帮我策划下一批选题。';setStartInput(value);sessionStorage.setItem('opc-new-task-input',value);}}
   function choosePosition(){setMethodDialog(true);setIntent('position');setShowSource(false);if(!startInput.trim()){const value='我想梳理一个账号的定位，请从需要确认的问题开始。';setStartInput(value);sessionStorage.setItem('opc-new-task-input',value);}}
-  if(directEntry)return <WorkspaceFrame area="start"><main className={styles.page}><section className={styles.selection} aria-label="正在进入定位流程"><h1>{START_TEXT[directEntry].title}</h1>{start.isPending&&<p role="status">正在建立定位草稿…</p>}<QueryNotice error={catalog.error} loading={catalog.isPending} label="定位方法" retry={()=>catalog.refetch()}/>{catalog.isSuccess&&!catalog.data?.length&&<p>当前没有已发布的定位方法。</p>}{error&&<p role="alert">{error}</p>}{error===PROFILE_ARCHIVE_TEXT.limitReached&&<ProfileArchiveList limitReached/>}{error&&pendingStart&&<Button disabled={start.isPending} onClick={()=>void runStart(pendingStart)}>恢复上次开始请求</Button>}<Link href="/app/positioning" onClick={()=>setDirectEntry(null)}>返回对话入口</Link></section></main></WorkspaceFrame>;
+  // The profile allowance is used (OPC_PROFILE_LIMIT): the ways out, the same on the one-click start screen and on this page.
+  // The list offers 继续已有的定位 and archiving; the link is the upgrade.
+  const limitWaysOut=error===PROFILE_ARCHIVE_TEXT.limitReached&&<><ProfileArchiveList limitReached/><Link href="/pricing">查看会员方案 →</Link></>;
+  if(directEntry)return <WorkspaceFrame area="start"><main className={styles.page}><section className={styles.selection} aria-label="正在进入定位流程"><h1>{START_TEXT[directEntry].title}</h1>{start.isPending&&<p role="status">正在建立定位草稿…</p>}<QueryNotice error={catalog.error} loading={catalog.isPending} label="定位方法" retry={()=>catalog.refetch()}/>{catalog.isSuccess&&!catalog.data?.length&&<p>当前没有已发布的定位方法。</p>}{error&&<p role="alert">{error}</p>}{limitWaysOut}{error&&pendingStart&&<Button disabled={start.isPending} onClick={()=>void runStart(pendingStart)}>恢复上次开始请求</Button>}<Link href="/app/positioning" onClick={()=>setDirectEntry(null)}>返回对话入口</Link></section></main></WorkspaceFrame>;
   return (
     <WorkspaceFrame area="start"><main className={styles.page}><header className={styles.startTop}><strong>我的增长工作</strong>{workReturn&&<Link href={workReturn}>返回当前工作 →</Link>}</header><div className={styles.content}>
       <header className={styles.hero}><h1>今天，想推进什么？</h1></header>
@@ -150,7 +153,7 @@ export default function PositioningHome() {
       {methodDialog&&<div className={styles.modalScrim} role="presentation"><section className={styles.methodDialog} role="dialog" aria-modal="true" aria-label="梳理账号定位"><header><h2>梳理账号定位</h2><button autoFocus aria-label="关闭窗口" onClick={()=>setMethodDialog(false)}><X size={17}/></button></header><p>开始新账号的定位分析；已经有定位的，选「我已有定位」，把它粘贴或描述给 AI 教练，再逐步核对确认。</p><div className={styles.methodActions}><button disabled={!actorId||!catalog.data?.length||start.isPending||Boolean(pendingStart)} onClick={()=>{setMethodDialog(false);void begin('mentor');}}>{START_TEXT.mentor.action}</button><button disabled={!actorId||!catalog.data?.length||start.isPending||Boolean(pendingStart)} onClick={()=>{setMethodDialog(false);void begin('manual');}}>{START_TEXT.manual.action}</button></div>
         <ProfileArchiveList/></section></div>}
       {error && <p role="alert">{error}</p>}
-      {error === PROFILE_ARCHIVE_TEXT.limitReached && <><ProfileArchiveList limitReached/><Link href="/pricing">查看会员方案 →</Link></>}
+      {limitWaysOut}
     </div></main></WorkspaceFrame>
   );
 }
