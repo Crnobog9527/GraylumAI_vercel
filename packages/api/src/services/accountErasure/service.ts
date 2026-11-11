@@ -22,6 +22,8 @@ const previewSchema = z.object({
   pendingPayments: z.number(),
   runsInFlight: z.number(),
   closed: z.boolean(),
+  // Migration 9999 (Owner 2026-11-11): a refund request being handled blocks erasure; absent before it, read as false.
+  refundRequestOpen: z.boolean().default(false),
 });
 export type AccountErasurePreview = z.infer<typeof previewSchema>;
 
@@ -60,6 +62,11 @@ const DB_ERRORS: Record<string, { code: TRPCError['code']; message: string }> = 
   ACCOUNT_ERASURE_STATUS_DENIED: {
     code: 'FORBIDDEN',
     message: 'ACCOUNT_ERASURE_STATUS_DENIED: 当前账号状态不能申请注销',
+  },
+  // Owner 2026-11-11: erasure would delete the ticket the refund approval needs.
+  ACCOUNT_ERASURE_REFUND_PENDING: {
+    code: 'PRECONDITION_FAILED',
+    message: 'ACCOUNT_ERASURE_REFUND_PENDING: 你有一笔退款申请在处理中，处理完成后才能注销。',
   },
 };
 

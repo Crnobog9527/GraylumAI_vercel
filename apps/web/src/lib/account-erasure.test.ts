@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  buildErasureImpactLines, describeErasureError, isAccountClosedError, isRenewalBlockedError, renewalUsesStripePortal,
+  buildErasureImpactLines, describeErasureError, erasureBlocked, isAccountClosedError, isRenewalBlockedError,
+  renewalUsesStripePortal,
 } from './account-erasure';
 
 const base = {
@@ -36,6 +37,16 @@ describe('buildErasureImpactLines', () => {
     expect(text).toContain('1 个 AI 任务');
   });
 
+  it('blocks while a refund request is being handled (Owner 2026-11-11), and lets the user go on once it is done', () => {
+    const open = { ...base, refundRequestOpen: true };
+    expect(buildErasureImpactLines(open)[0]).toEqual({ tone: 'block', text: '你有一笔退款申请在处理中，处理完成后才能注销。' });
+    expect(erasureBlocked(open)).toBe(true);
+    expect(erasureBlocked({ ...base, refundRequestOpen: false })).toBe(false);
+    // A server without the field (before migration 9999) is read as no request.
+    expect(erasureBlocked(base)).toBe(false);
+    expect(erasureBlocked({ ...base, subscriptionRenewing: true })).toBe(true);
+  });
+
   it('points card renewals without a Stripe portal to support, and keeps the portal for legacy Stripe', () => {
     const card = { ...base, subscriptionRenewing: true, renewalChannels: ['waffo'] };
     const lines = buildErasureImpactLines(card).filter((line) => line.tone === 'block');
@@ -53,6 +64,7 @@ describe('describeErasureError', () => {
   it('maps server codes to user text and never echoes unknown messages', () => {
     expect(describeErasureError({ message: 'ACCOUNT_ERASURE_REAUTH_REQUIRED: x' })).toContain('重新验证');
     expect(describeErasureError({ message: 'ACCOUNT_ERASURE_SUBSCRIPTION_RENEWING: x' })).toContain('取消自动续费');
+    expect(describeErasureError({ message: 'ACCOUNT_ERASURE_REFUND_PENDING: x' })).toBe('你有一笔退款申请在处理中，处理完成后才能注销。');
     expect(describeErasureError({ message: 'relation profiles does not exist' })).toBe('注销暂时无法完成，请稍后重试。');
     expect(describeErasureError({ message: 'x', data: { code: 'TOO_MANY_REQUESTS' } })).toContain('频繁');
     expect(isAccountClosedError({ message: 'ACCOUNT_CLOSED: 账号已注销' })).toBe(true);

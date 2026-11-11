@@ -13,5 +13,10 @@ AS $function$
   AND j->>'amount_total' IS NOT NULL)
  OR (j->>'status' IN ('failed','expired') AND j->>'purchase_closed_at' IS NOT NULL
   AND j->>'purchase_close_reason' IN ('stripe_checkout_expired','stripe_checkout_never_created',
-   'stripe_checkout_not_prepared','stripe_upgrade_rejected','stripe_upgrade_not_applied')),false);
+   'stripe_checkout_not_prepared','stripe_upgrade_rejected','stripe_upgrade_not_applied'))
+ -- ERASURE-ABANDONED (9999): a new-path checkout the buyer left. Release keeps status 'pending' and writes no close reason;
+ -- the provider has confirmed nothing can be paid (closed or expired session, never sent, verified absent), so it is final.
+ -- A late payment still lands on the order as cash evidence for review, as for any released order.
+ OR (j->>'qualification_state'='released' AND j->>'purchase_closed_at' IS NOT NULL AND j->>'payment_status'='unpaid'
+  AND j->>'fulfilled_at' IS NULL),false);
 $function$;

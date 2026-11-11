@@ -136,6 +136,17 @@ describe('account erasure confirm', () => {
     expect(admin.auth.admin.updateUserById).not.toHaveBeenCalled();
   });
 
+  it('refuses while a refund request is being handled (Owner 2026-11-11), as enforced by the database', async () => {
+    const admin = adminClient({
+      confirm: { data: null, error: { message: 'ACCOUNT_ERASURE_REFUND_PENDING', code: 'P0001' } },
+    });
+    await expect(confirm(admin, authClient({ sub: USER, amr: [{ method: 'otp', timestamp: NOW_S }] })))
+      .rejects.toMatchObject({ code: 'PRECONDITION_FAILED',
+        message: 'ACCOUNT_ERASURE_REFUND_PENDING: 你有一笔退款申请在处理中，处理完成后才能注销。' });
+    expect(admin.auth.admin.updateUserById).not.toHaveBeenCalled();
+    expect(limit.close).not.toHaveBeenCalled();
+  });
+
   it('names the cancel entry of every renewing channel', async () => {
     const admin = adminClient({
       confirm: { data: null, error: { message: 'ACCOUNT_ERASURE_SUBSCRIPTION_RENEWING', code: 'P0001' } },
@@ -175,9 +186,12 @@ describe('account erasure preview', () => {
       pendingPayments: 0, runsInFlight: 1, closed: false,
     };
     const admin = { rpc: vi.fn().mockResolvedValue({ data: facts, error: null }) };
-    // A database before 0224 sends no renewalChannels; it parses as none.
+    // A database before 0224 sends no renewalChannels, one before 9999 no refundRequestOpen: they parse as none.
     await expect(loadAccountErasurePreview(admin as unknown as SupabaseClient, USER))
-      .resolves.toEqual({ ...facts, renewalChannels: [] });
+      .resolves.toEqual({ ...facts, renewalChannels: [], refundRequestOpen: false });
+    admin.rpc.mockResolvedValueOnce({ data: { ...facts, refundRequestOpen: true }, error: null });
+    await expect(loadAccountErasurePreview(admin as unknown as SupabaseClient, USER))
+      .resolves.toMatchObject({ refundRequestOpen: true });
     admin.rpc.mockResolvedValueOnce({ data: { ...facts, renewalChannels: ['waffo'] }, error: null });
     await expect(loadAccountErasurePreview(admin as unknown as SupabaseClient, USER))
       .resolves.toMatchObject({ renewalChannels: ['waffo'] });
