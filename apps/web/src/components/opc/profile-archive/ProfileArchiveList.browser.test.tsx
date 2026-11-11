@@ -85,6 +85,8 @@ it('lists profiles with the allowance, archives one after confirming, and moves 
     const state = await open(page, () => ({ ok: true }));
     await ui(page.getByText('已用 2/3 个名额')).toBeVisible();
     await ui(page.getByText('名额用完了，可以把不再更新的档案归档。')).toBeVisible();
+    // 走查 26: under the limit notice, the first way out is the positioning that exists (the one profile here with a draft).
+    await ui(page.getByRole('link', { name: '继续已有的定位' })).toHaveAttribute('href', '/app/positioning/11111111-1111-4111-8111-111111111111');
     await page.getByText('已归档（1）').click();
     await ui(page.getByRole('link', { name: '查看' })).toHaveAttribute('href', '/app/positioning/33333333-3333-4333-8333-333333333333');
     // Cancelling sends nothing.
@@ -102,6 +104,8 @@ it('lists profiles with the allowance, archives one after confirming, and moves 
     await ui(page.getByText('已用 1/3 个名额')).toBeVisible();
     await ui(page.getByText('已归档（2）')).toBeVisible();
     await ui(page.getByRole('button', { name: '归档' })).toHaveCount(1);
+    // that profile is read-only now, and the one left has no draft: there is nothing to go back to
+    await ui(page.getByRole('link', { name: '继续已有的定位' })).toHaveCount(0);
   } finally { await page.close(); }
 }, 30000);
 

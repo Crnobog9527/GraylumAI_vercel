@@ -53,19 +53,27 @@ export function projectOrderPayment(order: Order, documents?: Documents) {
 }
 
 type ClosedOrder = { status: string; payment_status?: string | null; fulfilled_at?: string | null;
-  qualification_state?: string | null; purchase_closed_at?: string | null; method_review_reason?: string | null };
+  qualification_state?: string | null; purchase_closed_at?: string | null; method_review_reason?: string | null;
+  method_checkout_expires_at?: string | null };
 
 /** Display only. A failed wallet attempt remains reserved/pending so the same checkout can succeed on retry.
  * Released unpaid checkouts (0204/0211) stay pending for late-payment review but display as closed.
  * Any recorded payment or fulfilment takes the order out of either unpaid projection. */
-export function projectBillingStatus(order: ClosedOrder): PaymentOrderStatus {
+export function projectBillingStatus(order: ClosedOrder, now = Date.now()): PaymentOrderStatus {
   const status = normalizePaymentOrderStatus(order.status);
   if (status !== 'pending' || order.payment_status !== 'unpaid' || order.fulfilled_at) return status;
   if (order.qualification_state === 'reserved' && !order.purchase_closed_at && order.method_review_reason === 'wallet_payment_failed') {
     return 'failed';
   }
+  // Walkthrough 2026-11-11 item 3: a checkout the buyer left (back on the Stripe page, or never paid) is shown as canceled,
+  // never "待支付": once released, and also once its payment page has expired while the release is not recorded yet (the
+  // expiry webhook or the daily reconciliation records it). Until its page expires (31 minutes) it can still be paid.
+  const expiresAt = Date.parse(order.method_checkout_expires_at ?? '');
+  const pageExpired = order.qualification_state === 'reserved' && !order.purchase_closed_at && Number.isFinite(expiresAt)
+    && expiresAt <= now;
+  if (pageExpired) return 'canceled';
   if (order.qualification_state !== 'released' || !order.purchase_closed_at) return status;
-  return ['card_checkout_rejected', 'async_payment_failed'].includes(order.method_review_reason ?? '') ? 'failed' : 'expired';
+  return ['card_checkout_rejected', 'async_payment_failed'].includes(order.method_review_reason ?? '') ? 'failed' : 'canceled';
 }
 
 export type BillingRecord = ReturnType<typeof projectOrderPayment> & {
@@ -115,6 +123,7 @@ export type PaymentOrderBillingRow = {
   qualification_state?: string | null;
   purchase_closed_at?: string | null;
   method_review_reason?: string | null;
+  method_checkout_expires_at?: string | null;
 };
 
 /** Display only: a card subscription's automatic renewal (linked to the first period, not an upgrade), a founder

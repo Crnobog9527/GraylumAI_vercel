@@ -4,6 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { TabsContent, TabsTrigger } from '@/components/ui/tabs';
 import { StopNewCallsControl } from './StopNewCallsControl';
 import { StopLossLimitsForm } from './StopLossLimitsForm';
+import { MeteringBlocksCard } from './MeteringBlocksCard';
 import { ProviderBalanceForm } from './ProviderBalanceForm';
 import { StopLossAlertList } from './StopLossAlertList';
 
@@ -31,6 +32,7 @@ export function RuntimeStopLossSettings() {
       </CardHeader>
       <CardContent className="space-y-4">
         <StopNewCallsControl />
+        <MeteringBlocksCard />
         <StopLossLimitsForm />
         <ProviderBalanceForm />
         <StopLossAlertList />

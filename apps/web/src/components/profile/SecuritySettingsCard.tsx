@@ -64,6 +64,11 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
     : '-';
 
   const clearPasswordForm = () => setPasswordForm({ current_password: '', new_password: '', confirm_password: '' });
+  // Closing the dialog by any route (取消, Esc, the corner button) empties the three fields: typed passwords do not wait in a closed dialog.
+  const setPasswordDialogOpen = (open: boolean) => {
+    setShowPasswordDialog(open);
+    if (!open) clearPasswordForm();
+  };
 
   const handleChangePassword = async () => {
     setPasswordLoading(true);
@@ -102,9 +107,9 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
   return (
     <>
       <div
-        className="rounded-2xl p-6"
+        className="rounded-xl p-6"
         style={{
-          background: 'var(--bg-secondary)',
+          background: 'var(--gl-surface, #fff)',
           border: '1px solid var(--border-primary)',
           boxShadow: 'none',
         }}
@@ -253,7 +258,7 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
         </div>
       </div>
 
-      <Dialog open={showPasswordDialog} onOpenChange={setShowPasswordDialog}>
+      <Dialog open={showPasswordDialog} onOpenChange={setPasswordDialogOpen}>
         <DialogContent
           onInteractOutside={keepDialogOpenForCaptcha}
           className="sm:max-w-md"
@@ -347,7 +352,7 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
           <DialogFooter>
             <Button
               variant="outline"
-              onClick={() => setShowPasswordDialog(false)}
+              onClick={() => setPasswordDialogOpen(false)}
               style={{
                 background: 'transparent',
                 borderColor: 'var(--border-primary)',
@@ -360,8 +365,8 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
               onClick={handleChangePassword}
               disabled={passwordLoading}
               style={{
-                background: 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%)',
-                color: 'var(--bg-primary)',
+                background: 'var(--gl-action, #262626)',
+                color: 'var(--gl-action-text, #fff)',
               }}
             >
               {passwordLoading ? (

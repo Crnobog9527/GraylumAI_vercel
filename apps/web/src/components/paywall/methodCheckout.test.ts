@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   CHECKOUT_COPY, REFUND_POLICY_PATH, refundPolicyHref, founderSeatsLeft, METHOD_COPY, checkoutMethods, checkoutEntryOpen, describeCheckoutError, isStripeCheckoutUrl, isWaffoCheckoutUrl, isMethodCheckoutUrl, methodCopy,
-  type MethodMembershipEntry,
+  renewalMethods, type MethodMembershipEntry,
 } from './methodCheckout';
 
 const entry = (patch: Partial<MethodMembershipEntry> = {}): MethodMembershipEntry => ({
@@ -159,4 +159,20 @@ it('accepts only the official Waffo session path for an emergency route', () => 
   ]) expect(isWaffoCheckoutUrl(invalid)).toBe(false);
   expect(methodCopy('card', 'waffo')).toMatchObject({label:'Waffo 结账页',tax:'不另收税'});
   expect(methodCopy('card', 'stripe')).toEqual(METHOD_COPY.card);
+});
+
+describe('renewalMethods', () => {
+  const all = ['card', 'card_cn', 'wechat_pay', 'alipay'] as const;
+  it('item 6: a founder renewal, like a wallet renewal, offers only one-time methods on Stripe', () => {
+    for (const transition of ['founder_renewal', 'wallet_renewal'] as const) {
+      expect(renewalMethods(all, { transition }, 'stripe')).toEqual(['wechat_pay', 'alipay']);
+      expect(renewalMethods(all, { transition })).toEqual(['wechat_pay', 'alipay']);
+      // Waffo cards are one-time payments: they stay available while new purchases route there.
+      expect(renewalMethods(all, { transition }, 'waffo')).toEqual([...all]);
+    }
+    // Ordinary purchases and upgrades keep every method; no wallet left means no method (the form shows it closed).
+    expect(renewalMethods(all, { transition: 'upgrade' }, 'stripe')).toEqual([...all]);
+    expect(renewalMethods(all, null, 'stripe')).toEqual([...all]);
+    expect(renewalMethods(['card', 'card_cn'], { transition: 'founder_renewal' }, 'stripe')).toEqual([]);
+  });
 });

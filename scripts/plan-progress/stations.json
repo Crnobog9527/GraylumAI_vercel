@@ -117,6 +117,10 @@
         {
           "name": "RUNTIME-VIEW-PERF",
           "plain": "长对话打开不再变慢。"
+        },
+        {
+          "name": "BILL-BYOK",
+          "plain": "Claude、Gemini 走两家官方额度，平台成本更低，用户扣费不变。"
         }
       ]
     },
@@ -197,6 +201,10 @@
         {
           "name": "DATA-ERASURE",
           "plain": "注销账号、删除对话和成果，正在进行的扣费也能正确收尾。"
+        },
+        {
+          "name": "PHONE-OTP",
+          "plain": "中国大陆手机号用验证码登录和注册，发码按 IP 限次数防刷。"
         }
       ]
     },
@@ -325,6 +333,10 @@
         {
           "name": "PAYWALL",
           "plain": "价格页、付费弹窗和会员检查。"
+        },
+        {
+          "name": "PAY-STALE-SUB",
+          "plain": "订阅结束通知丢了也能按 Stripe 实际情况收口，不再挡住重新购买。"
         }
       ]
     },
@@ -336,6 +348,14 @@
         {
           "name": "PUBLISH-MONITOR",
           "plain": "接入 Post for Me 做多平台发布和数据监控，小红书、抖音读公开数据，支持手动导入；每周自动复盘仅限 Gold。"
+        },
+        {
+          "name": "PUBLISH-SCHEDULE",
+          "plain": "发布排期：选好时间到点自动发，日历里能看、能改期、能取消；上线前必须做完整。"
+        },
+        {
+          "name": "UI-UNIFY",
+          "plain": "数据复盘、一键发布、个人中心等登录后页面统一成同一套样式。"
         }
       ],
       "waitingForOwner": [
@@ -373,6 +393,18 @@
         {
           "name": "POSITIONING-GATE",
           "plain": "没做定位的用户聊社媒运营时，先引导他做定位或导入已有定位。"
+        },
+        {
+          "name": "ANALYTICS-CONSENT",
+          "plain": "统计同意按地区处理，用自己的同意条代替 Termly 弹窗。"
+        },
+        {
+          "name": "LANDING-ART",
+          "plain": "首页换成 D「晨光」风格，首屏放产品对话窗口，便签墙改成对话式；分两步做。"
+        },
+        {
+          "name": "UX-FIX",
+          "plain": "新用户走查发现的引导和文案问题：空页面、英文内部字样、退款说明、价格表等。"
         }
       ]
     },
@@ -418,6 +450,22 @@
         {
           "name": "REL-1",
           "plain": "发布到正式环境。"
+        },
+        {
+          "name": "ALERT-FEISHU",
+          "plain": "给你的中文业务告警发到 Graylum 飞书群（只配正式环境）。"
+        },
+        {
+          "name": "CODE-HEALTH",
+          "plain": "登录后功能的代码体检：超长文件拆小、旧数据改读新数据、去掉重复读取。"
+        },
+        {
+          "name": "SITE-SPEED",
+          "plain": "全站加载提速，首页滚动不再跳动。"
+        },
+        {
+          "name": "SIM-FLAKE",
+          "plain": "修好一条因测试服务器卡顿而偶尔失败的自动测试。"
         }
       ],
       "waitingForOwner": [

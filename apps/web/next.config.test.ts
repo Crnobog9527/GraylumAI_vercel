@@ -133,4 +133,20 @@ describe('development server page retention (simulated-model browser tests)', ()
     expect(kept?.maxInactiveAge).toBeGreaterThan(60 * 60 * 1000);
     expect(kept?.pagesBufferLength).toBeGreaterThanOrEqual(100);
   });
+
+  it('writes no compile cache to disk only when the sim switch is set, and only in the development server', async () => {
+    expect((await loadConfig())(PHASE_DEVELOPMENT_SERVER).webpack).toBeUndefined();
+    expect((await loadConfig())(PHASE_PRODUCTION_BUILD).webpack).toBeUndefined();
+    vi.stubEnv('SIM_KEEP_COMPILED', '1');
+    vi.resetModules();
+    const webpack = (await loadConfig())(PHASE_DEVELOPMENT_SERVER).webpack as unknown as
+      (config: { cache: unknown; name: string }, context: { dev: boolean }) => { cache: unknown; name: string };
+    const disk = { type: 'filesystem', cacheDirectory: '/tmp/x' };
+    // The same config object comes back, with only its cache switched off: the memory cache Next adds itself is a plugin, not this option.
+    const input = { cache: disk, name: 'server' };
+    expect(webpack(input, { dev: true })).toBe(input);
+    expect(input.cache).toBe(false);
+    // Outside the development server the compiler's cache is left as it is.
+    expect(webpack({ cache: disk, name: 'server' }, { dev: false }).cache).toBe(disk);
+  });
 });

@@ -143,3 +143,22 @@ export function getCreditLedgerLabel(row: CreditLedgerPresentationInput): string
       return '系统调整';
   }
 }
+
+/**
+ * The database writes a few record descriptions in internal English (turn_settle_credits.sql, opening_grant_remember.sql).
+ * What the user reads instead (walkthrough 2026-11-11, item 6); '' means no second line, because the record's own label
+ * ("AI 使用消耗") already says it. Any other description is shown as written.
+ */
+const INTERNAL_RECORD_NOTES: Record<string, string> = {
+  'AI turn': '',
+  'AI turn freeze': '',
+  'AI turn freeze top-up': '',
+  'AI turn freeze not returned (subscription refunded or ended)': '冻结的积分没有退回（订阅已退款或已结束）',
+  'Opening grant for new user profile bootstrap': '新用户赠送',
+  'Opening grant already claimed by this identity': '新用户赠送已经领过',
+};
+
+export function creditRecordNote(description: string | null | undefined): string {
+  const text = (description ?? '').trim();
+  return Object.hasOwn(INTERNAL_RECORD_NOTES, text) ? INTERNAL_RECORD_NOTES[text]! : text;
+}

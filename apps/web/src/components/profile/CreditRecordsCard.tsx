@@ -10,6 +10,7 @@ import { formatCreditsBalance } from '@/components/credits/balancePresentation';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 import {
   countsAsCreditSpend,
+  creditRecordNote,
   getCreditLedgerLabel,
   normalizeCreditLedgerType,
   type CreditLedgerType,
@@ -81,9 +82,9 @@ const DailyUsageTrendChart = memo(function DailyUsageTrendChart({
 
   return (
     <div
-      className="mt-6 rounded-2xl p-6 md:p-8"
+      className="mt-6 rounded-xl p-6 md:p-8"
       style={{
-        background: 'var(--bg-secondary)',
+        background: 'var(--gl-surface, #fff)',
         border: '1px solid var(--border-primary)',
         boxShadow: 'none',
       }}
@@ -126,7 +127,7 @@ const DailyUsageTrendChart = memo(function DailyUsageTrendChart({
                 style={{
                   height: `${heightPercent}%`,
                   minHeight: '4px',
-                  background: 'linear-gradient(to top, var(--color-primary), var(--color-secondary))',
+                  background: 'var(--color-primary)',
                   opacity: stats.maxUsage > 0 ? 0.7 + (heightPercent / 100) * 0.3 : 0.7
                 }}
                 title={`${day.fullDate}: ${day.usage} 积分`}
@@ -199,7 +200,7 @@ export const CreditRecordsCard = memo(function CreditRecordsCard({ user }: { use
     usage: { icon: Zap, color: 'var(--color-primary)' },
     consumption: { icon: Zap, color: 'var(--color-primary)' },
     bonus: { icon: Crown, color: 'var(--color-secondary)' },
-    refund: { icon: RefreshCw, color: 'rgba(139, 92, 246, 1)' },
+    refund: { icon: RefreshCw, color: 'var(--text-secondary)' },
     admin_adjustment: { icon: Settings, color: 'var(--text-tertiary)' },
     adjustment: { icon: Settings, color: 'var(--text-tertiary)' },
     membership: { icon: Crown, color: 'var(--color-primary)' },
@@ -209,16 +210,16 @@ export const CreditRecordsCard = memo(function CreditRecordsCard({ user }: { use
     expiration: { icon: Zap, color: 'var(--text-disabled)' },
     grant: { icon: Crown, color: 'var(--success)' },
     spend: { icon: Zap, color: 'var(--color-primary)' },
-    refund_clawback: { icon: RefreshCw, color: 'rgba(245, 158, 11, 1)' },
+    refund_clawback: { icon: RefreshCw, color: 'var(--warning)' },
   };
 
   return (
     <>
       {/* 积分概览 */}
       <div
-        className="mb-6 rounded-2xl p-6 md:p-8"
+        className="mb-6 rounded-xl p-6 md:p-8"
         style={{
-          background: 'var(--bg-secondary)',
+          background: 'var(--gl-surface, #fff)',
           border: '1px solid var(--border-primary)',
           boxShadow: 'none',
         }}
@@ -235,9 +236,7 @@ export const CreditRecordsCard = memo(function CreditRecordsCard({ user }: { use
               <div
                 className="text-3xl font-bold"
                 style={{
-                  background: 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%)',
-                  WebkitBackgroundClip: 'text',
-                  WebkitTextFillColor: 'transparent'
+                  color: 'var(--text-primary)',
                 }}
               >
                 {formatCreditsBalance(credits === null ? 'unavailable' : 'ready', credits)}
@@ -274,9 +273,9 @@ export const CreditRecordsCard = memo(function CreditRecordsCard({ user }: { use
 
       {/* 交易记录列表 */}
       <div
-        className="rounded-2xl p-6 mt-6"
+        className="rounded-xl p-6 mt-6"
         style={{
-          background: 'var(--bg-secondary)',
+          background: 'var(--gl-surface, #fff)',
           border: '1px solid var(--border-primary)',
           boxShadow: 'none',
         }}
@@ -313,20 +312,23 @@ export const CreditRecordsCard = memo(function CreditRecordsCard({ user }: { use
                   border: '1px solid var(--border-primary)'
                 }}
               >
-                <div className="flex items-start gap-4 mb-4 md:mb-0">
+                {/* min-w-0 on the row and on its text column: without it a long description keeps its full width and widens the page on a phone. */}
+                <div className="flex min-w-0 items-start gap-4 mb-4 md:mb-0">
                   <div
-                    className="p-3 rounded-xl"
+                    className="shrink-0 p-3 rounded-xl"
                     style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}
                   >
                     <Icon className="h-5 w-5" style={{ color: typeConfig.color }} />
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <div className="font-medium mb-1" style={{ color: 'var(--text-primary)' }}>
                       {typeLabels[ledgerType] || getCreditLedgerLabel(tx)}
                     </div>
-                    <div className="text-xs max-w-md truncate" style={{ color: 'var(--text-tertiary)' }}>
-                      {tx.description || '-'}
-                    </div>
+                    {creditRecordNote(tx.description) && (
+                      <div className="text-xs max-w-md truncate" style={{ color: 'var(--text-tertiary)' }}>
+                        {creditRecordNote(tx.description)}
+                      </div>
+                    )}
                     {ledgerType === 'spend' && <TransactionSearchCharges transactionId={tx.id} />}
                   </div>
                 </div>

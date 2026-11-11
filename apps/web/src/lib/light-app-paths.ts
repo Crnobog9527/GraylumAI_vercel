@@ -3,8 +3,9 @@
 // Signed-in routes whose finished page is light (WorkspaceFrame / the home page). Their first painted frame, in the server
 // HTML, must already be light. Dark routes (expert-consult, agent-first-preview, library/scan-check) are deliberately not listed.
 // publish-monitor covers the data review page, the account confirmation page and one-click publishing: all three sit in WorkspaceFrame.
+// publish-schedule is the schedule page (PUBLISH-SCHEDULE), also in WorkspaceFrame.
 const LIGHT_PREFIXES = ['/app/positioning', '/app/runtime', '/app/library', '/app/workbench/marketplace', '/app/workbench/search', '/app/profile',
-  '/app/publish-monitor'];
+  '/app/publish-monitor', '/app/publish-schedule'];
 const LIGHT_EXACT = ['/app'];
 const DARK_UNDER_LIGHT = ['/app/library/scan-check'];
 

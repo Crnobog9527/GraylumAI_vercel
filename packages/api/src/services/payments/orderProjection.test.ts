@@ -17,8 +17,10 @@ it('marks absent or unsupported credentials unavailable without selecting a new 
 it('shows a released unpaid checkout as closed while the stored pending state stays for late-payment review', () => {
   const closed = { status: 'pending', payment_status: 'unpaid', fulfilled_at: null, qualification_state: 'released',
     purchase_closed_at: '2026-10-11T16:40:00Z', method_review_reason: 'card_checkout_expired' };
-  expect(projectBillingStatus(closed)).toBe('expired');
-  expect(projectBillingStatus({ ...closed, method_review_reason: 'verified_checkout_absent' })).toBe('expired');
+  // Walkthrough item 3: a left checkout reads 已取消, never 待支付 or 已过期.
+  expect(projectBillingStatus(closed)).toBe('canceled');
+  expect(projectBillingStatus({ ...closed, method_review_reason: 'verified_checkout_absent' })).toBe('canceled');
+  expect(projectBillingStatus({ ...closed, method_review_reason: 'checkout_not_dispatched' })).toBe('canceled');
   expect(projectBillingStatus({ ...closed, method_review_reason: 'card_checkout_rejected' })).toBe('failed');
   expect(projectBillingStatus({ ...closed, method_review_reason: 'async_payment_failed' })).toBe('failed');
   // Still open, or money observed after the close: never hidden as closed.
@@ -28,6 +30,19 @@ it('shows a released unpaid checkout as closed while the stored pending state st
   expect(projectBillingStatus({ ...closed, fulfilled_at: '2026-10-11T16:50:00Z' })).toBe('pending');
   expect(projectBillingStatus({ ...closed, status: 'completed' })).toBe('completed');
   expect(projectBillingStatus({ status: 'pending' })).toBe('pending');
+});
+it('walkthrough item 3: an open checkout is payable until its page expires, then reads canceled before the release lands', () => {
+  const now = Date.parse('2026-11-11T12:00:00Z');
+  const open = { status: 'pending', payment_status: 'unpaid', fulfilled_at: null, qualification_state: 'reserved',
+    purchase_closed_at: null, method_review_reason: null, method_checkout_expires_at: '2026-11-11T12:10:00Z' };
+  expect(projectBillingStatus(open, now)).toBe('pending');
+  expect(projectBillingStatus({ ...open, method_checkout_expires_at: '2026-11-11T11:59:00Z' }, now)).toBe('canceled');
+  // Paid, fulfilled, under review, or no known expiry: never shown as canceled.
+  for (const patch of [{ payment_status: 'paid' }, { fulfilled_at: '2026-11-11T11:00:00Z' }, { qualification_state: 'review' },
+    { method_checkout_expires_at: null }]) {
+    expect(projectBillingStatus({ ...open, method_checkout_expires_at: '2026-11-11T11:59:00Z', ...patch }, now)).toBe('pending');
+  }
+  expect(projectBillingStatus({ ...open, method_checkout_expires_at: null, status: 'completed' }, now)).toBe('completed');
 });
 it('immediately displays a failed wallet attempt while its open checkout remains reserved for retry', () => {
   const retryable = { status: 'pending', payment_status: 'unpaid', fulfilled_at: null, qualification_state: 'reserved',

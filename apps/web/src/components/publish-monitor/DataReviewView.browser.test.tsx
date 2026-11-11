@@ -25,8 +25,18 @@ const series = (connectionId: string, platform: string) => ({ connectionId, plat
 const ANSWERS: Record<string, unknown> = {
   'opc.library': { businesses: [] },
   'publishMonitor.connections': [],
-  'publishMonitor.data': { windowDays: 90, connections: [], posts: [] },
+  'publishMonitor.data': { windowDays: 90, connections: [{ id: 'c1', platform: 'douyin' }], posts: [0, 1, 2].map(index => ({
+    id: `p${index}`, connectionId: 'c1', source: 'tikhub', url: `https://example.com/p/${index}`, postedAt: '2026-11-03T08:00:00Z',
+    postedAtSource: 'provider', firstSeenAt: '2026-11-04T00:00:00Z', workItemId: null,
+    titleExcerpt: '一个很长很长的作品标题用来确认它在手机上会换行而不是把页面撑宽'.repeat(index + 1),
+    latest: { capturedOn: '2026-11-10', missingFields: ['shares'],
+      metrics: { views: 12_000 + index, impressions: 90_000, reach: 40_000, likes: 300, comments: 20, saves: 15, followers_gained: 4 } } })) },
   'publishMonitor.trend': { windowDays: 90, series: [series('c1', 'douyin'), series('c2', 'youtube')] },
+  'publishMonitor.features': { ownData: true, weeklyReview: true, publish: false },
+  'publishMonitor.review.list': [{ id: 'r1', periodStart: '2026-11-03T00:00:00Z', status: 'completed', body: '这一周的复盘正文。',
+    tables: null, notice: null, cadence: 'weekly', businessName: '测试品牌' }],
+  'publishMonitor.review.pillars': [{ businessId: 'b1', businessName: '测试品牌', source: 'user',
+    pillars: [{ key: 'k1', name: '读书笔记' }, { key: 'k2', name: '城市探店' }] }],
 };
 
 beforeAll(async () => {
@@ -50,11 +60,11 @@ beforeAll(async () => {
         if (id !== entry) return;
         return `import React from 'react'; import {createRoot} from 'react-dom/client';
           import {QueryClient,QueryClientProvider} from '@tanstack/react-query';
-          import {httpLink} from '@trpc/client'; import {trpc} from ${file('../../trpc/client.ts')};
+          import {httpBatchLink} from '@trpc/client'; import {trpc} from ${file('../../trpc/client.ts')};
           import frame from ${file('../opc/workspace-frame.module.css')};
           import {DataReviewView} from ${file('./DataReviewView.tsx')};
           const queryClient=new QueryClient({defaultOptions:{queries:{retry:false}}});
-          const client=trpc.createClient({links:[httpLink({url:'http://review.test/api/trpc'})]});
+          const client=trpc.createClient({links:[httpBatchLink({url:'http://review.test/api/trpc'})]});
           const h=React.createElement;
           createRoot(document.getElementById('root')).render(h(trpc.Provider,{client,queryClient},
             h(QueryClientProvider,{client:queryClient},h('div',{className:frame.workspace},
@@ -75,22 +85,32 @@ afterAll(async () => { await browser?.close(); }, 30000);
 /** The tick texts of every vertical axis (recharts 3 draws them in their own layer, beside the axis group). */
 const Y_TICKS = '.recharts-yAxis-tick-labels text';
 
-async function open(width: number, height: number, reducedMotion: 'reduce' | 'no-preference' = 'no-preference') {
+type Sent = { paths: string[]; at: number };
+async function open(width: number, height: number, reducedMotion: 'reduce' | 'no-preference' = 'no-preference', firstReadsTakeMs = 0) {
   const page = await browser.newPage({ viewport: { width, height }, reducedMotion });
   const errors: string[] = [];
+  // Every tRPC request in the order it left the page, and when the page's first reads were answered.
+  const sent: Sent[] = [];
+  const answered: { firstReads: number | null } = { firstReads: null };
   page.on('pageerror', error => errors.push(error.message));
   await page.route('**/*', async route => {
     const url = new URL(route.request().url());
     if (url.pathname === '/') return route.fulfill({ contentType: 'text/html', body: '<body style="margin:0"><div id="root"></div></body>' });
-    const data = ANSWERS[url.pathname.replace('/api/trpc/', '')] ?? {};
-    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ result: { data } }) });
+    const paths = url.pathname.replace('/api/trpc/', '').split(',');
+    sent.push({ paths, at: Date.now() });
+    const first = paths.includes('publishMonitor.data');
+    if (first && firstReadsTakeMs) await new Promise(resolve => setTimeout(resolve, firstReadsTakeMs));
+    // Batched like the app: one answer per read, in the order asked.
+    const body = paths.map(path => ({ result: { data: ANSWERS[path] ?? {} } }));
+    if (first) answered.firstReads = Date.now();
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) });
   });
   await page.goto('http://review.test/');
   await page.addStyleTag({ content: css });
   await page.addScriptTag({ content: code });
   await ui(page.getByRole('tab', { name: '数据趋势' })).toBeVisible({ timeout: 10000 });
   await ui(page.locator(Y_TICKS).first()).toBeVisible({ timeout: 10000 });
-  return { page, errors };
+  return { page, errors, sent, answered };
 }
 
 const top = (page: Page) => page.locator('figure').last().evaluate(node => Math.round(node.getBoundingClientRect().top));
@@ -135,3 +155,70 @@ it('fits a 360px screen: the tab bar and the account switch scroll sideways insi
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 30000);
+
+it('asks for the trend data with the first reads, in a request of its own, not after they are answered', async () => {
+  // 2026-11-11 (PERF): the trend read left only after the first reads came back, one round trip late. Here the first
+  // reads take 600 ms to answer; the trend read must already have left by then, and must not sit in their request.
+  const { page, sent, answered, errors } = await open(1280, 720, 'reduce', 600);
+  try {
+    const trend = sent.filter(request => request.paths.includes('publishMonitor.trend'));
+    expect(trend).toHaveLength(1);
+    expect(trend[0]!.paths).toEqual(['publishMonitor.trend']);
+    // The first reads did travel together, so "a request of its own" above is not an accident of the test setup.
+    expect(sent.find(request => request.paths.includes('publishMonitor.data'))!.paths).toContain('publishMonitor.connections');
+    expect(answered.firstReads).not.toBeNull();
+    expect(trend[0]!.at).toBeLessThan(answered.firstReads!);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 30000);
+
+it('posts read as a table on a desktop and as cards on a phone, from the same list, without a sideways scroll on the phone', async () => {
+  const wide = await open(1280, 720, 'reduce');
+  try {
+    await wide.page.getByRole('tab', { name: '作品数据' }).click();
+    const label = wide.page.locator('dl dt').first();
+    await ui(wide.page.getByText('发布日期', { exact: true })).toBeVisible();
+    await ui(label).toBeHidden();
+    expect(wide.errors).toEqual([]);
+  } finally { await wide.page.close(); }
+  const phone = await open(360, 780, 'reduce');
+  try {
+    await phone.page.getByRole('tab', { name: '作品数据' }).click();
+    // Eight numbers per post: on a phone each sits under its own label, and the column header row is gone.
+    await ui(phone.page.locator('dl dt').first()).toBeVisible();
+    await ui(phone.page.getByText('发布日期', { exact: true })).toBeHidden();
+    await ui(phone.page.getByText('平台不提供').first()).toBeVisible();
+    expect(await pageWidth(phone.page)).toBe(360);
+    const widest = await phone.page.locator('main li').evaluateAll(nodes => Math.max(...nodes.map(node => node.getBoundingClientRect().right)));
+    expect(widest).toBeLessThanOrEqual(360);
+    expect(phone.errors).toEqual([]);
+  } finally { await phone.page.close(); }
+}, 45000);
+
+it('weekly reviews: the settings sit beside the reading on a wide screen and fold away above it on a narrower one', async () => {
+  const wide = await open(1600, 800, 'reduce');
+  try {
+    await wide.page.getByRole('tab', { name: '每周复盘' }).click();
+    await ui(wide.page.getByText('这一周的复盘正文。')).toBeVisible();
+    // Wide: the pillars are there without a click, to the right of the review.
+    const pillar = wide.page.getByLabel('内容方向 1 名称');
+    await ui(pillar).toBeVisible();
+    await ui(wide.page.getByRole('button', { name: '复盘设置' })).toBeHidden();
+    const [reviewBox, pillarBox] = [await wide.page.getByText('这一周的复盘正文。').boundingBox(), await pillar.boundingBox()];
+    expect(pillarBox!.x).toBeGreaterThan(reviewBox!.x + reviewBox!.width);
+  } finally { await wide.page.close(); }
+  for (const [width, height] of [[1280, 720], [360, 780]] as const) {
+    const narrow = await open(width, height, 'reduce');
+    try {
+      await narrow.page.getByRole('tab', { name: '每周复盘' }).click();
+      await ui(narrow.page.getByText('这一周的复盘正文。')).toBeVisible();
+      const fold = narrow.page.getByRole('button', { name: '复盘设置' });
+      await ui(fold).toHaveAttribute('aria-expanded', 'false');
+      await ui(narrow.page.getByLabel('内容方向 1 名称')).toBeHidden();
+      await fold.click();
+      await ui(narrow.page.getByLabel('内容方向 1 名称')).toBeVisible();
+      expect(await pageWidth(narrow.page)).toBe(width);
+      expect(narrow.errors).toEqual([]);
+    } finally { await narrow.page.close(); }
+  }
+}, 60000);

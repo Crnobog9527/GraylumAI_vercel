@@ -12,11 +12,14 @@ import { VoiceWallJ } from '@/components/landing/preview-j/VoiceWallJ';
 import page from '@/components/landing/preview-j/j.module.css';
 import { CtaK } from '@/components/landing/preview-k/CtaK';
 import k from '@/components/landing/preview-k/k.module.css';
+import dawn from './dawn-l.module.css';
+import regions from './dawn-regions-l.module.css';
 import own from './l.module.css';
 import { StickyCtaMNO } from '@/components/landing/preview-mno/StickyCtaMNO';
 import { HERO } from '@/lib/landing/landing-copy';
 import { L_NOTE_ANSWERS, L_NOTE_HEADS, L_NOTE_REGIONS, L_OPS, L_PRICE_NOTE, L_VOICE_FOLD } from '@/lib/landing/landing-copy-l';
 import { J_JURY_PAGE, linkReady } from '@/lib/landing/landing-copy-j-chrome';
+import { L_SAMPLES_REDO } from '@/lib/landing/landing-copy-l-samples';
 import { allOn } from '@/lib/landing/landing-flags';
 import { goldFirstMonthLine } from '@/lib/landing/landing-pricing';
 import { cn } from '@/lib/utils';
@@ -56,7 +59,7 @@ export function SampleL({ data, siteName, extras, production = false, supportEma
   // the price page, not here, and the home page carries no "先聊后买" or Gold line.
   const terms = <p className={k.terms}>{allOn(extras.flags, ['signupGrant']) ? L_PRICE_NOTE.free : L_PRICE_NOTE.noCard}</p>;
   return (
-    <MotionJ className={cn(light.light, page.page, k.page, own.lines)}>
+    <MotionJ className={cn(light.light, page.page, k.page, own.lines, dawn.dawn, regions.regions)}>
       {production ? null : (
         <nav aria-label="样稿切换" className={page.sampleBar}>
           <span>不公开的风格样稿（L：K 的第二轮）</span>
@@ -73,7 +76,8 @@ export function SampleL({ data, siteName, extras, production = false, supportEma
         <VoiceWallJ notes={data.notes} open regions={L_NOTE_REGIONS} compact={L_VOICE_FOLD} after={<CtaK />}
           heads={L_NOTE_HEADS} answers={L_NOTE_ANSWERS} />
         {/* The home page's jury link goes to the public jury page (Owner 2026-10-18), once it exists; the samples keep the demo. */}
-        <StepsL flags={extras.flags} juryHref={production ? (linkReady(J_JURY_PAGE) ? J_JURY_PAGE : null) : undefined} />
+        <StepsL flags={extras.flags} juryHref={production ? (linkReady(J_JURY_PAGE) ? J_JURY_PAGE : null) : undefined}
+          samplesHref={extras.showSamples ? `#${L_SAMPLES_REDO.anchor}` : null} />
         {extras.showSamples ? <SamplesL /> : null}
         <ScenariosL flags={extras.flags} after={<CtaK />} />
         <PriceJ proMonthly={data.pricing.proMonthly} rows={data.compareRows} calm plainTotal checked={false} quiet

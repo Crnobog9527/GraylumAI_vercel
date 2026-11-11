@@ -18,7 +18,18 @@ export type PaywallPlanSource = {
   credits: { monthly: number; monthlyBonus: number };
   discount: number;
   checkoutReady: { monthly: boolean; yearly: boolean };
+  /** The plan's own entitlement switches (admin-set, `membership_plans.allow_fusion_*`); absent in an older answer. */
+  allowFusionReview?: boolean;
+  allowFusionCompare?: boolean;
+  /** How many positioning profiles the plan allows (`membership_plans.positioning_profile_limit`); absent until the catalog returns it. */
+  positioningProfileLimit?: number;
 };
+
+/** "3 个" for a plan's positioning-profile limit, or null when the catalog did not send a usable number. */
+export function profileLimitLabel(plan: Pick<PaywallPlanSource, 'positioningProfileLimit'> | undefined) {
+  const limit = plan?.positioningProfileLimit;
+  return typeof limit === 'number' && Number.isInteger(limit) && limit > 0 ? `${limit} 个` : null;
+}
 
 export type PaywallPlan = PaywallPlanSource & { level: PaywallLevel };
 

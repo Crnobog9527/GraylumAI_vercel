@@ -1,0 +1,90 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/*
+ * The home page's "晨光" layer (Owner 2026-11-11, LANDING-ART: the home page's look becomes sample D, its first screen
+ * carries the product's conversation window). Step one of two: what the whole page shares (the buttons, the header, the
+ * colours of the backdrop's light) and the first screen. The regions below the first screen follow in step two.
+ *
+ * Only SampleL's root carries `.dawn`. It sets values that j.module.css and backdrop-j.module.css read with their own
+ * values as the fallback, so the other public pages and the older samples stay exactly as they are. The page's colour
+ * tokens (--j-canvas, --j-ink …) are not changed: PublicShell.test.tsx keeps them equal to the shared --pub-* values.
+ */
+.dawn {
+  --j-header-bg: rgba(250, 250, 249, .74);
+  --j-pill-bg: linear-gradient(180deg, #2b2925, #141312);
+  --j-pill-bg-hover: linear-gradient(180deg, #3a3733, #1f1e1c);
+  --j-pill-shadow: inset 0 1px 0 rgba(255, 255, 255, .18), 0 1px 2px rgba(20, 19, 18, .3), 0 14px 28px -12px rgba(20, 19, 18, .5);
+  --j-pill-hover-y: -2px;
+  /* The backdrop's three pools of light: morning gold, a soft lilac, a peach (they were gold, grey and paper). */
+  --pool-gold: rgba(255, 178, 56, .3);
+  --pool-cool: rgba(190, 170, 255, .2);
+  --pool-paper: rgba(255, 176, 150, .26);
+}
+
+/* First screen: the text, then the product window standing in a pool of warm light. No longer one screen tall. */
+.hero.hero { min-height: 0; align-items: start; padding: clamp(40px, 8vh, 104px) 0 clamp(48px, 7vw, 96px); }
+.glow {
+  position: absolute; inset: -64px 0 auto; z-index: -1; height: calc(100% + 180px); pointer-events: none;
+  background:
+    radial-gradient(58% 40% at 50% 76%, rgba(255, 178, 56, .58), transparent 72%),
+    radial-gradient(38% 32% at 13% 62%, rgba(190, 170, 255, .46), transparent 72%),
+    radial-gradient(40% 34% at 88% 58%, rgba(255, 150, 140, .42), transparent 72%);
+}
+.title.title { font-size: clamp(42px, 7.6vw, 112px); line-height: 1.04; letter-spacing: -.045em; }
+
+/* The window: the product's own conversation and confirm area (StepOneFlowL's third picture), still, in a glass frame. */
+.stage { position: relative; width: min(1140px, 100%); margin-top: clamp(36px, 6vw, 76px); perspective: 2200px; }
+.window {
+  display: grid; grid-template-rows: auto minmax(0, 1fr); border-radius: 22px; overflow: hidden; text-align: left;
+  background: rgba(255, 255, 255, .86); backdrop-filter: blur(30px) saturate(1.5); -webkit-backdrop-filter: blur(30px) saturate(1.5);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .9), 0 0 0 1px rgba(20, 19, 18, .07), 0 50px 90px -40px rgba(140, 80, 0, .45),
+    0 120px 180px -80px rgba(140, 80, 0, .35);
+  transform-origin: 50% 0;
+}
+.bar { display: flex; align-items: center; gap: 18px; padding: 13px 20px; border-bottom: 1px solid rgba(20, 19, 18, .08); font-size: 13px; white-space: nowrap; }
+.stages { display: flex; gap: 18px; min-width: 0; margin: 0; padding: 0; overflow: hidden; list-style: none; color: var(--j-muted); }
+.stages li { display: flex; align-items: center; gap: 7px; }
+.stages li span { display: grid; place-items: center; width: 19px; height: 19px; border-radius: 50%; background: #f0efeb; color: var(--j-ink); font-size: 11px; }
+.stages li[data-on] { color: var(--j-ink); font-weight: 600; }
+.stages li[data-on] span { background: var(--j-ink); color: #fff; }
+.bar > :last-child { margin-left: auto; }
+/* The picture's room: fixed, as the modules' pictures are, so nothing moves around it; its parts size to its width. */
+.screen {
+  position: relative; height: clamp(380px, 38vw, 560px); overflow: hidden; background: #fff; color: #262626; font-size: 14px;
+  contain: layout paint; container-type: inline-size;
+}
+@media (max-width: 639px) {
+  .stages li:not([data-on]) { display: none; }
+  .screen { height: 440px; }
+  /* A phone's window is too short for the whole picture: it keeps the top in view (the one-sentence position), where
+     region 3's pictures keep their newest part. The picture's holder is flow-l.module.css's .feed > div. */
+  .screen > div > div { transform: none; }
+}
+
+/* Two small cards beside the window where the screen is wide enough to hold them clear of it: what the coach found, what the week's review said. */
+.card {
+  position: absolute; z-index: 2; width: 244px; padding: 14px 16px; border-radius: 18px; text-align: left; font-size: 12.5px; line-height: 1.6;
+  color: var(--j-ink); background: rgba(255, 255, 255, .8); backdrop-filter: blur(20px) saturate(1.6); -webkit-backdrop-filter: blur(20px) saturate(1.6);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .9), 0 0 0 1px rgba(20, 19, 18, .06), 0 30px 50px -24px rgba(120, 70, 0, .5);
+}
+.card h3 { margin: 0 0 6px; color: var(--j-muted); font-size: 12px; font-weight: 600; }
+.card p { margin: 0; }
+.card ul { margin: 0; padding: 0; list-style: none; }
+.card li { display: flex; justify-content: space-between; gap: 10px; padding: 6px 0; border-bottom: 1px solid rgba(20, 19, 18, .08); }
+.card li:last-child { border-bottom: 0; }
+.card li span { color: #2f6a3b; font-size: 11.5px; white-space: nowrap; }
+.card strong { display: block; font-size: 17px; font-weight: 600; line-height: 1.4; letter-spacing: -.01em; }
+.card em { display: inline-block; margin-top: 8px; padding: 1px 9px; border-radius: 999px; background: #eaf4ec; color: #2f6a3b; font-size: 11.5px; font-style: normal; }
+.found { left: -206px; bottom: 72px; rotate: -3deg; }
+.review { right: -206px; top: 96px; rotate: 2.5deg; }
+@media (max-width: 1599px) { .card { display: none; } }
+
+@media (prefers-reduced-motion: no-preference) {
+  .found { animation: drift 8s ease-in-out infinite alternate; }
+  .review { animation: drift 10s -4s ease-in-out infinite alternate; }
+  /* The window leans back a little and stands up as the page scrolls: a transform only, and only where the browser can tie it to scrolling. */
+  @supports (animation-timeline: scroll()) {
+    .window { animation: stand linear both; animation-timeline: scroll(root); animation-range: 0 60vh; }
+  }
+}
+@keyframes drift { from { translate: 0 -6px; } to { translate: 0 8px; } }
+@keyframes stand { from { transform: rotateX(8deg) scale(.975); } to { transform: none; } }

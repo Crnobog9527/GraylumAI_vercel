@@ -3,7 +3,9 @@
 
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { CHECKOUT_COPY, methodCopy, TERMS_LINKS, refundPolicyHref, type CheckoutMethod, type MethodPurchase } from './methodCheckout';
+import {
+  CHECKOUT_COPY, methodCopy, renewalMethods, TERMS_LINKS, refundPolicyHref, type CheckoutMethod, type MethodPurchase,
+} from './methodCheckout';
 import type { MethodCheckout } from './useMethodCheckout';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 
@@ -41,9 +43,7 @@ export function MethodCheckoutForm(props: Props) {
   const { checkout, purchase, testIdPrefix: id } = props;
   const itemType = purchase?.itemType ?? 'membership_plan';
   const billingCycle = purchase?.billingCycle ?? props.billingCycle;
-  const methods = checkout.methodsFor(itemType, billingCycle)
-    .filter(method => purchase?.transition !== 'wallet_renewal' || checkout.entry?.purchaseChannel === 'waffo'
-      || method === 'wechat_pay' || method === 'alipay');
+  const methods = renewalMethods(checkout.methodsFor(itemType, billingCycle), purchase, checkout.entry?.purchaseChannel);
   const [picked, setPicked] = useState<CheckoutMethod>('card');
   // Consent is to one terms version: if methodMembership refetches a newer one (e.g. after reading the terms in
   // another tab), the box clears and must be ticked again for that version.

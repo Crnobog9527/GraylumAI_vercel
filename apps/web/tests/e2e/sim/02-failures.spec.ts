@@ -7,7 +7,8 @@ import { armFault, db, expectNothingFrozen, lastTurnId, ledger, resetSim, runRec
 /**
  * Injected provider failures on a free-chat turn. Whatever happens, the turn must end closed and settled under the existing rules
  * (CORE-PATH-V2 2.5): a 402 refusal charges nothing; a broken or silent stream keeps the freeze until the recovery job finds the
- * provider's receipt (charge what it says, never more than was frozen) or learns there is none (refund, #1667); never twice.
+ * provider's receipt or learns there is none (#1667); never twice. Owner 2026-11-11: the part of a cut-off reply the user was shown
+ * is saved and the turn is charged by its receipt like any answered turn; a turn that showed nothing saved no answer and pays nothing.
  */
 test.beforeEach(resetSim);
 
@@ -59,11 +60,24 @@ test('402 from the provider: refused before generation, nothing charged, nothing
   await expectNothingFrozen(seed().users.bob.id);
 });
 
-test('stream cut after ~0.5 s with a receipt: frozen until recovery, then charged what the receipt says, once', async ({ page }) => {
-  const { turn, before } = await failedTurn(page, { mode: 'cut' });
-  expect(turn.close_kind).toBe('interrupted');
+// Owner 2026-11-11 and the review of #1860. The simulator sends two text frames before it cuts the stream: what was shown is saved as
+// the reply, the turn is delivered, and the receipt recovery finds is charged once. (Before: nothing was saved.)
+test('stream cut after text was shown, with a receipt: the shown part is saved, frozen until recovery, then charged what the receipt says, once', async ({ page }) => {
+  const bob = seed().users.bob;
+  const { turn, before } = await failedTurn(page, { mode: 'cut', receipt: true });
+  expect(turn.close_kind).toBe('completed');
+  expect(turn.failure_code).toBe('turn_reply_cut');
+  const saved = await db()`select role, content from session_messages
+    where turn_id = ${turn.id}::bigint and visible order by seq`;
+  expect(saved.map(m => m.role)).toEqual(['user', 'assistant']);
+  // What was shown when the connection dropped: the first frame for certain, the second only if it was read before the drop.
+  const whole = '模拟回复的前半，然后连接断了', shown = String(saved[1]!.content);
+  expect(shown.startsWith('模拟回复的前半') && whole.startsWith(shown), `saved: ${shown}`).toBe(true);
+  // The page says the reply was cut and that what was shown is kept.
+  await expect(page.getByText('已显示的内容已经保存', { exact: false })).toBeVisible({ timeout: 30_000 });
   const settled = await expectSettledBy(turn.id, before);
-  expect(settled.charged ?? 0, 'the provider billed the cut generation').toBeGreaterThan(0);
+  expect(settled.charged ?? 0, 'the provider billed the cut generation and its shown part was delivered').toBeGreaterThan(0);
+  expect((await ledger(bob.id)).credits).toBe(before - (settled.charged ?? 0));
 });
 
 /**
@@ -89,7 +103,8 @@ async function expectHeldThenRefunded(turn: Turn, before: number) {
 
 test('stream cut and the provider has no record: frozen for 24 hours, then refunded once (0489)', async ({ page }) => {
   const { turn, before } = await failedTurn(page, { mode: 'cut', receipt: false });
-  expect(turn.close_kind).toBe('interrupted');
+  // The shown part is saved (the turn is delivered), but the provider never billed the call: nothing is charged for it.
+  expect(turn.close_kind).toBe('completed');
   await expectHeldThenRefunded(turn, before);
 });
 

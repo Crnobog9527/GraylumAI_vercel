@@ -280,6 +280,13 @@
   min-width: 0;
   height: 176px;
 }
+/* Where a chart will be drawn, while its drawing code is on the way. */
+.plotWait {
+  width: 100%;
+  height: 100%;
+  border-radius: 8px;
+  background: var(--pm-subtle);
+}
 .gap {
   display: flex;
   align-items: center;
@@ -300,6 +307,589 @@
   padding: 10px 14px;
   border-radius: 8px;
   background: var(--pm-subtle);
+  color: var(--pm-secondary);
+  font-size: 12px;
+  list-style: none;
+}
+
+/* Shared by the posts, accounts and import tabs: a section head, fields the page draws itself, small notices. */
+.sectionHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  margin: 0 0 6px;
+}
+.sectionHead h2,
+.subTitle {
+  font-size: 14px;
+  font-weight: 600;
+}
+.page .select {
+  max-width: 100%;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--pm-border-control);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--pm-text);
+  font-size: 13px;
+}
+.page .select:focus-visible {
+  outline: 2px solid var(--pm-text);
+  outline-offset: 1px;
+}
+.card {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--pm-border);
+  border-radius: 12px;
+  background: #fff;
+}
+.cardStack {
+  display: grid;
+  gap: 10px;
+}
+.hint {
+  margin: 0;
+  color: var(--pm-secondary);
+  font-size: 12px;
+}
+.error {
+  margin: 0;
+  color: var(--pm-error);
+  font-size: 13px;
+}
+.done {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--pm-success-bg);
+  color: var(--pm-success);
+  font-size: 13px;
+}
+.quietNote {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--pm-subtle);
+  color: var(--pm-strong);
+  font-size: 13px;
+}
+.page .textButton {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--pm-secondary);
+  font-size: 13px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.page .textButton:hover {
+  color: var(--pm-text);
+}
+.rowActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.pushRight {
+  margin-left: auto;
+}
+.tile {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--pm-text);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+}
+.stepNumber {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin-right: 8px;
+  border-radius: 999px;
+  background: var(--pm-muted);
+  color: var(--pm-strong);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+/*
+ * Posts: one list for every width. From 701px it reads as a table (a header row, one line per post, the same column
+ * template on both through --pm-columns); on a phone each post is a card with its numbers in a grid, each under its
+ * own label, so nothing has to be scrolled sideways.
+ */
+.postsScroll {
+  overflow-x: auto;
+}
+.posts {
+  min-width: calc(330px + var(--pm-metrics) * 76px);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.postsHead,
+.postRow {
+  display: grid;
+  grid-template-columns: minmax(200px, 2.4fr) 112px repeat(var(--pm-metrics), minmax(64px, 1fr)) 76px;
+  align-items: start;
+  gap: 0 12px;
+}
+.postsHead {
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--pm-subtle);
+  color: var(--pm-secondary);
+  font-size: 12px;
+}
+.post {
+  border-bottom: 1px solid var(--pm-border);
+}
+.postRow {
+  padding: 10px 12px;
+  font-size: 13px;
+  transition: background-color 150ms ease;
+}
+.postRow:hover {
+  background: var(--pm-subtle);
+}
+.postTitle {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.postTitle a {
+  color: var(--pm-text);
+  text-decoration: underline;
+  text-decoration-color: #dcdcdc;
+  text-underline-offset: 3px;
+}
+.postTitle a:hover {
+  text-decoration-color: var(--pm-text);
+}
+.postTitle small,
+.postDate small {
+  display: block;
+  color: var(--pm-secondary);
+  font-size: 12px;
+}
+.metrics {
+  display: contents;
+}
+.metric {
+  min-width: 0;
+  margin: 0;
+}
+.metric dt {
+  display: none;
+}
+.metric dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+.metric dd[data-missing='true'] {
+  color: #999;
+  font-size: 12px;
+}
+.postMore {
+  justify-self: end;
+}
+.postDetail {
+  display: grid;
+  gap: 10px;
+  padding: 4px 12px 14px;
+}
+.miniTableWrap {
+  overflow-x: auto;
+}
+.miniTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  text-align: left;
+}
+.miniTable th {
+  padding: 6px 12px 6px 0;
+  color: var(--pm-secondary);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.miniTable td {
+  padding: 6px 12px 6px 0;
+  border-top: 1px solid var(--pm-border);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.inlineField {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+/* Accounts. */
+.accounts {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.account {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--pm-border);
+  border-radius: 12px;
+  background: #fff;
+}
+.accountMain {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.accountName {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 2px 12px;
+}
+.accountName strong {
+  font-size: 14px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.accountName span {
+  color: var(--pm-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.accountState {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  color: var(--pm-secondary);
+  font-size: 13px;
+}
+.accountState::before {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--pm-success);
+  content: '';
+  transform: translateY(-1px);
+}
+.accountState[data-tone='warning'] {
+  color: var(--pm-warning);
+}
+.accountState[data-tone='warning']::before {
+  background: #c79a3c;
+}
+.accountState[data-tone='error'] {
+  color: var(--pm-error);
+}
+.accountState[data-tone='error']::before {
+  background: var(--pm-error);
+}
+.accountActions {
+  grid-column: 2;
+  margin-top: 8px;
+}
+.benchmarkRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--pm-border);
+  font-size: 13px;
+}
+.benchmarkRow small {
+  margin-left: 8px;
+  color: var(--pm-secondary);
+  font-size: 12px;
+}
+.benchmarkForm {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) minmax(0, 200px) auto;
+  gap: 8px;
+  margin-top: 4px;
+}
+.formStack {
+  display: grid;
+  gap: 10px;
+  font-size: 13px;
+}
+.field {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+}
+.field > span,
+.formStack legend {
+  font-weight: 500;
+}
+.field .select,
+.formStack .select {
+  width: 100%;
+}
+.fieldset {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 14px;
+  border: 1px solid var(--pm-border);
+  border-radius: 8px;
+  background: var(--pm-subtle);
+}
+.fieldset legend {
+  padding: 0 4px;
+}
+.check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.radios {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.radios input {
+  accent-color: var(--pm-text);
+}
+.twoFields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+/* Table import: the real file input covers the drop area, so a click, the keyboard and a dropped file are one control. */
+.drop {
+  position: relative;
+  display: block;
+  padding: 18px 16px;
+  border: 1px dashed #dcdcdc;
+  border-radius: 8px;
+  background: var(--pm-subtle);
+  color: var(--pm-secondary);
+  font-size: 13px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 150ms ease, background-color 150ms ease;
+}
+.drop strong {
+  color: var(--pm-text);
+  font-weight: 500;
+  text-decoration: underline;
+}
+.drop small {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+}
+.drop:hover,
+.drop[data-over='true'] {
+  border-color: var(--pm-text);
+  background: #fff;
+}
+.drop:focus-within {
+  outline: 2px solid var(--pm-text);
+  outline-offset: 2px;
+}
+.drop input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+.previewBox {
+  max-height: 384px;
+  overflow: auto;
+  border: 1px solid var(--pm-border);
+  border-radius: 8px;
+  padding: 0 12px;
+}
+.previewBox thead {
+  position: sticky;
+  top: 0;
+  background: #fff;
+}
+.problemList {
+  max-height: 160px;
+  margin: 0;
+  padding: 8px 12px;
+  overflow-y: auto;
+  border-radius: 8px;
+  background: var(--pm-subtle);
+  color: var(--pm-secondary);
+  font-size: 12px;
+  list-style: none;
+}
+
+/*
+ * Weekly reviews: the reviews are the reading column; the settings sit beside them on a wide screen and fold away
+ * above them on a narrow one (the fold is CSS only: a wide screen never hides them).
+ */
+.lead a {
+  color: var(--pm-text);
+  text-decoration: underline;
+}
+.reviewLayout {
+  display: grid;
+  gap: 12px;
+}
+.reviewLayout[data-settings='true'] {
+  grid-template-columns: minmax(0, 1fr) 360px;
+  align-items: start;
+  gap: 16px;
+}
+.reviewMain {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.reviewSide {
+  position: sticky;
+  top: 0;
+  min-width: 0;
+}
+.reviewSideTitle {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.reviewSideTitle button {
+  display: none;
+}
+.reviewSideBody {
+  display: grid;
+  gap: 8px;
+}
+.switchRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+}
+.review {
+  min-width: 0;
+  border: 1px solid var(--pm-border);
+  border-radius: 12px;
+  background: #fff;
+}
+.review > .error {
+  padding: 0 16px 12px;
+}
+.reviewWait {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+}
+.reviewHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 12px;
+  padding: 12px 16px;
+}
+.reviewHead h3 {
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.reviewHead > span {
+  color: var(--pm-secondary);
+  font-size: 12px;
+}
+.page .reviewHead button,
+.page .reviewSideTitle button {
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--pm-text);
+  font-size: inherit;
+  font-weight: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.page .reviewHead button {
+  display: inline-flex;
+}
+.reviewHead button svg,
+.reviewSideTitle button svg {
+  flex: none;
+  color: var(--pm-secondary);
+  transition: transform 150ms ease;
+}
+.review[data-open='true'] .reviewHead button svg,
+.reviewSide[data-open='true'] .reviewSideTitle button svg {
+  transform: rotate(180deg);
+}
+.reviewHead button:focus-visible,
+.reviewSideTitle button:focus-visible {
+  outline: 2px solid var(--pm-text);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+.reviewBody {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  padding: 4px 16px 16px;
+  border-top: 1px solid var(--pm-border);
+  animation: pm-fade 150ms ease both;
+}
+/* The written part reads like a message of the conversation: 15px, line height 1.75, a comfortable measure. */
+.reviewText {
+  max-width: 44em;
+  padding-top: 10px;
+  color: #444;
+  font-size: 15px;
+  line-height: 1.75;
+}
+.reviewData {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: var(--pm-subtle);
+}
+.reviewData:empty {
+  display: none;
+}
+.reviewData th {
+  color: var(--pm-secondary);
+  white-space: nowrap;
+}
+.reviewWeeks {
+  margin: 0;
+  padding: 0;
   color: var(--pm-secondary);
   font-size: 12px;
   list-style: none;
@@ -405,9 +995,18 @@
   height: 19px;
   margin-bottom: 14px;
 }
-/* The inert tab bar drawn while the first read runs. */
+/* The place of the tab bar while the first read runs: grey bars exactly as wide as the labels (the label text sizes the
+   bar and is not painted), so nothing moves when the real tabs or the upgrade notice arrive. */
 .page span.tab {
   cursor: default;
+}
+.skTab {
+  border-radius: 4px;
+  background: #ebebeb;
+  color: transparent;
+  font-style: normal;
+  user-select: none;
+  animation: pm-pulse 1.4s ease-in-out infinite;
 }
 .skKpi {
   height: 108px;
@@ -455,12 +1054,119 @@
   }
 }
 
+/* Below 1360px the reading column would be too narrow for a review's tables next to the settings. */
+@media (max-width: 1359px) {
+  .reviewLayout[data-settings='true'] {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+  /* Narrow: the settings come first, folded to one row unless opened. */
+  .reviewSide {
+    position: static;
+    order: -1;
+    padding: 10px 14px;
+    border: 1px solid var(--pm-border);
+    border-radius: 12px;
+  }
+  .reviewSideTitle {
+    margin: 0;
+  }
+  .reviewSideTitle span {
+    display: none;
+  }
+  .page .reviewSideTitle button {
+    display: flex;
+    justify-content: space-between;
+    width: 100%;
+    min-height: 28px;
+  }
+  .reviewSide[data-open='false'] .reviewSideBody {
+    display: none;
+  }
+  .reviewSide[data-open='true'] .reviewSideBody {
+    margin-top: 10px;
+  }
+}
 @media (max-width: 900px) {
   .kpis {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 @media (max-width: 700px) {
+  .postsScroll {
+    overflow-x: visible;
+  }
+  .posts {
+    display: grid;
+    gap: 8px;
+    min-width: 0;
+  }
+  .postsHead {
+    display: none;
+  }
+  .post {
+    border: 1px solid var(--pm-border);
+    border-radius: 12px;
+  }
+  .postRow {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px 12px;
+    padding: 12px;
+  }
+  .postRow:hover {
+    background: none;
+  }
+  .postTitle {
+    grid-column: 1 / -1;
+    font-weight: 500;
+  }
+  .postDate {
+    color: var(--pm-secondary);
+    font-size: 12px;
+  }
+  .postDate small {
+    display: inline;
+  }
+  .postMore {
+    grid-row: 2;
+    grid-column: 2;
+  }
+  .metrics {
+    display: grid;
+    grid-column: 1 / -1;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px 10px;
+    margin-top: 4px;
+    padding-top: 10px;
+    border-top: 1px solid var(--pm-border);
+  }
+  .metric dt {
+    display: block;
+    overflow: hidden;
+    color: var(--pm-secondary);
+    font-size: 11px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .postDetail {
+    padding: 0 12px 12px;
+  }
+  .account {
+    padding: 12px;
+  }
+  .accountActions {
+    grid-column: 1 / -1;
+  }
+  .benchmarkForm,
+  .twoFields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .card {
+    padding: 14px 12px;
+  }
+  .page .select {
+    height: 40px;
+  }
   .head {
     padding: 12px 16px 0;
   }
@@ -517,7 +1223,8 @@
 @media (prefers-reduced-motion: reduce) {
   .panel,
   .rise,
-  .sk {
+  .sk,
+  .skTab {
     animation: none;
   }
   .page .tab,
@@ -525,5 +1232,14 @@
   .page .button,
   .page .buttonQuiet {
     transition: none;
+  }
+  .postRow,
+  .drop,
+  .reviewHead button svg,
+  .reviewSideTitle button svg {
+    transition: none;
+  }
+  .reviewBody {
+    animation: none;
   }
 }

@@ -541,16 +541,18 @@ try{
   assert.equal(await balance(a),940);
   await record(a,o.turnId,1,{n:0.01});
   const settled=await close(a,o.turnId,'interrupted',{messages:[],delivered:false});
-  assert.deepEqual([settled.closeKind,settled.chargedCredits,settled.settlement,settled.replay],['interrupted',6,'done',true]);
-  assert.equal(await balance(a),994);
+  // Owner 2026-11-11 (migration turn_interrupted_no_charge): the turn was cut off and saved no answer, so the late receipt is not
+  // charged (before: D = 6, 54 back); the stop-loss still counts its cost below.
+  assert.deepEqual([settled.closeKind,settled.chargedCredits,settled.absorbedCredits,settled.settlement,settled.replay],['interrupted',0,6,'done',true]);
+  assert.equal(await balance(a),1000);
   const after=await dayTotals();
   assert.ok(near(Number(after.s)-Number(before.s),0.01),`spent ${after.s} - ${before.s}`);
   assert.ok(near(Number(after.r),Number(before.r)),`reserved ${after.r} vs ${before.r}`);
   // Again: nothing more happens.
-  assert.equal((await close(a,o.turnId,'interrupted')).chargedCredits,6);
-  assert.equal(await balance(a),994);
+  assert.equal((await close(a,o.turnId,'interrupted')).chargedCredits,0);
+  assert.equal(await balance(a),1000);
   assert.ok(near(Number((await dayTotals()).s),Number(after.s)));
-  assert.equal(await spends(a),6);
+  assert.equal(await spends(a),0);
   assert.equal(await one('select count(*)::int v from session_messages where session_id=$1',[a.session]),0);
   // A full refund owed at the close (failed, refundAll) is kept for the later settlement: D = 0.
   const b=await account(1000);
@@ -560,7 +562,7 @@ try{
   await record(b,ob.turnId,1,{n:0.01});
   assert.equal((await close(b,ob.turnId,'failed')).chargedCredits,0);
   assert.equal(await balance(b),1000);
-  report.checks.push('closed first, receipt late, settled by turn_close again: D=6 and 54 back once, stop-loss spent 0.01 and released, messages kept; a full refund owed at the close still applies');
+  report.checks.push('closed first (interrupted), receipt late, settled by turn_close again: nothing charged and the whole freeze back once (Owner 2026-11-11), stop-loss spent 0.01 and released; a full refund owed at the close still applies');
  }
  // 22. The per-kind hook (controller 10-28): turn_open returns kindContext (null until a kind adds its branch); turn_close takes
  // p_kind_result and refuses it while no kind handles one, without closing the turn; the replay of a closed turn ignores it.
@@ -587,8 +589,9 @@ try{
   await close(a,o.turnId,'interrupted',{messages:[],delivered:false});
   await record(a,o.turnId,1,{n:0.01});await record(a,o.turnId,2,{n:0.02});
   const settled=await close(a,o.turnId,'interrupted');
-  assert.deepEqual([settled.chargedCredits,settled.settlement],[6,'done'],'D = 6 from the model; the late tool receipt (12) is not charged');
-  assert.equal(await balance(a),994);
+  // Owner 2026-11-11: the turn was cut off, so neither late receipt is charged (before: D = 6 from the model, the tool's 12 never).
+  assert.deepEqual([settled.chargedCredits,settled.settlement],[0,'done'],'an interrupted turn charges nothing for its late receipts');
+  assert.equal(await balance(a),1000);
 
   const r=await account(2000),mine=await reportSource(r),other=await reportSource(r);
   const rep=src=>openReport(r,src);

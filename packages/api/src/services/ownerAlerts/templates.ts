@@ -127,6 +127,11 @@ const RENDERERS: Renderers = {
     line: `【AI 供应商】${provider(f.provider)} 说账户余额不够付钱，用户的 AI 调用正在失败（不扣用户积分）。请尽快去 ${provider(f.provider)} 充值。`,
     path: '/admin/costs',
   }),
+  model_blocked: () => ({
+    line: '【模型已暂停】有一个模型的一次调用，实际费用超过了系统预估的上限，系统已经暂停所有用户对这个模型的新调用（被拦下的对话不扣积分）。'
+      + '请到「系统设置 → 成本止损」的“被暂停的模型”核对它的价格，确认没问题后点“已核对价格，恢复调用”。',
+    path: '/admin/settings',
+  }),
   platform_absorb: f => ({
     line: `【平台垫付】${f.utcDate} 模型 ${f.model} 由平台承担的成本约 $${trimUsd(f.usd)}，超过了提醒线 $${trimUsd(f.thresholdUsd)}。`,
     path: '/admin/finance',

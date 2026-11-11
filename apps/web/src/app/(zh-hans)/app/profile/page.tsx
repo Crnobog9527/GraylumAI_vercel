@@ -36,6 +36,7 @@ import TicketsPanel from '@/components/profile/TicketsPanel';
 import { trpc } from '@/trpc/client';
 import { useBanner } from '@/hooks/use-banner';
 import { useCreditsBalance } from '@/hooks/use-credits';
+import { useProfilePrefetch } from '@/hooks/use-profile-prefetch';
 import { isProfileTab, withProfileTab, type ProfileTab } from '@/lib/profile-tabs';
 import { ProfileLoadError } from '@/components/profile/ProfileLoadError';
 import { PaymentNoticeInbox } from '@/components/profile/PaymentNoticeInbox';
@@ -70,6 +71,8 @@ function ProfilePageContent() {
     error: creditsError,
     refetch: refetchCreditsBalance,
   } = useCreditsBalance();
+  // The first tab's cards read four more things once they mount: asked for now, so they are not a second round of waiting.
+  useProfilePrefetch(activeTab);
   // The credit summary is read by the cards that show it. It must not hold the whole page: a
   // failing summary would keep the spinner up and remount those cards into another request.
   const isLoading = isProfileLoading || isBalanceLoading;
@@ -241,11 +244,13 @@ function ProfilePageContent() {
             {userProfile && activeTab === 'security' && <AccountErasureCard user={effectiveUser} />}
 
             {userProfile && activeTab === 'tickets' && (
+              // No key here. It used to be keyed on the view the panel reports, so opening a ticket ('detail') remounted
+              // the panel, which dropped the chosen ticket and showed the list again. The panel is only mounted on this
+              // tab, so `initialView` (where to open it next time: the list, or the form after 联系客服) is all it needs.
               <TicketsPanel
                 user={effectiveUser}
-                key={`${activeTab}-${ticketInitialView}`}
                 initialView={ticketInitialView}
-                onViewChange={(v) => setTicketInitialView(v as 'list' | 'create')}
+                onViewChange={(view) => setTicketInitialView(view === 'create' ? 'create' : 'list')}
               />
             )}
           </div>

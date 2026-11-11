@@ -1,5 +1,4 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { J_TAKEOVER_MOMENTS } from './landing-copy-j-takeover';
 import type { LandingFeature } from './landing-flags';
 
 /**
@@ -9,21 +8,31 @@ import type { LandingFeature } from './landing-flags';
  * being the Owner's title) are in landing-copy-l-later.ts (round five). Then the jury,
  * larger, and region 6 one scenario at a time. NEW lines are marked.
  */
-export type StepStage = { label: string; moment: number; note: string; needs?: readonly LandingFeature[] };
+export type StepStage = {
+  label: string; moment: number; note: string; needs?: readonly LandingFeature[];
+  /** After its line, the link to the page's sample reports (shown only while that region is). */
+  samples?: boolean;
+};
 
 export const L_STEPS = {
-  /** NEW: shown with the progress bar, the share of the step already seen. */
-  progress: '第一步进度',
-  /** NEW: for a visitor who has watched it before (remembered in this browser). */
+  /** Region 6's button for a visitor who has watched it before (remembered in this browser). */
   skip: '看过了，跳过这段',
+  /**
+   * Owner 2026-11-11 ("改成查看样例报告"): the report module's link to the sample reports already on the page (region 4),
+   * in place of the "查看完整报告" the held stage ended on; a module that loops cannot carry a button of its own.
+   */
+  samplesLink: '查看样例报告',
   one: {
     title: '第一步：先把你的定位挖清楚',
+    /**
+     * Owner 2026-11-11 ("文字也太多了"): each stage is a module with one line, cut out of the note it had before (sample
+     * J's notes, and sample L's own for the report), nothing added. Sample J keeps its notes whole.
+     */
     stages: [
-      { label: '了解你', moment: 0, note: J_TAKEOVER_MOMENTS[0].note },
-      { label: '诊断与平台对标', moment: 1, note: J_TAKEOVER_MOMENTS[1].note, needs: ['research'] },
-      { label: '定位与执行方案', moment: 2, note: J_TAKEOVER_MOMENTS[2].note },
-      // Owner 2026-10-18 (edit mode): sample L's own note; sample J keeps its own.
-      { label: '生成完整运营策略报告', moment: 3, note: '三步都确认后，AI 教练将根据你的信息生成定制化的策略分析报告。', needs: ['report'] },
+      { label: '了解你', moment: 0, note: '一次只问一个问题，清单跟着对话自动记。' },
+      { label: '诊断与平台对标', moment: 1, note: '先直说这条路能不能赚钱、难在哪，再用真实公开数据找对标。', needs: ['research'] },
+      { label: '定位与执行方案', moment: 2, note: '把前两步收成一句话定位，再落到第一个月具体怎么做。' },
+      { label: '生成完整运营策略报告', moment: 3, note: '三步都确认后，AI 教练将根据你的信息生成定制化的策略分析报告。', needs: ['report'], samples: true },
     ] as readonly StepStage[],
   },
 } as const;

@@ -7,7 +7,7 @@ import { Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { PaywallCompareTable } from '@/components/paywall/PaywallPlanPicker';
 import {
-  PLAN_FIT, formatUsd, monthlyCredits, paywallQuote, pickPaywallPlans, yearlyBadge,
+  PLAN_FIT, formatUsd, monthlyCredits, paywallQuote, pickPaywallPlans, profileLimitLabel, yearlyBadge,
   type PaywallBilling, type PaywallPlan, type PaywallPlanSource,
 } from '@/components/paywall/paywallPlans';
 import { PRICING_COPY as COPY } from './pricingContent';
@@ -34,6 +34,8 @@ function PricingPlansInner({ plans: source, links, offers }: {
   const founderUsd = useFounderPrice(offers?.founder);
   const badge = yearlyBadge(plans, founderUsd);
   const yearly = plans.some(plan => paywallQuote(plan, 'yearly'));
+  // The free tier's own number from the catalog ("1 个"), when the catalog sends it; the paid plans' are in the comparison table.
+  const freeLimit = profileLimitLabel(source.find(plan => plan.level === 'free'));
   if (plans.length === 0) {
     return <p role="status" className="text-center text-sm" style={{ color: 'var(--text-tertiary)' }}>{COPY.catalogUnavailable}</p>;
   }
@@ -60,7 +62,7 @@ function PricingPlansInner({ plans: source, links, offers }: {
           <h2 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>{COPY.freeName}</h2>
           <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>{COPY.freeFit}</p>
           <p><b className="text-3xl" style={{ color: 'var(--text-primary)' }}>$0</b></p>
-          <PointList points={COPY.freePoints} />
+          <PointList points={freeLimit ? [COPY.freePoints[0], `${freeLimit}定位档案`, ...COPY.freePoints.slice(1)] : COPY.freePoints} />
           <Link className="mt-2 rounded-lg border px-4 py-2 text-center text-sm font-medium" style={{ borderColor: 'var(--border-primary)',
             color: 'var(--text-primary)' }} href={links.signup}>{COPY.freeCta}</Link>
         </section>

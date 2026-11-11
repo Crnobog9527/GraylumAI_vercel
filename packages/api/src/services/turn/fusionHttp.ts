@@ -17,6 +17,7 @@ import { fusionAdmission, fusionCoreSetting } from './fusionCalls';
 import { fusionQuote } from './fusionQuote';
 import { codeOf, juryTurn } from './jury';
 import { QuoteError } from './quote';
+import { storable } from './storableText';
 import { eventStream } from './sse';
 
 /*
@@ -84,7 +85,7 @@ async function compareEstimate(deps: FusionHttpDeps, request: Request, actorId: 
 
 export async function handleTurnEstimate(request: Request, deps: FusionHttpDeps): Promise<Response> {
   let input;
-  try { input = estimateRequest.parse(await request.json()); } catch { return json(400, { error: 'TURN_REQUEST_INVALID' }); }
+  try { input = estimateRequest.parse(storable(await request.json())); } catch { return json(400, { error: 'TURN_REQUEST_INVALID' }); }
   const actorId = await admitted(request, deps);
   if (actorId instanceof Response) return actorId;
   try {
@@ -100,7 +101,7 @@ export async function handleTurnEstimate(request: Request, deps: FusionHttpDeps)
 
 export async function handleCompareStart(request: Request, deps: FusionHttpDeps): Promise<Response> {
   let input;
-  try { input = compareStartRequest.parse(await request.json()); } catch { return json(400, { error: 'TURN_REQUEST_INVALID' }); }
+  try { input = compareStartRequest.parse(storable(await request.json())); } catch { return json(400, { error: 'TURN_REQUEST_INVALID' }); }
   const actorId = await admitted(request, deps);
   if (actorId instanceof Response) return actorId;
   const { sessionId, question, skill, requestId, modelIds, shown } = input;

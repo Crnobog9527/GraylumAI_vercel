@@ -56,13 +56,52 @@ describe('profile-archive gate in front of the editable draft and topics pages',
     for (const html of await render()) expect(html).not.toContain('EDITABLE');
   });
 
-  it('leaves a deleted conversation and a failed draft read to the page itself, without reading profiles', async () => {
-    read = ok({ draftId: 'draft', conversationDeleted: true });
+  it('leaves a deleted conversation and a failed draft read to the page itself, whatever the profiles say', async () => {
+    // The profiles were asked for with the draft (see the test below), so an answer may be there. It is not used:
+    // pending, archived or unreadable, the page (which shows these two cases itself) is what opens.
+    const answers: Result[] = [{ isPending: true, isSuccess: false, isError: false, error: null }, ok(profile(true)), ok(profile(false)),
+      { isPending: false, isSuccess: false, isError: true, error: new Error('down') }];
+    for (const answer of answers) {
+      businesses = answer;
+      read = ok({ draftId: 'draft', conversationDeleted: true });
+      for (const html of await render()) expect(html).toBe('<p>EDITABLE</p>');
+      read = { isPending: false, isSuccess: false, isError: true, error: new Error('x') };
+      for (const html of await render()) expect(html).toBe('<p>EDITABLE</p>');
+    }
+  });
+
+  it('asks for the profiles together with the draft, not after it, and for nothing without a draft id', async () => {
+    // While the draft read is still out, the profile read is already on: tRPC sends the two in one request.
+    read = { isPending: true, isSuccess: false, isError: false, error: null };
     businesses = { isPending: true, isSuccess: false, isError: false, error: null };
-    for (const html of await render()) expect(html).toBe('<p>EDITABLE</p>');
+    enabled.businesses = false;
+    for (const html of await render()) { expect(html).toContain('page-skeleton'); expect(html).not.toContain('EDITABLE'); }
+    expect(enabled.businesses).toBe(true);
+    const { DraftArchiveGate } = await import('./draft-archive-gate');
+    expect(renderToStaticMarkup(<DraftArchiveGate draftId=""><p>EDITABLE</p></DraftArchiveGate>)).toBe('<p>EDITABLE</p>');
     expect(enabled.businesses).toBe(false);
-    read = { isPending: false, isSuccess: false, isError: true, error: new Error('x') };
-    for (const html of await render()) expect(html).toBe('<p>EDITABLE</p>');
+  });
+
+  it('whichever read answers first, nothing opens before both have: then active opens the page and archived the read-only view', async () => {
+    const pending: Result = { isPending: true, isSuccess: false, isError: false, error: null };
+    for (const archived of [false, true]) {
+      // The profiles first, the draft still out.
+      read = pending; businesses = ok(profile(archived));
+      for (const html of await render()) { expect(html).toContain('page-skeleton'); expect(html).not.toContain('EDITABLE'); expect(html).not.toContain('ARCHIVED_VIEW'); }
+      // The draft first, the profiles still out.
+      read = ok({ draftId: 'draft' }); businesses = pending;
+      for (const html of await render()) { expect(html).toContain('page-skeleton'); expect(html).not.toContain('EDITABLE'); expect(html).not.toContain('ARCHIVED_VIEW'); }
+      // Both in.
+      businesses = ok(profile(archived));
+      for (const html of await render()) {
+        if (archived) { expect(html).toContain('ARCHIVED_VIEW'); expect(html).not.toContain('EDITABLE'); } else expect(html).toBe('<p>EDITABLE</p>');
+      }
+    }
+    // Unreadable profiles, known before the draft is: still the placeholder, then the "try again" line, never the page.
+    read = pending; businesses = { isPending: false, isSuccess: false, isError: true, error: new Error('down') };
+    for (const html of await render()) { expect(html).toContain('page-skeleton'); expect(html).not.toContain('EDITABLE'); }
+    read = ok({ draftId: 'draft' });
+    for (const html of await render()) { expect(html).toContain('定位档案暂时读不出来'); expect(html).not.toContain('EDITABLE'); }
   });
 
   it('keeps the page mounted while its own read refetches a failed draft (no checking/unmount loop)', async () => {

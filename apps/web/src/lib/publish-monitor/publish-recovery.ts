@@ -5,7 +5,9 @@
  * request is kept per topic: key, targets, caption and each file's identity (never a media link).
  */
 export type StoredAttempt = { key: string; connectionIds: string[]; caption: string; maxHoldCredits: number;
-  media: Array<{ sha256: string; size: number; mimeType: string; coverMs: number | null }> };
+  media: Array<{ sha256: string; size: number; mimeType: string; coverMs: number | null }>;
+  /** PUBLISH-SCHEDULE: the chosen publish time (UTC instant), part of the request; absent or null publishes now. */
+  scheduledAt?: string | null };
 type Store = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 
 const slot = (workItemId: string) => `publish-monitor-attempt:${workItemId}`;
@@ -27,7 +29,9 @@ export function loadAttempt(workItemId: string, store: Store | null = defaultSto
     const value = JSON.parse(raw) as StoredAttempt;
     const valid = typeof value.key === 'string' && Array.isArray(value.connectionIds) && typeof value.caption === 'string'
       && Number.isInteger(value.maxHoldCredits) && Array.isArray(value.media) && value.media.every(m => SHA.test(m.sha256) && Number.isInteger(m.size)
-        && typeof m.mimeType === 'string' && (m.coverMs === null || Number.isInteger(m.coverMs)));
+        && typeof m.mimeType === 'string' && (m.coverMs === null || Number.isInteger(m.coverMs)))
+      && (value.scheduledAt === undefined || value.scheduledAt === null
+        || (typeof value.scheduledAt === 'string' && Number.isFinite(Date.parse(value.scheduledAt))));
     return valid ? value : null;
   } catch { return null; }
 }
