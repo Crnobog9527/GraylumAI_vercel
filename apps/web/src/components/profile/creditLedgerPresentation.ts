@@ -195,7 +195,8 @@ const INTERNAL_RECORD_NOTES: Record<string, string> = {
   'Refunded dispute reservation return': '争议订单退款',
   'Failed cash refund credit restoration': '退款没有成功，积分已恢复',
   'Payment dispute hold': '付款争议处理中，积分暂时冻结',
-  'Payment dispute hold withdrawn': '付款争议已解除，冻结的积分已恢复',
+  // pay_dispute_withdraw: an administrator lifts the hold and the credits come back; the dispute itself may still be open.
+  'Payment dispute hold withdrawn': '付款争议的冻结已撤销，积分已恢复',
   'Payment dispute in-flight adjustment': '付款争议期间的调整',
 };
 /** Descriptions that end in internal ids ("… [order:… refund:…]"): matched by how they begin; the longer beginning first. */

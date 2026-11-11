@@ -1,8 +1,9 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { readdirSync, readFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { creditRecordNote } from './creditLedgerPresentation';
 
 const read = (name: string) => readFileSync(fileURLToPath(new URL(`./${name}`, import.meta.url)), 'utf8');
@@ -48,16 +49,26 @@ describe('creditRecordNote', () => {
     expect(creditRecordNote('Approved package refund')).toBe('积分包退款');
     expect(creditRecordNote('Failed cash refund credit restoration')).toBe('退款没有成功，积分已恢复');
     expect(creditRecordNote('Payment dispute hold')).toBe('付款争议处理中，积分暂时冻结');
-    expect(creditRecordNote('Payment dispute hold withdrawn')).toBe('付款争议已解除，冻结的积分已恢复');
+    // Lifting the hold does not say the dispute is over (review of #1907).
+    expect(creditRecordNote('Payment dispute hold withdrawn')).toBe('付款争议的冻结已撤销，积分已恢复');
+    expect(creditRecordNote('Payment dispute hold withdrawn')).not.toContain('解除');
   });
+});
 
-  // Every description the database has ever written beside a ledger type, in the functions and in all migrations (old rows keep
-  // old texts): none may reach the page in English. A new English description added to the database turns this red.
-  it('no English description written by the database, now or in any earlier migration, reaches the page untranslated', () => {
+// Every description the database has ever written beside a ledger type, in the functions and in all migrations (old rows keep
+// old texts): none may reach the page in English. A new English description added to the database turns this red.
+describe('the database sources', () => {
+  let sql = '';
+  // About 1,400 files: read together, once, before the check (a cold disk made a one-by-one read inside the test too slow).
+  beforeAll(async () => {
     const root = fileURLToPath(new URL('../../../../../packages/db/', import.meta.url));
     const files = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap(entry =>
       entry.isDirectory() ? files(join(dir, entry.name)) : entry.name.endsWith('.sql') ? [join(dir, entry.name)] : []);
-    const sql = [...files(join(root, 'functions')), ...files(join(root, 'migrations'))].map(file => readFileSync(file, 'utf8')).join('\n');
+    const all = [...files(join(root, 'functions')), ...files(join(root, 'migrations'))];
+    sql = (await Promise.all(all.map(file => readFile(file, 'utf8')))).join('\n');
+  });
+
+  it('no English description written by the database, now or in any earlier migration, reaches the page untranslated', () => {
     const beside = /'(?:consumption|adjustment|addition|deduction|purchase|refund|bonus|grant|usage|membership)',\s*'([A-Za-z][^'\n]*\s[^'\n]*)'/g;
     const named = /'((?:AI (?:turn|call|run)|Opening grant|Web search|Research (?:cancelled|provider)|Stripe (?:subscription )?refund credit clawback)[^'\n]*)'/g;
     const written = [...new Set([...sql.matchAll(beside), ...sql.matchAll(named)].map(match => match[1]!))];
