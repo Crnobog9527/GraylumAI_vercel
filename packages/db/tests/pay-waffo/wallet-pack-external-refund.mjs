@@ -40,13 +40,13 @@ export async function walletPackExternalRefundCases({ admin, service, connect })
   for (const method of ['alipay', 'wechat_pay']) {
     // Full external refund: recorded for review, order ended, credits held (not taken), never twice.
     const p = await pack(method);
-    const first = (await record(p, `re_full_${method}`)).rows[0].v;
+    const first = (await record(p, `re_wallet_pack_full_${method}`)).rows[0].v;
     assert.deepEqual([first.state, first.duplicate, first.packCredits, first.balance], ['pack_review', false, 2990, 2990], method);
     assert.deepEqual((await admin.query('SELECT status,payment_status FROM payment_orders WHERE id=$1', [p.order])).rows[0],
       { status: 'refunded', payment_status: 'refunded' });
     assert.equal(await held(p), true, 'the pack credits are held for a person');
     assert.equal(await balance(p), 2990, 'nothing taken automatically (Owner 2026-10-14)');
-    const again = (await record(p, `re_full_${method}`)).rows[0].v;
+    const again = (await record(p, `re_wallet_pack_full_${method}`)).rows[0].v;
     assert.deepEqual([again.state, again.duplicate], ['pack_review', true], 'a replay repeats the review state, records nothing');
     assert.equal((await admin.query(`SELECT jsonb_array_length(payment_amount_facts) n FROM payment_orders WHERE id=$1`,
       [p.order])).rows[0].n, 1, 'one refund fact');
@@ -60,22 +60,22 @@ export async function walletPackExternalRefundCases({ admin, service, connect })
   }
   // Partial external refund: recorded for review, the pack stays, nothing held.
   const partial = await pack('alipay');
-  assert.equal((await record(partial, 're_partial', 1000)).rows[0].v.state, 'partial_review');
+  assert.equal((await record(partial, 're_wallet_pack_partial', 1000)).rows[0].v.state, 'partial_review');
   assert.equal(await held(partial), false);
   assert.equal(await balance(partial), 2990);
   // "kept": the hold is released and the credits are ordinary balance.
   const kept = await pack('wechat_pay', 2990, 3100);
-  await record(kept, 're_kept');
+  await record(kept, 're_wallet_pack_kept');
   assert.equal((await settle(ops, kept, 'kept')).rows[0].v.creditsTakenBack, 0);
   assert.deepEqual([await held(kept), await balance(kept)], [false, 3100]);
   // Concurrency: the webhook and the reconciliation record the same refund at once: one record, one review.
   const race = await pack('alipay');
   const [a, b] = [await connect(), await connect()];
   await Promise.all([a, b].map(c => c.query('SET ROLE service_role')));
-  const both = (await Promise.all([record(race, 're_race', 2990, a), record(race, 're_race', 2990, b)])).map(r => r.rows[0].v);
+  const both = (await Promise.all([record(race, 're_wallet_pack_race', 2990, a), record(race, 're_wallet_pack_race', 2990, b)])).map(r => r.rows[0].v);
   assert.deepEqual(both.map(r => r.state), ['pack_review', 'pack_review']);
   assert.equal(both.filter(r => r.duplicate).length, 1, 'exactly one of the two records it');
-  assert.equal((await admin.query(`SELECT count(*)::int n FROM payment_provider_refs WHERE object_type='refund' AND external_id='re_race'`))
+  assert.equal((await admin.query(`SELECT count(*)::int n FROM payment_provider_refs WHERE object_type='refund' AND external_id='re_wallet_pack_race'`))
     .rows[0].n, 1);
   return ['wallet-pack-external-full-review-held', 'wallet-pack-external-replay', 'wallet-pack-settle-admin-only',
     'wallet-pack-settle-clawback-once', 'wallet-pack-external-partial-review', 'wallet-pack-settle-kept',
