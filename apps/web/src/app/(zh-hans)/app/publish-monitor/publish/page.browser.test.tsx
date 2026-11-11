@@ -426,3 +426,50 @@ it('a remembered brand that is gone and holds no unconfirmed publish is forgotte
     await ui(page.getByRole('textbox')).toHaveValue('成果夹里的文案');
   } finally { await page.close(); }
 }, 30000);
+
+// PUBLISH-SCHEDULE: a chosen local time goes to the server as one UTC instant; the dialog says when and that the files
+// stay on a public link until then; the job then waits as scheduled with a way to the schedule page.
+it('schedules a post for a chosen local time: the time is sent as a UTC instant and the job waits as scheduled', async () => {
+  const at = new Date(Date.now() + 3 * 3600_000);
+  at.setSeconds(0, 0);
+  const local = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}T`
+    + `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  const scheduled = { ...job('scheduled', 'pending'), scheduledAt: at.toISOString() };
+  const { page, calls, errors } = await open(path => path === 'publishMonitor.publish.uploadUrl' ? slot(1)
+    : path === 'publishMonitor.publish.submit' ? { data: scheduled }
+      : path === 'publishMonitor.publish.job' ? { data: scheduled } : undefined);
+  try {
+    await page.getByRole('radio', { name: '定时发布' }).check();
+    await page.getByLabel('发布时间').fill(local(new Date(Date.now() + 5 * 60_000)));
+    await ui(page.getByText('最早只能排在 15 分钟以后。')).toBeVisible();
+    await ui(page.getByRole('button', { name: '定时发布', exact: true })).toBeDisabled();
+    await page.getByLabel('发布时间').fill(local(at));
+    await page.getByLabel('选择要发布的图片或视频').setInputFiles({ name: 'a.png', mimeType: 'image/png',
+      buffer: Buffer.from('89504e470d0a1a0a', 'hex') });
+    await page.getByRole('button', { name: '定时发布', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: '确认定时发布' });
+    await ui(dialog).toContainText('排期期间素材以公开链接的形式保存在发布服务里');
+    await ui(dialog).toContainText('改期或取消');
+    expect(count(calls, 'publishMonitor.publish.uploadUrl')).toBe(0);
+    await dialog.getByRole('checkbox').click();
+    await dialog.getByRole('button', { name: '确认定时发布' }).click();
+    await ui(page.getByText('已排期，会在设定时间发出')).toBeVisible();
+    await ui(page.getByRole('link', { name: '发布排期' })).toBeVisible();
+    const submit = calls.find(c => c.path === 'publishMonitor.publish.submit')!.input as Record<string, unknown>;
+    expect(submit.scheduledAt).toBe(at.toISOString());
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 30000);
+
+it('publishing now sends no scheduled time', async () => {
+  const { page, calls } = await open(path => path === 'publishMonitor.publish.uploadUrl' ? slot(1)
+    : path === 'publishMonitor.publish.submit' ? { data: job('unknown', 'pending') }
+      : path === 'publishMonitor.publish.job' ? { data: job('completed', 'published') } : undefined);
+  try {
+    await ui(page.getByRole('radio', { name: '立即发布' })).toBeChecked();
+    await pickImageAndConfirm(page);
+    await ui(page.getByText('本次扣除 6 积分')).toBeVisible();
+    const submit = calls.find(c => c.path === 'publishMonitor.publish.submit')!.input as Record<string, unknown>;
+    expect('scheduledAt' in submit).toBe(false);
+  } finally { await page.close(); }
+}, 30000);

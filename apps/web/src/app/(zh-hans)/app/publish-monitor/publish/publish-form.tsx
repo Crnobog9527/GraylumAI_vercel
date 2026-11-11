@@ -13,6 +13,8 @@ import {
 } from '@/lib/publish-monitor/publish-flow';
 import { clearAttempt, loadAttempt, saveAttempt, sameFiles, type StoredAttempt } from '@/lib/publish-monitor/publish-recovery';
 import { mediaDigest, MediaUploadError, uploadPublishFiles } from '@/lib/publish-monitor/upload-media';
+import { dateTimeLabel, fromLocalInput, timeProblem, toLocalInput, zoneLabel } from '@/lib/publish-schedule/schedule-view';
+import { defaultLaterValue, ScheduleChoice } from '@/components/publish-schedule/ScheduleChoice';
 import { trpc } from '@/trpc/client';
 import { MediaPicker, type PickedMedia } from './media-picker';
 import styles from './publish.module.css';
@@ -37,12 +39,18 @@ export function PublishForm({ businessId, workItemId, contextKey, targets, initi
   const [accepted, setAccepted] = useState(false);
   const [phase, setPhase] = useState<'idle' | 'uploading' | 'submitting'>('idle');
   const [error, setError] = useState('');
+  // PUBLISH-SCHEDULE: publish now, or at a chosen local time (sent as a UTC instant; part of the request's fingerprint).
+  const [when, setWhen] = useState<'now' | 'later'>('now');
+  const [laterValue, setLaterValue] = useState(() => defaultLaterValue());
   // A submit whose answer never arrived (lost answer, reload, crash): the next try reuses its key and uploads the files
   // again (an old media link is never reused). Storage keeps only the key and file identities (publish-recovery.ts).
   const [recovered, setRecovered] = useState<StoredAttempt | null>(null);
   useEffect(() => {
     const stored = loadAttempt(contextKey);
-    if (stored) { setRecovered(stored); setSelected(stored.connectionIds); setCaption(stored.caption); }
+    if (stored) {
+      setRecovered(stored); setSelected(stored.connectionIds); setCaption(stored.caption);
+      if (stored.scheduledAt) { setWhen('later'); setLaterValue(toLocalInput(Date.parse(stored.scheduledAt))); }
+    }
   }, [contextKey]);
   // Pending from confirmation until a definite outcome: while uploading or submitting, and while a lost answer is unresolved.
   useEffect(() => { onPendingChange?.(recovered !== null || phase !== 'idle'); }, [recovered, phase]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -61,8 +69,11 @@ export function PublishForm({ businessId, workItemId, contextKey, targets, initi
   // While an earlier submit is unconfirmed, what is published cannot change: another key could post and charge twice.
   const locked = recovered !== null;
   const mediaIssue = recovered ? null : mediaProblem(chosen.map(t => t.platform), media.map(m => m.file.type.toLowerCase()));
+  // In recovery the saved time decides (the server answers a replay whatever the time is now).
+  const scheduledAt = recovered ? recovered.scheduledAt ?? null : when === 'later' ? fromLocalInput(laterValue) : null;
+  const timeIssue = !recovered && when === 'later' ? timeProblem(scheduledAt, Date.now()) : null;
   const canPublish = targetCount > 0 && hold !== null && caption.trim().length > 0 && !tooLongForServer && mediaIssue === null
-    && !busy;
+    && timeIssue === null && !busy;
   const changed = <T,>(set: (value: T) => void) => (value: T) => { if (!locked) set(value); };
   // Shown with the accounts that can publish now first; the order decides nothing else.
   const listed = [...targets].sort((a, b) => Number(b.ready) - Number(a.ready));
@@ -88,6 +99,9 @@ export function PublishForm({ businessId, workItemId, contextKey, targets, initi
   async function publish() {
     setConfirming(false);
     setError('');
+    // The time may have come too close while the dialog was open: nothing is uploaded or held then.
+    const lateIssue = !recovered && when === 'later' ? timeProblem(scheduledAt, Date.now()) : null;
+    if (lateIssue) { setError(lateIssue); return; }
     const ids = recovered?.connectionIds ?? chosen.map(t => t.id);
     let submitting = false;
     let sent: StoredAttempt | null = null;
@@ -108,7 +122,7 @@ export function PublishForm({ businessId, workItemId, contextKey, targets, initi
           ...(recovered ? { idempotencyKey: recovered.key } : {}) }));
       const record: StoredAttempt = recovered ?? { key: newIdempotencyKey(), connectionIds: ids, caption, maxHoldCredits: hold ?? 0,
         media: uploaded.map((item, i) => ({ sha256: item.sha256, size: item.size, mimeType: item.mimeType,
-          coverMs: media[i]!.coverMs })) };
+          coverMs: media[i]!.coverMs })), ...(scheduledAt ? { scheduledAt } : {}) };
       setPhase('submitting');
       saveAttempt(contextKey, record);
       submitting = true;
@@ -116,7 +130,8 @@ export function PublishForm({ businessId, workItemId, contextKey, targets, initi
       const job = await submit.mutateAsync({ idempotencyKey: record.key, businessId, workItemId, connectionIds: record.connectionIds,
         caption: record.caption, maxHoldCredits: record.maxHoldCredits, media: uploaded.map((item, i) => ({ ...item,
           ...(record.media[i]!.coverMs !== null && item.mimeType.startsWith('video/')
-            ? { thumbnailTimestampMs: record.media[i]!.coverMs! } : {}) })) });
+            ? { thumbnailTimestampMs: record.media[i]!.coverMs! } : {}) })),
+        ...(record.scheduledAt ? { scheduledAt: record.scheduledAt } : {}) });
       discardEarlier();
       onSubmitted(job.id);
     } catch (cause) {
@@ -199,6 +214,12 @@ export function PublishForm({ businessId, workItemId, contextKey, targets, initi
           )}
         </section>
 
+        <section aria-labelledby="when" className={styles.card}>
+          <h2 id="when"><span className={styles.stepNumber} aria-hidden>4</span>什么时候发</h2>
+          <ScheduleChoice mode={when} value={laterValue} problem={timeIssue} disabled={busy || locked}
+            onModeChange={changed(setWhen)} onValueChange={changed(setLaterValue)} />
+        </section>
+
         {locked && <div role="status" className={styles.note}>
           <p>上一次提交还没有确认结果，可能已经发出。为了不重复发布和扣费，现在不能改账号和文案：请{recovered
             ? (recovered.media.length > 0 ? '按原来的顺序选择同样的文件，' : '')+'再点一次发布' : '再点一次发布'}，系统会认出是同一次。</p>
@@ -214,27 +235,31 @@ export function PublishForm({ businessId, workItemId, contextKey, targets, initi
           <div><dt>账号</dt><dd>{recovered ? `${targetCount} 个账号（和上一次相同）`
             : chosen.length > 0 ? chosen.map(t => platformName(t.platform)).join('、') : '还没有选'}</dd></div>
           <div><dt>素材</dt><dd>{media.length > 0 ? `${media.length} 个文件` : '不带图片或视频'}</dd></div>
+          <div><dt>时间</dt><dd>{scheduledAt ? dateTimeLabel(scheduledAt) : '立即发布'}</dd></div>
         </dl>
         {hold !== null && targetCount > 0 && <p className={styles.hold}>
           最多 {hold} 积分，只按发布成功的平台扣，失败不扣</p>}
         <Button className={styles.primary} disabled={!canPublish} onClick={() => { setAccepted(false); setConfirming(true); }}>
           {phase === 'uploading' ? '正在上传素材……' : phase === 'submitting' ? '正在提交……'
-            : recovered ? '再试一次（同一次发布，不会重复发）' : '发布'}</Button>
+            : recovered ? '再试一次（同一次发布，不会重复发）' : scheduledAt ? '定时发布' : '发布'}</Button>
       </aside>
 
       <Dialog open={confirming} onOpenChange={setConfirming}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>确认发布</DialogTitle>
+            <DialogTitle>{scheduledAt ? '确认定时发布' : '确认发布'}</DialogTitle>
             <DialogDescription>
-              发布到 {recovered ? `${targetCount} 个账号（和上一次相同）` : chosen.map(t => platformName(t.platform)).join('、')}，发出后在平台上公开可见；要删帖需要你自己去平台删除。
+              {scheduledAt ? `将在 ${dateTimeLabel(scheduledAt)}（${zoneLabel()}）` : ''}发布到 {recovered
+                ? `${targetCount} 个账号（和上一次相同）` : chosen.map(t => platformName(t.platform)).join('、')}，发出后在平台上公开可见；要删帖需要你自己去平台删除。
             </DialogDescription>
           </DialogHeader>
           <ul className="list-disc space-y-1 pl-5 text-sm">
             {hold !== null && <li>先冻结最多 {hold} 积分，结果确定后只按发布成功的平台扣，其余退回。</li>}
+            {scheduledAt && <li>发布前 10 分钟之前可以在“发布排期”里改期或取消，取消后冻结的积分全部退回。</li>}
             {media.length > 0 && <>
               <li>素材会上传到第三方发布服务 Post for Me，再由它发到各平台。</li>
               <li>发布期间素材是公开链接，拿到链接的人能看到。</li>
+              {scheduledAt && <li>排期期间素材以公开链接的形式保存在发布服务里，直到发出；我们无法提前删除。</li>}
               <li>发布成功后对方会删除素材；发布失败或没用上的素材，对方约一天内自动清理，我们无法提前删除。</li>
             </>}
           </ul>
@@ -244,7 +269,7 @@ export function PublishForm({ businessId, workItemId, contextKey, targets, initi
           </label>
           <DialogFooter>
             <Button variant="outline" onClick={() => setConfirming(false)}>取消</Button>
-            <Button disabled={!accepted} onClick={publish}>确认发布</Button>
+            <Button disabled={!accepted} onClick={publish}>{scheduledAt ? '确认定时发布' : '确认发布'}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -1,0 +1,150 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/*
+ * The home page's "晨光" layer, step two (Owner 2026-11-11, LANDING-ART): the regions under the first screen take
+ * sample D's look. Like step one (dawn-l.module.css), only SampleL's root carries `.regions`, and nothing here changes
+ * a colour token, a line of copy or a component's structure.
+ *
+ * The regions are reached by the marks the page already carries (`data-region`, `data-row`, a heading's id) and by the
+ * elements inside them, not by the other modules' class names: dawn-regions-l.test.ts keeps those marks in place.
+ */
+
+/* Region headings: centred and larger, as sample D sets them.
+   Ids are written as attributes: a CSS module would rename an #id selector as it renames a class. */
+.regions.regions :is([id='voice-title'], [id='steps-title'], [id='samples-title'], [id='pricing-title'], [id='faq-title'], [id='final-title']) {
+  font-size: clamp(32px, 4.8vw, 68px); line-height: 1.08; letter-spacing: -.04em; text-align: center; text-wrap: balance;
+}
+.regions div:has(> [id='voice-title']) { display: block; margin-bottom: clamp(36px, 5vw, 68px); }
+
+/*
+ * The voice wall (Owner 2026-11-11: "按 D 样稿换", in place of 2026-10-14's note-beside-answer rows): each voice is
+ * what they said, in a soft bubble, and under it, stepped to the right, the coach's answer on a white card. Two columns
+ * on a computer, one on a phone; the band behind the wall is gone. The rows still arrive one after another (j.module.css).
+ */
+.regions [data-region='用户心声'] { margin-inline: 0; border-radius: 0; background: none; box-shadow: none; }
+.regions [id='j-voice-wall'] { display: block; columns: 2; column-gap: 28px; }
+.regions [data-region='心声卡片'] { display: block; margin: 0 0 28px; break-inside: avoid; }
+.regions [data-region='心声卡片'] > figure {
+  padding: 22px 26px; border-radius: 26px 26px 26px 8px; background: rgba(20, 19, 18, .05); box-shadow: none;
+  color: var(--j-body); transform: none;
+}
+.regions [data-region='心声卡片'] > figure blockquote { font-size: 18px; line-height: 1.7; }
+.regions [data-region='心声卡片'] > figure figcaption { margin-top: 10px; color: var(--j-muted); font-size: 12.5px; }
+.regions [data-region='心声卡片'] > svg { display: none; }
+.regions [data-region='心声卡片'] > div {
+  margin: -10px 0 0 34px; padding: 22px 26px; border: 0; border-radius: 26px 26px 8px 26px; background: #fff;
+  box-shadow: 0 0 0 1px var(--j-line), 0 24px 40px -28px rgba(120, 70, 0, .4);
+}
+.regions [data-region='心声卡片'] > div::before { content: none; }
+.regions [data-region='心声卡片'] > div > p:first-child { align-items: flex-start; gap: 10px; }
+.regions [data-region='心声卡片'] > div > p:first-child > i {
+  width: 26px; height: 26px; margin-top: 1px;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M12 2c.7 5.6 3.4 8.3 9 10-5.6 1.7-8.3 4.4-9 10-.7-5.6-3.4-8.3-9-10 5.600-1.700 8.300-4.400 9-10z'/%3E%3C/svg%3E") center / 13px no-repeat,
+    linear-gradient(135deg, #ffd27a, #ff9f6b);
+}
+.regions [data-region='心声卡片'] > div p:not(:first-child), .regions [data-region='心声卡片'] > div > div p { font-size: 15.5px; }
+.regions [data-region='用户心声'] p:has(> a[href]) { justify-content: center; margin-top: clamp(28px, 4vw, 52px); }
+@media (max-width: 859px) {
+  .regions [id='j-voice-wall'] { columns: 1; }
+  .regions [data-region='心声卡片'] { margin-bottom: 20px; }
+  .regions [data-region='心声卡片'] > figure { padding: 16px 18px; border-radius: 22px 22px 22px 8px; }
+  .regions [data-region='心声卡片'] > figure blockquote { font-size: 16px; line-height: 1.65; }
+  .regions [data-region='心声卡片'] > div { margin-left: 18px; padding: 14px 18px; border-radius: 22px 22px 8px 22px; }
+}
+
+/* The FAQ: no band, each question a white card of its own, its plus in a small round. */
+.regions [data-region='常见问题'] { margin-inline: 0; border-radius: 0; background: none; box-shadow: none; }
+.regions div:has(> [data-region='问题分组']) { gap: 40px; margin-top: clamp(36px, 4.6vw, 64px); }
+.regions [data-region='问题分组'] h3 { margin-bottom: 12px; font-size: 19px; }
+.regions [data-region='问题分组'] details { margin-bottom: 8px; border: 0; border-radius: 18px; background: rgba(255, 255, 255, .78); box-shadow: 0 0 0 1px var(--j-line); }
+.regions [data-region='问题分组'] summary { gap: 14px; padding: 15px 18px; font-size: 15px; }
+.regions [data-region='问题分组'] summary svg { box-sizing: content-box; width: 14px; height: 14px; margin-top: 1px; padding: 3px; border-radius: 50%; background: #f0eeea; }
+.regions [data-region='问题分组'] details > div { padding: 0 18px 14px; }
+
+/* The close: a wide rounded panel of morning light, inset from the screen's edges. */
+.regions [data-region='结尾行动'] {
+  margin: 0 clamp(8px, 1.6vw, 24px); padding: clamp(72px, 10vw, 150px) 0; border-radius: clamp(28px, 3.4vw, 56px);
+  background:
+    radial-gradient(70% 90% at 50% 118%, #ffb238, rgba(255, 178, 56, 0) 70%),
+    radial-gradient(50% 70% at 12% 100%, #ffb7a0, transparent 70%),
+    radial-gradient(50% 70% at 88% 100%, #d9c8ff, transparent 70%),
+    #fbf6ec;
+}
+.regions [data-region='结尾行动'] > div > div { padding: 0; }
+
+/*
+ * The three steps: each on a wide rounded panel of its own colour of light (warm gold, lilac, peach) with its number
+ * large and faint in the corner; each module a translucent white card. The modules' pictures play as they did.
+ */
+.regions :is([data-region='第一步'], [data-region='第二步'], [data-region='第三步']) {
+  position: relative; margin-top: 24px; padding: clamp(22px, 4vw, 60px); border-radius: clamp(28px, 3.4vw, 48px); overflow: hidden;
+}
+.regions [data-region='第一步'] { margin-top: clamp(36px, 5vw, 68px); background: linear-gradient(155deg, #ffefd2 0%, #ffe6d2 44%, #f4efe8 100%); }
+.regions [data-region='第二步'] { background: linear-gradient(155deg, #ebe6fd 0%, #f1e8f3 46%, #f3f0ea 100%); }
+.regions [data-region='第三步'] { background: linear-gradient(155deg, #ffe2dc 0%, #fdebd9 46%, #f3f0ea 100%); }
+.regions :is([data-region='第一步'], [data-region='第二步'], [data-region='第三步'])::before {
+  position: absolute; right: clamp(16px, 4vw, 56px); top: -.16em; color: rgba(255, 255, 255, .8); font-size: clamp(150px, 22vw, 330px);
+  font-weight: 700; line-height: 1; letter-spacing: -.06em; pointer-events: none;
+}
+.regions [data-region='第一步']::before { content: '1'; }
+.regions [data-region='第二步']::before { content: '2'; }
+.regions [data-region='第三步']::before { content: '3'; }
+.regions :is([data-region='第一步'], [data-region='第二步'], [data-region='第三步']) > * { position: relative; }
+.regions :is([data-region='第一步'], [data-region='第二步'], [data-region='第三步']) > h3 { font-size: clamp(26px, 3.2vw, 46px); line-height: 1.2; letter-spacing: -.035em; }
+.regions [data-region='流程模块'] {
+  padding: 20px 20px 22px; border-radius: 30px; background: rgba(255, 255, 255, .66);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .9), 0 30px 50px -36px rgba(120, 70, 0, .35);
+}
+.regions [data-region='流程模块'] > [inert] { border-color: rgba(20, 19, 18, .07); border-radius: 20px; box-shadow: 0 24px 40px -30px rgba(120, 70, 0, .4); }
+@media (max-width: 639px) { .regions [data-region='流程模块'] { padding: 16px 14px 16px; border-radius: 24px; } }
+
+/*
+ * The jury: the page's one dark block. Its panel takes dark values for the tokens its own styles read; the example and
+ * the circuit stay on their white cards, with the light values back inside them.
+ */
+.regions [data-region='评审团'] [data-jury-panel] {
+  --j-ink: #f6f4ef; --j-body: #b9b5ac; --j-line: rgba(255, 255, 255, .14);
+  border: 0; border-radius: 32px; padding: clamp(22px, 3.6vw, 52px);
+  background: radial-gradient(60% 80% at 100% 0, rgba(255, 178, 56, .28), transparent 70%), #151412;
+}
+.regions [data-region='评审团'] [data-jury-panel] figure { --j-ink: #141312; --j-body: #3d3c3a; --j-line: #e7e6e2; border-radius: 18px; }
+.regions [data-region='评审团'] [data-jury-panel] ol > li::before { background: none; box-shadow: 0 0 0 1px rgba(255, 255, 255, .3); }
+
+/* The sample reports: heading and facts centred, the chosen person a dark pill with a soft shadow, the report on a wide glass card. */
+.regions div:has(> [id='samples-title']) { justify-items: center; gap: 20px; margin-bottom: clamp(28px, 4vw, 52px); }
+.regions [data-region='样例报告'] div:has(> [id='samples-title']) > ul { justify-content: center; }
+.regions [data-region='样例报告'] nav button { border-radius: 14px; background: rgba(255, 255, 255, .78); }
+.regions [data-region='样例报告'] nav button[aria-pressed='true'] { background: var(--j-ink); box-shadow: 0 12px 24px -12px rgba(20, 19, 18, .6); }
+.regions [data-region='样例报告'] [role='region'] {
+  border: 0; border-radius: 32px; background: rgba(255, 255, 255, .82);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .9), 0 0 0 1px var(--j-line), 0 60px 100px -60px rgba(120, 70, 0, .45);
+}
+
+/*
+ * The comparison: on the light canvas now (it sat on the page's one dark band; the jury is the dark block instead).
+ * The band's dark token values go back to the page's own; the two windows keep their own colours.
+ */
+.regions [data-region='对比区'] {
+  --j-ink: #141312; --j-body: #3d3c3a; --j-muted: #63625f; --j-line: #e7e6e2; --j-gold-text: #8a5a00;
+  margin-inline: 0; border-radius: 0; background: none; color: var(--j-ink);
+}
+/* The title is centred but keeps the region's own sizes: while the region holds the screen (ScenariosL), its title is set
+   small on purpose so that the tabs, the question and both windows fit in one screen. */
+.regions.regions [id='compare-title'] { max-width: none; text-align: center; }
+.regions [data-region='对比区'] div:has(> [role='tablist']) { justify-content: center; }
+.regions [data-region='对比区'] [role='tablist'] { justify-content: center; }
+.regions [data-region='对比区'] [role='tab'][aria-selected='true'] { background: var(--j-ink); color: #fff; }
+.regions [data-region='对比区'] [role='tabpanel'] > :is(h3, p) { margin-inline: auto; text-align: center; }
+.regions [data-region='对比区'] p > a[href] { background: var(--j-pill-bg); color: #fff; }
+.regions [data-region='对比区'] p > a[href]:hover { background: var(--j-pill-bg-hover); }
+.regions [data-region='对比区'] p:has(> a[href]) { justify-content: center; }
+
+/* Price: the costs on a wide glass card; Graylum's own price on a card of morning light, its figure large. No strike-through. */
+.regions div:has(> [data-region='费用对比表']) {
+  margin-top: clamp(32px, 4.6vw, 60px); border: 0; border-radius: 32px; background: rgba(255, 255, 255, .82);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .9), 0 0 0 1px var(--j-line), 0 50px 90px -60px rgba(120, 70, 0, .4);
+}
+.regions [data-region='Graylum 价格'] > div {
+  padding: clamp(22px, 3vw, 40px); border: 0; border-radius: 26px;
+  background: radial-gradient(90% 80% at 80% 0, #ffd98a, transparent 70%), radial-gradient(80% 90% at 0 100%, #ffb7a0, transparent 70%), linear-gradient(135deg, #ffe9bd, #ffd2b0);
+  box-shadow: 0 40px 70px -44px rgba(229, 138, 0, .7);
+}

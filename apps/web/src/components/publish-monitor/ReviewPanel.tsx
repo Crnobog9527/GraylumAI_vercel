@@ -2,6 +2,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { useState } from 'react';
 import Link from 'next/link';
+import { ChevronDown, NotebookText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { MessageMarkdown } from '@/components/chat/MessageMarkdown';
@@ -9,6 +10,8 @@ import { trpc } from '@/trpc/client';
 import { dataErrorMessage, errorCode, formatDay, formatMetric, metricLabel } from './labels';
 import { coachTable, CoachTables, EMPTY_COACH, type CoachTable } from './CoachTables';
 import { PillarSettings } from './PillarSettings';
+import styles from './data-review.module.css';
+import { StateBlock } from './StateBlock';
 
 /**
  * PUBLISH-MONITOR PR-7 (plan §5): the weekly reviews and, for Gold, the automatic weekly review switch. The written
@@ -41,25 +44,57 @@ export function reviewTable(tables: unknown): { rows: Row[]; weeks: Week[]; coac
   return { rows, weeks, coach: coachTable(tables) };
 }
 
+/** The review opened when the tab is shown: the latest one that has something to read, whatever order the list came in. */
+export function latestReadable(reviews: Review[]): string | null {
+  return reviews.filter(review => review.body).reduce<Review | null>(
+    (best, review) => (!best || review.periodStart > best.periodStart ? review : best), null)?.id ?? null;
+}
+
 export function ReviewPanel({ gold }: { gold: boolean }) {
   // The weekly review has its own admin switch; while it is off the server answers 403, so do not ask at all.
   const features = trpc.publishMonitor.features.useQuery(undefined, { retry: false, staleTime: 300_000 });
   const open = features.data?.weeklyReview === true;
   const reviews = trpc.publishMonitor.review.list.useQuery(undefined, { retry: false, enabled: open });
+  const list = (reviews.data ?? []) as Review[];
+  // Below 1360px the settings fold away above the reviews (closed until the user opens them); a wider screen always
+  // shows them beside the reviews, whatever this says (data-review.module.css).
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [picked, setPicked] = useState<string | null | undefined>(undefined);
+  const shown = picked === undefined ? latestReadable(list) : picked;
+  const hasSettings = gold || open;
   return (
-    <section className="space-y-4" aria-labelledby="pm-review">
-      <h2 id="pm-review" className="text-base font-semibold">每周复盘</h2>
-      <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-        想现在就复盘，可以在<Link className="underline" href="/app/positioning">对话</Link>里说“帮我复盘最近的作品”，按对话正常扣积分。</p>
-      {gold && <AutoReviewSwitch />}
-      {open && <PillarSettings />}
-      {features.isPending ? <ReviewSkeleton />
-        : !open ? <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>每周复盘还没有开放。</p>
-        : reviews.isPending ? <ReviewSkeleton />
-        : reviews.error ? <p role="alert" className="text-sm">{dataErrorMessage(errorCode(reviews.error))}</p>
-          : (reviews.data as Review[]).length === 0 ? <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-            还没有复盘。{gold ? '自动复盘在打开满 7 天后生成第一份。' : ''}</p>
-            : (reviews.data as Review[]).map(review => <ReviewCard key={review.id} review={review} />)}
+    <section aria-labelledby="pm-review">
+      <h2 id="pm-review" className={styles.srOnly}>每周复盘</h2>
+      <p className={styles.lead}>
+        想现在就复盘，可以在<Link href="/app/positioning">对话</Link>里说“帮我复盘最近的作品”，按对话正常扣积分。</p>
+      <div className={styles.reviewLayout} data-settings={hasSettings}>
+        <div className={styles.reviewMain}>
+          {features.isPending ? <ReviewSkeleton />
+            : !open ? <StateBlock icon={<NotebookText size={20} aria-hidden />} title="还没有开放" text="每周复盘还没有开放。" />
+            : reviews.isPending ? <ReviewSkeleton />
+            : reviews.error ? <StateBlock tone="error" title="暂时读不到复盘" text={dataErrorMessage(errorCode(reviews.error))} />
+              : list.length === 0 ? (
+                <StateBlock icon={<NotebookText size={20} aria-hidden />} title="还没有复盘"
+                  text={`还没有复盘。${gold ? '自动复盘在打开满 7 天后生成第一份。' : ''}`}>
+                  <Link className={styles.button} href="/app/positioning">去对话里复盘</Link>
+                </StateBlock>
+              ) : list.map(review => <ReviewCard key={review.id} review={review} expanded={review.id === shown}
+                onToggle={() => setPicked(review.id === shown ? null : review.id)} />)}
+        </div>
+        {hasSettings && (
+          <aside className={styles.reviewSide} aria-labelledby="pm-review-settings" data-open={settingsOpen}>
+            <h3 id="pm-review-settings" className={styles.reviewSideTitle}>
+              <button type="button" aria-expanded={settingsOpen} onClick={() => setSettingsOpen(value => !value)}>
+                复盘设置<ChevronDown size={16} aria-hidden /></button>
+              <span>复盘设置</span>
+            </h3>
+            <div className={styles.reviewSideBody}>
+              {gold && <AutoReviewSwitch />}
+              {open && <PillarSettings />}
+            </div>
+          </aside>
+        )}
+      </div>
     </section>
   );
 }
@@ -71,24 +106,29 @@ function AutoReviewSwitch() {
   if (!settings.data) return null;
   const on = settings.data.autoReviewEnabled;
   return (
-    <div className="space-y-1 rounded-lg border p-3 text-sm" style={{ borderColor: 'var(--border-primary)' }}>
-      <label className="flex items-center gap-2">
+    <div className={`${styles.card} ${styles.cardStack}`}>
+      <label className={styles.switchRow}>
         <Switch checked={on} disabled={save.isPending} onCheckedChange={enabled => save.mutate({ enabled })} aria-label="每周自动复盘" />
         每周自动复盘
       </label>
-      <p style={{ color: 'var(--text-secondary)' }}>
+      <p className={styles.hint}>
         {on ? `已打开${settings.data.autoReviewEnabledAt ? `（${formatDay(settings.data.autoReviewEnabledAt)} 起）` : ''}，`
           + '满 7 天生成一份，之后每 7 天一份。' : '已关闭，不会自动复盘，也不会扣积分。'}
         每次按实际用量扣积分，有花费上限；复盘前积分不够就跳过这一周。关掉再打开，会重新等满 7 天。</p>
-      {save.error && <p role="alert" style={{ color: 'var(--color-error)' }}>{dataErrorMessage(errorCode(save.error))}</p>}
+      {save.error && <p role="alert" className={styles.error}>{dataErrorMessage(errorCode(save.error))}</p>}
     </div>
   );
 }
 
-function ReviewCard({ review }: { review: Review }) {
+/**
+ * One review. Only the opened one draws its text and tables (a review is long, and a year holds up to 52); the others
+ * are their title and state, one click away. A week that was skipped or is still being written has nothing to open.
+ */
+function ReviewCard({ review, expanded, onToggle }: { review: Review; expanded: boolean; onToggle: () => void }) {
   const [busy, setBusy] = useState(false), [error, setError] = useState('');
   const utils = trpc.useUtils();
-  const { rows, weeks, coach } = reviewTable(review.tables);
+  const readable = Boolean(review.body);
+  const state = review.notice ?? (review.status === 'claimed' ? '正在生成…' : review.status === 'skipped' ? '这一周没有复盘' : '');
   async function download() {
     setBusy(true); setError('');
     try {
@@ -100,26 +140,41 @@ function ReviewCard({ review }: { review: Review }) {
     } catch (cause) { setError(dataErrorMessage(errorCode(cause))); } finally { setBusy(false); }
   }
   return (
-    <article className="space-y-3 rounded-lg border p-4" style={{ borderColor: 'var(--border-primary)' }}>
-      <header className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold">{reviewTitle(review)}</h3>
-        <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-          {review.notice ?? (review.status === 'claimed' ? '正在生成…' : review.status === 'skipped' ? '这一周没有复盘' : '')}</span>
+    <article className={styles.review} data-open={readable && expanded}>
+      <header className={styles.reviewHead}>
+        <h3>{readable ? (
+          <button type="button" aria-expanded={expanded} onClick={onToggle}>
+            {reviewTitle(review)}<ChevronDown size={16} aria-hidden /></button>
+        ) : reviewTitle(review)}</h3>
+        {state && <span>{state}</span>}
       </header>
-      {review.body && <MessageMarkdown text={review.body} />}
-      {weeks.length > 0 && (
-        <ul className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-          {weeks.map(w => <li key={w.start}>{w.start} 至 {w.end}：发布 {w.published} 条
-            {w.status === 'data_accumulating' ? '，互动变化数据积累中' : `，${w.matched_posts} 条有前后两天的记录`}</li>)}
-        </ul>
-      )}
-      {rows.length > 0 && <AgeTable rows={rows} />}
-      {coach !== EMPTY_COACH && <CoachTables coach={coach} />}
-      {review.status === 'completed' && review.body && (
-        <Button size="sm" variant="outline" disabled={busy} onClick={download}>导出</Button>
-      )}
-      {error && <p role="alert" className="text-sm" style={{ color: 'var(--color-error)' }}>{error}</p>}
+      {readable && expanded && <ReviewBody review={review} busy={busy} onDownload={download} />}
+      {error && <p role="alert" className={styles.error}>{error}</p>}
     </article>
+  );
+}
+
+function ReviewBody({ review, busy, onDownload }: { review: Review; busy: boolean; onDownload: () => void }) {
+  const { rows, weeks, coach } = reviewTable(review.tables);
+  return (
+    <div className={styles.reviewBody}>
+      <div className={styles.reviewText}><MessageMarkdown text={review.body!} /></div>
+      <div className={styles.reviewData}>
+        {weeks.length > 0 && (
+          <ul className={styles.reviewWeeks}>
+            {weeks.map(w => <li key={w.start}>{w.start} 至 {w.end}：发布 {w.published} 条
+              {w.status === 'data_accumulating' ? '，互动变化数据积累中' : `，${w.matched_posts} 条有前后两天的记录`}</li>)}
+          </ul>
+        )}
+        {rows.length > 0 && <AgeTable rows={rows} />}
+        {coach !== EMPTY_COACH && <CoachTables coach={coach} />}
+      </div>
+      {review.status === 'completed' && (
+        <div className={styles.rowActions}>
+          <Button size="sm" variant="outline" disabled={busy} onClick={onDownload}>导出</Button>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -154,9 +209,8 @@ function AgeTable({ rows }: { rows: Row[] }) {
 /** While the reviews are read: the card's shape, with no words or spinner (Owner: no "loading" text on pages). */
 function ReviewSkeleton() {
   return (
-    <div aria-busy="true" data-testid="review-skeleton" className="space-y-2 rounded-lg border p-4" style={{ borderColor: 'var(--border-primary)' }}>
-      {['w-40', 'w-full', 'w-5/6', 'w-2/3'].map(w => (
-        <div key={w} className={`h-3 ${w} animate-pulse rounded`} style={{ background: 'var(--border-primary)' }} />))}
+    <div aria-busy="true" data-testid="review-skeleton" className={`${styles.review} ${styles.reviewWait}`}>
+      {['40%', '100%', '84%', '66%'].map(width => <div key={width} className={styles.sk} style={{ width, height: 12 }} />)}
     </div>
   );
 }

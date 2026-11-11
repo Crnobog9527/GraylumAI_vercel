@@ -311,14 +311,15 @@ export const CreditRecordsCard = memo(function CreditRecordsCard({ user }: { use
                   border: '1px solid var(--border-primary)'
                 }}
               >
-                <div className="flex items-start gap-4 mb-4 md:mb-0">
+                {/* min-w-0 on the row and on its text column: without it a long description keeps its full width and widens the page on a phone. */}
+                <div className="flex min-w-0 items-start gap-4 mb-4 md:mb-0">
                   <div
-                    className="p-3 rounded-xl"
+                    className="shrink-0 p-3 rounded-xl"
                     style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}
                   >
                     <Icon className="h-5 w-5" style={{ color: typeConfig.color }} />
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <div className="font-medium mb-1" style={{ color: 'var(--text-primary)' }}>
                       {typeLabels[ledgerType] || getCreditLedgerLabel(tx)}
                     </div>

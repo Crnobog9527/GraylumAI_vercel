@@ -18,6 +18,17 @@ describe('publish recovery', () => {
     expect(loadAttempt('item', store)).toBeNull();
   });
 
+  it('keeps a scheduled time with the attempt, so a replay is the same request (PUBLISH-SCHEDULE)', () => {
+    const store = memory();
+    const scheduled = { ...attempt, scheduledAt: '2026-11-20T17:00:00.000Z' };
+    saveAttempt('item', scheduled, store);
+    expect(loadAttempt('item', store)).toEqual(scheduled);
+    store.setItem('publish-monitor-attempt:item', JSON.stringify({ ...attempt, scheduledAt: 'not a time' }));
+    expect(loadAttempt('item', store)).toBeNull();
+    store.setItem('publish-monitor-attempt:item', JSON.stringify({ ...attempt, scheduledAt: null }));
+    expect(loadAttempt('item', store)?.scheduledAt).toBeNull();
+  });
+
   it('ignores damaged or missing storage', () => {
     const store = memory();
     store.setItem('publish-monitor-attempt:item', '{"key":1}');

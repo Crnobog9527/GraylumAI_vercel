@@ -10,7 +10,13 @@ import {
   estimateCacheSavings,
 } from '../services/performanceCostReport';
 import { picoToUsd, usdToPico } from '../services/reportUsd';
+import { readAdminActivity, readUsageDays, requestCount, sumDaysSince, usageDaysAsTokenRows } from '../services/adminActivity';
 import { createAdminOperationError, logAdminEndpointMetric } from './adminShared';
+
+/** A token_stats row of the retired path (one request), or one model-and-day group of the per-turn core (`requests` of them). */
+type PerformanceTokenRow = { model_used: string; total_credits: number | null; total_cost_usd: string | number | null;
+  input_tokens: number | null; output_tokens: number | null; cached_tokens: number | null; cache_creation_tokens: number | null;
+  created_at: string; requests?: number };
 
 // Part of the admin router (merged in ./admin.ts): the procedure paths stay `admin.<name>`.
 export const adminPerformanceProcedures = {
@@ -31,50 +37,13 @@ export const adminPerformanceProcedures = {
       const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
       const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
       const rangeStartIso = rangeStart.toISOString();
-      const todayStartIso = todayStart.toISOString();
-      const sevenDaysAgoIso = sevenDaysAgo.toISOString();
-      const thirtyDaysAgoIso = thirtyDaysAgo.toISOString();
 
-      const [
-        conversationTotalResult,
-        recentConversationsResult,
-        messageTotalResult,
-        messageUserResult,
-        messageAssistantResult,
-        recentMessagesResult,
-        ticketsResult,
-        modelsResult,
-        allTokenStatsResult,
-        usageLogsResult,
-      ] = await Promise.all([
-        ctx.supabase
-          .from('conversations')
-          .select('id', { count: 'planned', head: true })
-          .eq('is_deleted', false),
-        ctx.supabase
-          .from('conversations')
-          .select('model_id, created_at')
-          .eq('is_deleted', false)
-          .gte('created_at', thirtyDaysAgoIso),
-        ctx.supabase
-          .from('messages')
-          .select('id', { count: 'planned', head: true })
-          .eq('is_deleted', false),
-        ctx.supabase
-          .from('messages')
-          .select('id', { count: 'planned', head: true })
-          .eq('is_deleted', false)
-          .eq('role', 'user'),
-        ctx.supabase
-          .from('messages')
-          .select('id', { count: 'planned', head: true })
-          .eq('is_deleted', false)
-          .eq('role', 'assistant'),
-        ctx.supabase
-          .from('messages')
-          .select('role, created_at')
-          .eq('is_deleted', false)
-          .gte('created_at', thirtyDaysAgoIso),
+      // Conversations, messages and finished calls come from the per-turn core (turn_admin_activity, turn_admin_usage_days): the
+      // retired chat tables get no new rows. Charts cover 30 days; requests, tokens and cost cover the chosen range.
+      const readUntil = new Date(now.getTime() + 60_000);
+      const [activity, usageDays, ticketsResult, modelsResult, legacyTokenStatsResult] = await Promise.all([
+        readAdminActivity(ctx.supabase, thirtyDaysAgo, readUntil, rangeStart),
+        readUsageDays(ctx.supabase, rangeStart, readUntil, rangeStart),
         ctx.supabase
           .from('tickets')
           .select('status')
@@ -82,58 +51,46 @@ export const adminPerformanceProcedures = {
         ctx.supabase
           .from('ai_models')
           .select('id, name, model_id, provider, config, is_active'),
+        // Rows the retired path left in token_stats (none on a database built from files).
         withRealModelUsedResult(ctx.supabase, readAllReportRows((from, to) => ctx.supabase
           .from('token_stats') // MODEL-IDENTITY-GUARD: stored as aliases; joined and priced by the real model
           .select('model_used, total_credits, total_cost_usd, input_tokens, output_tokens, cached_tokens, cache_creation_tokens, created_at')
           .gte('created_at', rangeStartIso).order('id').range(from, to))),
-        ctx.supabase
-          .from('ai_usage_logs')
-          .select('status, latency_ms, created_at')
-          .gte('created_at', rangeStartIso),
-      ]);
+      ]).catch((error: unknown) => { throw createAdminOperationError('读取性能统计', error); });
 
-      const results = [
-        conversationTotalResult,
-        recentConversationsResult,
-        messageTotalResult,
-        messageUserResult,
-        messageAssistantResult,
-        recentMessagesResult,
-        ticketsResult,
-        modelsResult,
-        allTokenStatsResult,
-        usageLogsResult,
-      ];
-
-      for (const result of results) {
+      for (const result of [ticketsResult, modelsResult, legacyTokenStatsResult]) {
         if (result.error) {
           throw createAdminOperationError('读取性能统计', result.error);
         }
       }
 
-      const recentConversations = recentConversationsResult.data ?? [];
-      const recentMessages = recentMessagesResult.data ?? [];
       const tickets = ticketsResult.data ?? [];
       const models = modelsResult.data ?? [];
-      const tokenStatsInRange = allTokenStatsResult.data ?? [];
-      const usageLogs = usageLogsResult.data ?? [];
+      const tokenStatsInRange: PerformanceTokenRow[] = [...(legacyTokenStatsResult.data ?? []), ...usageDaysAsTokenRows(usageDays)];
+      const requestsInRange = requestCount(tokenStatsInRange);
+
+      // The core answers per UTC day, so "today", "this week" and the range start at a day boundary.
+      const conversationDays = activity.conversations.days;
+      const messageDays = activity.messages.days;
+      const conversationsSince = (since: Date) => sumDaysSince(conversationDays, since, row => row.count);
+      const messagesSince = (since: Date) => sumDaysSince(messageDays, since, row => row.user + row.assistant);
 
       const conversationStats = {
-        total: conversationTotalResult.count ?? 0,
-        today: 0,
-        thisWeek: 0,
-        thisMonth: 0,
-        inRange: 0,
+        total: activity.conversations.total,
+        today: conversationsSince(todayStart),
+        thisWeek: conversationsSince(sevenDaysAgo),
+        thisMonth: conversationsSince(thirtyDaysAgo),
+        inRange: conversationsSince(rangeStart),
       };
 
       const messageStats = {
-        total: messageTotalResult.count ?? 0,
-        userMessages: messageUserResult.count ?? 0,
-        assistantMessages: messageAssistantResult.count ?? 0,
-        today: 0,
-        thisWeek: 0,
-        thisMonth: 0,
-        inRange: 0,
+        total: activity.messages.user + activity.messages.assistant,
+        userMessages: activity.messages.user,
+        assistantMessages: activity.messages.assistant,
+        today: messagesSince(todayStart),
+        thisWeek: messagesSince(sevenDaysAgo),
+        thisMonth: messagesSince(thirtyDaysAgo),
+        inRange: messagesSince(rangeStart),
       };
 
       const ticketStats = {
@@ -161,45 +118,13 @@ export const adminPerformanceProcedures = {
           outputTokens: 0,
           cachedTokens: 0,
         };
-        current.requestCount += 1;
+        current.requestCount += stat.requests ?? 1;
         current.credits += stat.total_credits ?? 0;
         current.costPico += usdToPico(stat.total_cost_usd);
         current.inputTokens += stat.input_tokens ?? 0;
         current.outputTokens += stat.output_tokens ?? 0;
         current.cachedTokens += stat.cached_tokens ?? 0;
         modelUsageByToken.set(stat.model_used, current);
-      }
-
-      const conversationsInRange: typeof recentConversations = [];
-      for (const conversation of recentConversations) {
-        if (conversation.created_at >= todayStartIso) {
-          conversationStats.today += 1;
-        }
-        if (conversation.created_at >= sevenDaysAgoIso) {
-          conversationStats.thisWeek += 1;
-        }
-        conversationStats.thisMonth += 1;
-
-        if (conversation.created_at >= rangeStartIso) {
-          conversationStats.inRange += 1;
-          conversationsInRange.push(conversation);
-        }
-      }
-
-      const messagesInRange: typeof recentMessages = [];
-      for (const message of recentMessages) {
-        if (message.created_at >= todayStartIso) {
-          messageStats.today += 1;
-        }
-        if (message.created_at >= sevenDaysAgoIso) {
-          messageStats.thisWeek += 1;
-        }
-        messageStats.thisMonth += 1;
-
-        if (message.created_at >= rangeStartIso) {
-          messageStats.inRange += 1;
-          messagesInRange.push(message);
-        }
       }
 
       for (const ticket of tickets) {
@@ -212,15 +137,12 @@ export const adminPerformanceProcedures = {
         }
       }
 
+      // A conversation belongs to the model of its first turn (the provider model name).
+      const rangeDay = rangeStartIso.slice(0, 10);
       const conversationsByModel = new Map<string, number>();
-      for (const conversation of conversationsInRange) {
-        if (!conversation.model_id) {
-          continue;
-        }
-        conversationsByModel.set(
-          conversation.model_id,
-          (conversationsByModel.get(conversation.model_id) ?? 0) + 1
-        );
+      for (const row of conversationDays) {
+        if (row.date < rangeDay) continue;
+        conversationsByModel.set(row.model, (conversationsByModel.get(row.model) ?? 0) + row.count);
       }
 
       const modelUsage = models.map((model) => {
@@ -256,20 +178,14 @@ export const adminPerformanceProcedures = {
         dailyActivity[dateKey] = { conversations: 0, messages: 0, requests: 0 };
       }
 
-      for (const conversation of conversationsInRange) {
-        const dateKey = new Date(conversation.created_at).toISOString().split('T')[0];
-        if (dailyActivity[dateKey]) {
-          dailyActivity[dateKey].conversations++;
-        }
+      for (const row of conversationDays) {
+        if (dailyActivity[row.date]) dailyActivity[row.date].conversations += row.count;
       }
 
-      for (const message of messagesInRange) {
-        const dateKey = new Date(message.created_at).toISOString().split('T')[0];
-        if (dailyActivity[dateKey]) {
-          dailyActivity[dateKey].messages++;
-          if (message.role === 'assistant') {
-            dailyActivity[dateKey].requests++;
-          }
+      for (const row of messageDays) {
+        if (dailyActivity[row.date]) {
+          dailyActivity[row.date].messages += row.user + row.assistant;
+          dailyActivity[row.date].requests += row.assistant;
         }
       }
 
@@ -294,7 +210,7 @@ export const adminPerformanceProcedures = {
         requestsPerDay: Math.round(rangeAssistantCount / days),
       };
 
-      const totalRequests = messageAssistantResult.count ?? 0;
+      const totalRequests = activity.messages.assistant;
       const rangeRequests = rangeAssistantCount;
 
       const inputTokens = tokenStatsInRange.reduce((sum, stat) => sum + (stat.input_tokens ?? 0), 0);
@@ -304,28 +220,17 @@ export const adminPerformanceProcedures = {
 
       const cacheSavings = estimateCacheSavings(tokenStatsInRange, models);
 
-      const successLogs = usageLogs.filter((log) => log.status === 'success');
-      const failedLogs = usageLogs.filter((log) => log.status !== 'success');
-      const totalLogs = usageLogs.length;
-      const errorRate = totalLogs > 0 ? (failedLogs.length / totalLogs) * 100 : 0;
+      // Finished model calls of the range: failed ones over all finished ones; duration from dispatch to record, over successes.
+      const { finished, failed } = activity.calls;
+      const errorRate = finished > 0 ? (failed / finished) * 100 : 0;
+      const avgResponseTime = activity.calls.avgMs ?? 0;
+      const p95ResponseTime = activity.calls.p95Ms ?? 0;
 
-      const latencies = successLogs
-        .map((log) => log.latency_ms)
-        .filter((latency): latency is number => latency !== null && latency !== undefined)
-        .sort((a, b) => a - b);
-
-      const avgResponseTime = latencies.length > 0
-        ? latencies.reduce((sum, latency) => sum + latency, 0) / latencies.length
-        : 0;
-
-      const p95Index = Math.floor(latencies.length * 0.95);
-      const p95ResponseTime = latencies.length > 0
-        ? latencies[p95Index] ?? latencies[latencies.length - 1]
-        : 0;
-
+      // Health follows the error rate only. The duration is a whole model call (a streamed answer takes many seconds), so the
+      // retired path's 1.5 s and 2 s limits would mark every day critical.
       let healthStatus: 'healthy' | 'warning' | 'critical' = 'healthy';
-      if (errorRate > 2 || avgResponseTime > 2000) healthStatus = 'critical';
-      else if (errorRate > 1 || avgResponseTime > 1500) healthStatus = 'warning';
+      if (errorRate > 2) healthStatus = 'critical';
+      else if (errorRate > 1) healthStatus = 'warning';
 
       const aiPerformance = {
         totalRequests,
@@ -345,7 +250,7 @@ export const adminPerformanceProcedures = {
         cacheCreationTokens,
       };
 
-      const costStats = buildPerformanceCostStats(tokenStatsInRange, days, cacheSavings);
+      const costStats = buildPerformanceCostStats(tokenStatsInRange, days, cacheSavings, requestsInRange);
 
       const result = {
         timeRange: input.timeRange,
@@ -361,8 +266,8 @@ export const adminPerformanceProcedures = {
       };
 
       logAdminEndpointMetric('admin.getPerformanceStats', startedAt, {
-        queryCount: 10,
-        countStrategy: 'planned',
+        queryCount: 5,
+        countStrategy: 'database',
         timeRange: input.timeRange,
         conversationTotal: result.conversations.total,
         messageTotal: result.messages.total,
