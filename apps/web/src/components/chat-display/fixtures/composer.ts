@@ -31,7 +31,8 @@ export const SAMPLE_SKILLS: SkillChoice[] = [
 ];
 export const SAMPLE_SKILL_HINT = '加载到本对话，不自动发送';
 
-/** The line under "从文件添加" when references are on. */
-export const SAMPLE_FILE_HINT = '支持 TXT、Markdown、Word、PDF。文件会存进你的资料库，并作为引用加入本条消息。';
+/** The line under "从文件添加" when references are on, as the product writes it (work-composer.tsx `fileHintText(true)`, with Word and PDF open). */
+export const SAMPLE_FILE_HINT = '支持 TXT、Markdown、Word、PDF。文件会存进你的资料库，并作为引用加入本条消息。'
+  + '也可以在输入框里输入 @，引用资料库里已有的文件。';
 
 export const SAMPLE_COMPOSER_NOTE = '可以自由提问；Agent 按需查阅相关资料。Enter 发送，Shift + Enter 换行。';

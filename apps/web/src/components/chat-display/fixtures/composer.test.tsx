@@ -28,6 +28,8 @@ it('lists only ready text documents in the @ picker, like the product', () => {
 it('renders the file menu and the skill menu from the shared fixtures', () => {
   const files = renderToStaticMarkup(<ComposerView menu="files" fileHint={C.SAMPLE_FILE_HINT} editor={null}/>);
   expect(files).toContain(C.SAMPLE_FILE_HINT);
+  // The product's own sentence since the 2026-11-11 walkthrough (items 5 and 29): it also says that @ picks library files.
+  expect(C.SAMPLE_FILE_HINT).toBe('支持 TXT、Markdown、Word、PDF。文件会存进你的资料库，并作为引用加入本条消息。也可以在输入框里输入 @，引用资料库里已有的文件。');
   const html = renderToStaticMarkup(<ComposerView menu="skills" skillName="选题策划" fileHint={C.SAMPLE_FILE_HINT}
     editor={<ComposerTextPreview paragraphs={C.SAMPLE_COMPOSER_PLAIN_TEXT}/>}
     skillMenu={<SkillMenuView query="" skills={C.SAMPLE_SKILLS} hint={C.SAMPLE_SKILL_HINT}/>}/>);
