@@ -1,7 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
 import type { ResearchCall } from '@/components/research/research-model';
-import { closedTurnSeen, liveAfter, neverOpened, withResearchRow } from './use-turn-chat';
+import { closedTurnSeen, liveAfter, neverOpened, refusalNotice, withResearchRow } from './use-turn-chat';
+import { POSITIONING_REQUIRED_NOTICE } from './gate-notices';
 
 const call = (state: ResearchCall['state'], credits: string | null = null): ResearchCall => ({ callId: 'c1', toolName: 'social_search', args: {},
   query: '早起', platform: 'douyin' as never, dataKind: 'keyword_posts', state, credits });
@@ -59,5 +60,19 @@ describe('the live reply while its steps run', () => {
     const writing = liveAfter(two, { type: 'text', delta: '第一镜' });
     expect(writing).toMatchObject({ text: '第一镜', trimmed: ['x'] });
     expect(writing.steps).toHaveLength(2);
+  });
+});
+
+// 走查 26: the page says a definite refusal when it arrives. Only a code that proves the message was not stored qualifies; any other
+// failure is still read back first.
+describe('a refusal the page can say at once', () => {
+  it('is a code that proves nothing was stored: the positioning guide, no credits, a message too long', () => {
+    expect(refusalNotice('POSITIONING_REQUIRED')).toEqual({ code: 'POSITIONING_REQUIRED', text: POSITIONING_REQUIRED_NOTICE });
+    expect(refusalNotice('TURN_INSUFFICIENT_CREDITS')?.text).toContain('没有发送');
+    expect(refusalNotice('TURN_INPUT_TOO_LARGE')?.code).toBe('TURN_INPUT_TOO_LARGE');
+  });
+  it('is not a failure whose outcome has to be read back, an unknown code, a replay or no code', () => {
+    for (const code of ['TURN_PROVIDER_BUSY', 'TURN_CALL_UNKNOWN', 'TURN_FAILED', 'SOMETHING_NEW', 'TURN_REQUEST_REPLAYED', '', null, undefined])
+      expect(refusalNotice(code)).toBeNull();
   });
 });
