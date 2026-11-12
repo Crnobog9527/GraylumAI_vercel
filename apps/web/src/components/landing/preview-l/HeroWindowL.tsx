@@ -30,7 +30,7 @@ export const heroJudgement = (id: string) => ({ title: FIELD_TITLES.get(id) ?? '
 
 function Judgement({ id }: { id: string }) {
   const { title, value } = heroJudgement(id);
-  return <div className={styles.card}><h3>{title}</h3><p>{value}</p></div>;
+  return <div className={styles.card}><h3>{title}<DemoTag /></h3><p>{value}</p></div>;
 }
 
 /**
@@ -44,7 +44,8 @@ function Judgement({ id }: { id: string }) {
  * Beside it on a very wide screen, three small cards on each side (Owner 2026-11-12: "只放两个还不够，可以多放几个……
  * 定位过程中间会涉及到的 AI 教练判断小卡片"): the coach's judgements along the way for the same person, in the words
  * the product and this page already use (the checklist's field names and proposed values, the benchmark table's rows,
- * the week's review). They are decoration, out of the reading order, and sit clear of the conversation.
+ * the week's review). They are decoration, out of the reading order, and sit clear of the conversation. Each carries the
+ * window's own 示例 tag: read alone, a card ("一年后希望每月多几百美元") must not pass for something we promise.
  */
 export function HeroWindowL() {
   const [goal, findings] = HERO_JUDGEMENTS.left;
@@ -54,7 +55,7 @@ export function HeroWindowL() {
       <div className={styles.side} data-side="left" aria-hidden="true">
         <Judgement id={goal} />
         <div className={styles.card}>
-          <h3>{J_BENCHMARK_TABLE.title}</h3>
+          <h3>{J_BENCHMARK_TABLE.title}<DemoTag /></h3>
           <ul>{J_BENCHMARK_TABLE.rows.slice(0, 3).map(([account, state]) => <li key={account}>{account}<span>{state}</span></li>)}</ul>
         </div>
         <Judgement id={findings} />
@@ -63,7 +64,7 @@ export function HeroWindowL() {
         <Judgement id={feasibility} />
         <Judgement id={platform} />
         <div className={styles.card}>
-          <h3>{L_LATER_FLYWHEEL.review.notice}</h3>
+          <h3>{L_LATER_FLYWHEEL.review.notice}<DemoTag /></h3>
           <p>{FIRST_REVIEW[0]}</p>
           <strong>{FIRST_REVIEW[1]}</strong>
           <em>{FIRST_REVIEW[2]}</em>
