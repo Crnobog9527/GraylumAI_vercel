@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { randomUUID } from 'node:crypto';
 import { logger } from '../../lib/logger';
+import { swallow } from '../../lib/swallow';
 
 /** PROFILE-AVATAR (Owner 2026-11-12). Public-read bucket written only by the service role (migration profile_avatar). */
 export const AVATAR_BUCKET = 'profile-avatars';
@@ -97,7 +98,7 @@ export async function replaceProfileAvatar(input: {
   const mime = sniffAvatarType(bytes);
   if (!mime) return { status: 400, error: MESSAGES.type };
 
-  const before = await readProfile(client, profileId).catch(() => null);
+  const before = await swallow('profile_avatar_read_failed', readProfile(client, profileId), null);
   if (!before) return { status: 503, error: MESSAGES.unavailable };
   if (!before.active) return { status: 403, error: MESSAGES.closed };
 
@@ -128,13 +129,13 @@ export async function replaceProfileAvatar(input: {
     won = Array.isArray(written.data) && written.data.length === 1 && written.data[0]?.avatar_url === url;
   } catch {
     // The write may have committed: read the row back instead of guessing.
-    const after = await readProfile(client, profileId).catch(() => null);
+    const after = await swallow('profile_avatar_read_failed', readProfile(client, profileId), null);
     if (!after) return { status: 503, error: MESSAGES.unavailable };
     won = after.avatarUrl === url;
   }
   if (!won) {
     await discard();
-    const now = await readProfile(client, profileId).catch(() => null);
+    const now = await swallow('profile_avatar_read_failed', readProfile(client, profileId), null);
     if (now && !now.active) return { status: 403, error: MESSAGES.closed };
     return { status: 409, error: MESSAGES.conflict };
   }

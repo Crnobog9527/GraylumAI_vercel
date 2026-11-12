@@ -198,6 +198,12 @@ export function readTurnRouteEnv() {
   };
 }
 
+/** PROFILE-AVATAR /api/profile/avatar: the Supabase connection a route needs to check the caller and write as the service. */
+export function readSupabaseRouteEnv() {
+  return { url: process.env.NEXT_PUBLIC_SUPABASE_URL, anonKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+    serviceKey: process.env.SUPABASE_SERVICE_ROLE_KEY };
+}
+
 /** Only Redis is in this task's deployment preflight; reuse the same schema. */
 export function validateRedisEnvForBuild(): void {
   // Vercel builds (including custom staging environments) must have Redis.

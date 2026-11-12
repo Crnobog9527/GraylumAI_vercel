@@ -5,6 +5,7 @@ import { NextRequest } from 'next/server';
 const mocks = vi.hoisted(() => ({ createClient: vi.fn(), replace: vi.fn(), log: vi.fn(), getUser: vi.fn(), maintenance: vi.fn() }));
 vi.mock('@supabase/supabase-js', () => ({ createClient: mocks.createClient }));
 vi.mock('@/lib/server-log', () => ({ logServerError: mocks.log }));
+vi.mock('@/lib/publish-monitor-connect', () => ({ maintenanceOn: mocks.maintenance }));
 vi.mock('@repo/api/src/services/profileAvatar/storage', () => ({ AVATAR_MAX_BYTES: 2 * 1024 * 1024, replaceProfileAvatar: mocks.replace }));
 import { POST } from './route';
 
@@ -27,9 +28,8 @@ beforeEach(() => {
   vi.stubEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY', 'anon');
   vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', 'service');
   mocks.getUser.mockResolvedValue({ data: { user: { id: me } }, error: null });
-  mocks.maintenance.mockResolvedValue({ data: { value: false }, error: null });
-  const query = { select: () => query, eq: () => query, maybeSingle: mocks.maintenance };
-  mocks.createClient.mockImplementation(() => ({ auth: { getUser: mocks.getUser }, from: () => query }));
+  mocks.maintenance.mockResolvedValue(false);
+  mocks.createClient.mockImplementation(() => ({ auth: { getUser: mocks.getUser } }));
   mocks.replace.mockResolvedValue({ status: 200, avatarUrl: 'https://proj.supabase.co/storage/v1/object/public/profile-avatars/x' });
 });
 
@@ -66,13 +66,12 @@ describe('POST /api/profile/avatar', () => {
     }
   });
 
-  it('no file, maintenance, or a read failure of the maintenance switch: nothing is saved', async () => {
+  it('no file, or maintenance (the shared switch reader also says "on" when it cannot read): nothing is saved', async () => {
     expect((await POST(request({ file: null }))).status).toBe(400);
     expect((await POST(request({ file: 'not a file' }))).status).toBe(400);
-    mocks.maintenance.mockResolvedValueOnce({ data: { value: true }, error: null });
-    expect((await POST(request())).status).toBe(503);
-    mocks.maintenance.mockResolvedValueOnce({ data: null, error: new Error('down') });
-    expect((await POST(request())).status).toBe(503);
+    mocks.maintenance.mockResolvedValueOnce(true);
+    const paused = await POST(request());
+    expect([paused.status, await paused.json()]).toEqual([503, { error: '系统维护中，暂时无法修改头像' }]);
     expect(mocks.replace).not.toHaveBeenCalled();
   });
 
