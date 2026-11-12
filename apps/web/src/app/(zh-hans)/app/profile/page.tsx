@@ -30,7 +30,6 @@ import { SecuritySettingsCard } from '@/components/profile/SecuritySettingsCard'
 import { AccountErasureCard } from '@/components/profile/AccountErasureCard';
 import { DataUseConsentCard } from '@/components/profile/DataUseConsentCard';
 import { FounderProfileCard } from '@/components/founder/FounderProfileCard';
-import { CookieSettingsCard } from '@/components/analytics/CookieSettingsCard';
 import { DATA_USE_CONSENT_VISIBLE } from '@/components/profile/dataUseConsentVisibility';
 import TicketsPanel from '@/components/profile/TicketsPanel';
 import { trpc } from '@/trpc/client';
@@ -240,7 +239,8 @@ function ProfilePageContent() {
 
             {userProfile && activeTab === 'security' && <SecuritySettingsCard user={effectiveUser} />}
             {userProfile && activeTab === 'security' && DATA_USE_CONSENT_VISIBLE && <DataUseConsentCard />}
-            {userProfile && activeTab === 'security' && <CookieSettingsCard />}
+            {/* No "Cookie 和统计设置" card here (Owner 2026-11-12). The statistics choice is still changed from "Cookie 设置" in the
+                footer of the public pages (ConsentPreferenceLinks), which stays: withdrawing consent needs a place. */}
             {userProfile && activeTab === 'security' && <AccountErasureCard user={effectiveUser} />}
 
             {userProfile && activeTab === 'tickets' && (
