@@ -99,7 +99,7 @@ export const MODEL_SLOT_HINT='模型由系统按用途自动选择';
 function FilesMenu({onPickFile,fileHint}:{onPickFile?:()=>void;fileHint?:ReactNode}){
  const menuRef=useRef<HTMLDivElement>(null);
  useMenuPlacement(menuRef,menuRef,'files');
- return <div ref={menuRef} className={styles.menu} role="dialog" aria-label="添加资料">
+ return <div ref={menuRef} className={`${styles.menu} ${styles.filesMenu}`} role="dialog" aria-label="添加资料">
   <button type="button" onClick={onPickFile}><FileText size={16}/> 从文件添加</button>
   <p>{fileHint}</p></div>;
 }
