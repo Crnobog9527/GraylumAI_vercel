@@ -32,8 +32,8 @@ const ownerRefund = (facts: Pick<RefundAlert, 'orderId' | 'refundId' | 'state'> 
  * Each refund is classified on its own: ours (our approval flows tag them with refundIntentId) are left to the existing
  * refund path, external ones are recorded here. Our approved monthly refund of a card subscription (step 4b-2) is
  * recorded here through the monthly refund flow, since the legacy path cannot map a card order (no stored Stripe ids).
- * Returns false when the payment is not a card order (wallet, legacy, off-site) or the event also carries another
- * refund of ours (a pack), so the existing path still runs for that one. */
+ * Returns false when the payment is not a card or wallet order of these paths (legacy, off-site) or the event also carries
+ * another refund of ours (a pack), so the existing path still runs for that one. */
 export async function handleCardRefund(db: SupabaseClient, stripe: RefundStripe, input: { refundId?: string; chargeId?: string },
   alert: () => void = () => {}) {
   const scope = await resolveStripeScope(stripe as unknown as Stripe);
@@ -51,11 +51,9 @@ export async function handleCardRefund(db: SupabaseClient, stripe: RefundStripe,
   const match = await findCardOrderForPayment(db, stripe, scope, { chargeId, paymentIntentId }, { includeWalletMembership: true, includeWalletPacks: true });
   if (match && !match.order.fulfilled_at
     && await closeRefundedTestClockOrder(db, stripe as Stripe, scope, match.order.id)) return true;
-  if (match?.kind === 'pack' && ['wechat_pay', 'alipay'].includes(match.order.payment_method)) {
-    const holds = await db.from('payment_disputes').select('id').eq('order_id', match.order.id).in('freeze_state', ['frozen', 'superseded']).limit(1);
-    if (holds.error || !Array.isArray(holds.data)) throw new Error('PAY_DISPUTE_REFUND_SCOPE_UNAVAILABLE');
-    if (!holds.data.length) return false; // Keep the original wallet path only when no dispute owns this refund.
-  }
+  // Wallet credit packs (WeChat Pay, Alipay) are recorded here like card packs (deep review 2026-11-11 item 5, migration
+  // 0522): an external refund is held for a person to settle and alerted. Our own approved pack refunds (tagged with
+  // refundIntentId) still go back to the package refund reconciliation below.
   let oursHandled = 0;
   for (const refund of match ? ours : []) {
     if (refund.metadata?.orderId !== match!.order.id) throw new Error(PAYMENT_EVIDENCE_CONFLICT);

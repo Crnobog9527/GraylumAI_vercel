@@ -41,18 +41,24 @@ describe('R7: external refunds of wallet one-time memberships (0298)', () => {
     mocks.find.mockReset(); mocks.error.mockReset(); mocks.monthly.mockReset().mockResolvedValue({ handled: false });
     mocks.ref.mockReset().mockResolvedValue({ order_id: 'order' });
   });
-  it.each(['wechat_pay', 'alipay'])('leaves an ordinary %s pack refund on its existing path; only converts a dispute hold', async method => {
+  it.each(['wechat_pay', 'alipay'])('item 5: records an external %s pack refund for review and alerts, like a card pack', async method => {
     mocks.find.mockResolvedValue({ order: { id: 'order', item_type: 'credit_package', payment_method: method },
       paymentId: 'pi_1', paymentIntentId: 'pi_1', kind: 'pack' });
-    for (const held of [false, true]) {
-      const f = fixture([refund()]);
-      const chain = { select: () => chain, eq: () => chain, in: () => chain,
-        limit: async () => ({ data: held ? [{ id: 'dispute' }] : [], error: null }) };
-      f.db.from.mockImplementation((() => chain) as never);
-      expect(await f.run({ refundId: 're_1' })).toBe(held);
-      if (held) expect(f.db.rpc).toHaveBeenCalledWith('pay_stripe_mp_record_external_refund', expect.any(Object));
-      else expect(f.db.rpc).not.toHaveBeenCalled();
+    for (const duplicate of [false, true]) {
+      mocks.owner.mockClear();
+      const f = fixture([refund({ amount: 2990 })], { state: 'pack_review', duplicate, packageId: 'pkg', packCredits: 2990, balance: 3100 });
+      expect(await f.run({ refundId: 're_1' })).toBe(true);
+      expect(f.db.rpc).toHaveBeenCalledExactlyOnceWith('pay_stripe_mp_record_external_refund', expect.objectContaining({
+        p_order: 'order', p_payment: 'pi_1', p_refund: 're_1', p_amount: 2990 }));
+      // A replay repeats the alert a crashed delivery may never have sent; the alert itself is sent once per refund (dedupe).
+      expect(f.alert).toHaveBeenCalledTimes(1);
+      expect(mocks.owner).toHaveBeenCalledWith('refund', expect.objectContaining({ orderId: 'order', refundId: 're_1', state: 'pack_review' }));
+      expect(mocks.error).toHaveBeenCalledWith('billing', 'stripe_mp_external_refund_pack', expect.objectContaining({ packCredits: 2990 }));
     }
+    // Our own approved pack refund (tagged) is left to the package refund reconciliation.
+    const ours = fixture([refund({ metadata: { orderId: 'order', refundIntentId: 'intent' } })]);
+    expect(await ours.run({ refundId: 're_1' })).toBe(false);
+    expect(ours.db.rpc).not.toHaveBeenCalled();
   });
   it.each(['wechat_pay', 'alipay'])('keeps %s refund retries on the duplicate-safe path after the hold is superseded', async method => {
     mocks.find.mockResolvedValue({ order: { id: 'order', item_type: 'credit_package', payment_method: method },
