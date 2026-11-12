@@ -1,6 +1,6 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC.
 -- All rights reserved. This code is proprietary and confidential.
--- PROFILE-AVATAR (Owner 2026-11-12: users set their own avatar, before launch).
+-- PROFILE-AVATAR (Owner 2026-11-12: users set their own avatar, before launch). Number 0523 assigned by the controller.
 --
 -- 1. A public-read bucket for avatars. An avatar is shown on every signed-in page (profile header, rail account button,
 --    account popover), so a stable public URL is stored in profiles.avatar_url and no signed URL has to be refreshed.
