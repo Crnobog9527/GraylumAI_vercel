@@ -10,6 +10,8 @@ import {
   changeable, dayLabel, entriesOn, entryStatus, hasOpenEntries, sameLocalDay, scheduleErrorMessage, timeLabel, weekDays,
   weekRange, weekStart, zoneLabel, type ScheduleEntry,
 } from '@/lib/publish-schedule/schedule-view';
+import { existingPositioning, type ExistingPositioning } from '@/app/(zh-hans)/app/runtime/positioning-required';
+import { useProfileBusinesses } from '@/components/opc/profile-archive/profile-archive-api';
 import { trpc } from '@/trpc/client';
 import { ScheduleChangeDialog } from './ScheduleChangeDialog';
 
@@ -18,6 +20,20 @@ import { ScheduleChangeDialog } from './ScheduleChangeDialog';
  * reschedule and cancel until 10 minutes before the time. Everything shown comes from the server (no media links; the
  * caption preview only). Scheduling itself starts from the one-click publish page.
  */
+/**
+ * An empty week tells a new user (no confirmed positioning yet, by `opc.list`) to finish positioning first; while that
+ * list is read or cannot be read, the user is treated as an existing one (the ordinary empty week). "继续定位" opens the
+ * same positioning as the guide card's 继续我的定位 (`existingPositioning`, #1890): the newest profile not archived.
+ */
+export function isNewUser(drafts: { isPending: boolean; error: unknown; data?: unknown }): boolean {
+  if (drafts.isPending || drafts.error) return false;
+  const list = (drafts.data as { drafts?: Array<{ state?: string }> } | undefined)?.drafts;
+  return Array.isArray(list) && !list.some(draft => draft.state === 'published');
+}
+export function positioningHref(existing: ExistingPositioning): string {
+  return existing.state === 'draft' ? `/app/positioning/${existing.draftId}` : '/app/positioning';
+}
+
 const TONE: Record<string, string> = { waiting: 'var(--text-primary)', working: 'var(--text-secondary)',
   done: 'var(--color-success, var(--text-primary))', partial: 'var(--color-warning, var(--text-primary))',
   failed: 'var(--color-error)', cancelled: 'var(--text-secondary)' };
@@ -31,6 +47,10 @@ export function ScheduleView() {
   const list = trpc.publishMonitor.schedule.list.useQuery(range, { retry: false,
     refetchInterval: query => (hasOpenEntries((query.state.data ?? []) as ScheduleEntry[], Date.now()) ? 30_000 : false) });
   const entries = (list.data ?? []) as ScheduleEntry[];
+  const drafts = trpc.opc.list.useQuery(undefined, { retry: false });
+  const empty = !list.isPending && !list.error && entries.length === 0;
+  const newUser = empty && isNewUser(drafts);
+  const profiles = useProfileBusinesses(newUser);
   const days = weekDays(start);
   const today = new Date();
   const refresh = () => { void utils.publishMonitor.schedule.list.invalidate(); };
@@ -48,9 +68,16 @@ export function ScheduleView() {
         <Button variant="outline" onClick={() => setOffset(o => o + 1)}>下一周</Button>
         <span className="text-sm" aria-live="polite">{dayLabel(days[0]!)} – {dayLabel(days[6]!)}</span>
       </nav>
-      <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-        要排新的帖子，请在资料库里打开一条内容，选"一键发布"后选择发布时间。已排期的帖子不会跟着内容的修改变化；要改内容，请取消后重新排期。
-        <Link className="ml-1 underline" href="/app/library">去资料库</Link></p>
+      {newUser ? <section aria-label="还没有排期" className="space-y-2 rounded-lg border p-4">
+        <p className="text-sm">先完成定位、写好第一篇，就能在这里排期。</p>
+        <Button asChild><Link href={positioningHref(existingPositioning(profiles.businesses, Boolean(profiles.error)))}>
+          继续定位</Link></Button>
+      </section> : <div className="space-y-1">
+        {empty && <p className="text-sm">这周还没有安排。</p>}
+        <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+          要排新的帖子，请在资料库里打开一条内容，选"一键发布"后选择发布时间。已排期的帖子不会跟着内容的修改变化；要改内容，请取消后重新排期。
+          <Link className="ml-1 underline" href="/app/library">去资料库</Link></p>
+      </div>}
       {list.isPending ? <PageSkeleton compact rows={4} label="发布排期读取中" />
         : list.error ? <div className="space-y-2">
           <p role="alert" className="text-sm">{scheduleErrorMessage(list.error.message, list.error.data?.code)}</p>
