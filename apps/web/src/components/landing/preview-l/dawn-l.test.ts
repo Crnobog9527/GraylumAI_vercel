@@ -4,11 +4,12 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { DEMO_LABEL } from '@/components/landing/demo/demo-script';
-import { J_STEPS } from '@/lib/landing/landing-copy-j-persona';
+import { J_FIELD_VALUES, J_FIELDS, J_STEPS } from '@/lib/landing/landing-copy-j-persona';
 import { J_BENCHMARK_TABLE } from '@/lib/landing/landing-copy-j-takeover';
 import { L_FLOW_ONE } from '@/lib/landing/landing-copy-l-flow';
 import { L_LATER_FLYWHEEL } from '@/lib/landing/landing-copy-l-later';
-import { HeroWindowL } from './HeroWindowL';
+import { L_PLAIN_SWAPS, L_POSITIONING_MOMENTS } from '@/lib/landing/landing-copy-l-positioning';
+import { HERO_JUDGEMENTS, heroJudgement, HeroWindowL } from './HeroWindowL';
 import { STEP_ONE_PICTURES } from './StepOneFlowL';
 
 const SRC = join(__dirname, '../../..');
@@ -40,6 +41,8 @@ describe('the home page\'s 晨光 layer and the first screen\'s product window',
     expect(html).toMatch(/<div class="[^"]*"[^>]* inert=""/);
   });
 
+  const judgements = [...HERO_JUDGEMENTS.left, ...HERO_JUDGEMENTS.right];
+
   it('says nothing the page\'s copy does not already hold', () => {
     const picture = text(renderToStaticMarkup(createElement('div', null, STEP_ONE_PICTURES[2].draw(null))));
     const [review] = L_LATER_FLYWHEEL.review.rows;
@@ -47,18 +50,52 @@ describe('the home page\'s 晨光 layer and the first screen\'s product window',
       ...J_STEPS.map(step => step.title), DEMO_LABEL, J_BENCHMARK_TABLE.title,
       ...J_BENCHMARK_TABLE.rows.slice(0, 3).flatMap(([account, state]) => [account, state]),
       L_LATER_FLYWHEEL.review.notice, ...review,
+      ...judgements.flatMap(id => [heroJudgement(id).title, heroJudgement(id).value]),
     ];
     // What is left of the window's text once the picture and the known lines are taken out: only the stage numbers.
-    let rest = text(html).replace(picture, ' ');
+    let rest = text(html).split('&quot;').join('"').replace(picture.split('&quot;').join('"'), ' ');
     for (const line of [...known].sort((a, b) => b.length - a.length)) rest = rest.split(line).join(' ');
     expect(rest.replace(/[\s123]/g, '')).toBe('');
   });
 
-  it('keeps the two side cards out of the reading order and the window in it', () => {
+  // Owner 2026-11-12: "只放两个还不够，可以多放几个……定位过程中间会涉及到的 AI 教练判断小卡片".
+  it('shows the coach\'s judgements for this person as the product holds them, in the page\'s plain words', () => {
+    const fields = Object.entries(J_FIELDS).flatMap(([step, list]) => list.map(field => ({ ...field, step })));
+    expect(judgements).toHaveLength(4);
+    expect(new Set(judgements).size).toBe(4);
+    for (const id of judgements) {
+      const field = fields.find(item => item.id === id);
+      // A field of the product's checklist that the coach proposed ("草稿 · AI 教练建议"), from steps one and two:
+      // step three's fields are already in the window's own confirm area.
+      expect(field, id).toBeDefined();
+      expect(J_FIELD_VALUES[id].proposal, id).toBe(true);
+      expect(['s1', 's2'], id).toContain(field?.step);
+      const { title, value } = heroJudgement(id);
+      expect(title).toBe(field?.title);
+      // The value is the checklist's own, with the page's plain-word swaps and nothing else.
+      const swapped = L_PLAIN_SWAPS.reduce((line, [from, to]) => line.split(from).join(to), J_FIELD_VALUES[id].value);
+      expect(value).toBe(swapped);
+      for (const [from] of L_PLAIN_SWAPS) expect(value, from).not.toContain(from);
+      expect(html.split('&quot;').join('"')).toContain(`<h3>${title}</h3><p>${value}</p>`);
+    }
+    // The one judgement the swaps reword says what the coach says in the page's own conversation.
+    const spoken = L_POSITIONING_MOMENTS.flatMap(moment => moment.lines.map(line => line.text)).join('\n');
+    expect(heroJudgement('feasibility').value).toContain('难在做饭的账号很多、带货要先让人信你');
+    expect(spoken).toContain('难在做饭的账号很多、带货要先让人信你');
+  });
+
+  it('keeps the six side cards out of the reading order, three a side, and the window in it', () => {
+    const sides = [...html.matchAll(/<div class="[^"]*side[^"]*" data-side="(left|right)" aria-hidden="true">(.*?)<\/div>(?=<div class="[^"]*(?:side|window))/gs)];
+    expect(sides.map(side => side[1])).toEqual(['left', 'right']);
+    for (const side of sides) expect(side[2].split('<h3>').length - 1).toBe(3);
     expect(html.split('aria-hidden="true"').length - 1).toBeGreaterThanOrEqual(2);
     const cards = html.slice(0, html.indexOf(J_STEPS[0].title));
     expect(cards).toContain(J_BENCHMARK_TABLE.title);
     expect(cards).toContain(L_LATER_FLYWHEEL.review.notice);
+    // The cards are laid over the stage's edges: they are positioned columns, shown only on a very wide screen.
+    const layer = read('components/landing/preview-l/dawn-l.module.css');
+    expect(layer).toMatch(/\.side \{\s*position: absolute;/);
+    expect(layer).toContain('@media (max-width: 1599px) { .side { display: none; } }');
   });
 
   it('puts the layer on the home page only: one root carries it, one first screen draws the window', () => {
