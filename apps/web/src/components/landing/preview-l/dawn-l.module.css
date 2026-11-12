@@ -60,27 +60,46 @@
   .screen > div > div { transform: none; }
 }
 
-/* Two small cards beside the window where the screen is wide enough to hold them clear of it: what the coach found, what the week's review said. */
+/*
+ * Small cards down both sides of the window, three a side (Owner 2026-11-12: more than two): the coach's judgements along
+ * the way. Each side is one column laid over the stage's edge, so the cards can never run into each other whatever their
+ * text, and they add nothing to the page's layout. They show only where the screen is wide enough to hold them clear of
+ * the conversation: from 1600px the column covers no more than the window's own 16px of padding; wider, it stands off.
+ */
+.side {
+  position: absolute; z-index: 2; top: 30px; display: grid; gap: 16px; width: 230px;
+  /* The stage is 1140px wide there: half of what is left of the screen, less a 14px margin, puts the column at the screen's edge. */
+  --out: max(-250px, calc((1140px - 100vw) / 2 + 14px));
+}
+.side[data-side='left'] { left: var(--out); }
+.side[data-side='right'] { right: var(--out); top: 84px; }
 .card {
-  position: absolute; z-index: 2; width: 244px; padding: 14px 16px; border-radius: 18px; text-align: left; font-size: 12.5px; line-height: 1.6;
+  padding: 13px 15px; border-radius: 18px; text-align: left; font-size: 12.5px; line-height: 1.6;
   color: var(--j-ink); background: rgba(255, 255, 255, .8); backdrop-filter: blur(20px) saturate(1.6); -webkit-backdrop-filter: blur(20px) saturate(1.6);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .9), 0 0 0 1px rgba(20, 19, 18, .06), 0 30px 50px -24px rgba(120, 70, 0, .5);
 }
-.card h3 { margin: 0 0 6px; color: var(--j-muted); font-size: 12px; font-weight: 600; }
+.card h3 { margin: 0 0 5px; color: var(--j-muted); font-size: 12px; font-weight: 600; line-height: 1.5; }
 .card p { margin: 0; }
 .card ul { margin: 0; padding: 0; list-style: none; }
-.card li { display: flex; justify-content: space-between; gap: 10px; padding: 6px 0; border-bottom: 1px solid rgba(20, 19, 18, .08); }
+.card li { display: flex; justify-content: space-between; gap: 10px; padding: 5px 0; border-bottom: 1px solid rgba(20, 19, 18, .08); }
 .card li:last-child { border-bottom: 0; }
 .card li span { color: #2f6a3b; font-size: 11.5px; white-space: nowrap; }
 .card strong { display: block; font-size: 17px; font-weight: 600; line-height: 1.4; letter-spacing: -.01em; }
 .card em { display: inline-block; margin-top: 8px; padding: 1px 9px; border-radius: 999px; background: #eaf4ec; color: #2f6a3b; font-size: 11.5px; font-style: normal; }
-.found { left: -206px; bottom: 72px; rotate: -3deg; }
-.review { right: -206px; top: 96px; rotate: 2.5deg; }
-@media (max-width: 1599px) { .card { display: none; } }
+/* Set down by hand: each card turned a little and nudged to one side. */
+.side .card:nth-child(1) { rotate: -2.5deg; margin-inline: 0 10px; }
+.side .card:nth-child(2) { rotate: 1.8deg; margin-inline: 10px 0; }
+.side .card:nth-child(3) { rotate: -1.5deg; margin-inline: 2px 8px; }
+.side[data-side='right'] .card:nth-child(1) { rotate: 2.2deg; margin-inline: 10px 0; }
+.side[data-side='right'] .card:nth-child(2) { rotate: -1.8deg; margin-inline: 0 10px; }
+.side[data-side='right'] .card:nth-child(3) { rotate: 2.6deg; margin-inline: 8px 2px; }
+@media (max-width: 1599px) { .side { display: none; } }
 
 @media (prefers-reduced-motion: no-preference) {
-  .found { animation: drift 8s ease-in-out infinite alternate; }
-  .review { animation: drift 10s -4s ease-in-out infinite alternate; }
+  .side .card { animation: drift 9s ease-in-out infinite alternate; }
+  .side .card:nth-child(2) { animation-duration: 11s; animation-delay: -4s; }
+  .side .card:nth-child(3) { animation-duration: 10s; animation-delay: -7s; }
+  .side[data-side='right'] .card:nth-child(1) { animation-delay: -2s; }
   /* The window leans back a little and stands up as the page scrolls: a transform only, and only where the browser can tie it to scrolling. */
   @supports (animation-timeline: scroll()) {
     .window { animation: stand linear both; animation-timeline: scroll(root); animation-range: 0 60vh; }
