@@ -1,5 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 .page{height:100%;min-height:0;overflow:hidden;background:#fff;color:#262626}
+/* The new-conversation page has a wide empty head: a breath of the same morning light behind "今天，想推进什么？", fading out
+   above the message box. Very faint, still, and only here: a conversation's own page stays plain white for reading. */
+.page{background:radial-gradient(56% 300px at 50% -60px,rgba(255,178,56,.11),transparent 72%),radial-gradient(34% 240px at 84% -40px,rgba(255,176,150,.07),transparent 72%),#fff}
 .startTop{height:48px;display:flex;align-items:center;justify-content:space-between;padding:0 24px;font-size:14px}.startTop strong{font-weight:500}.startTop a{color:#6b6b6b;text-decoration:none;font-size:12px}
 .content{width:100%;height:calc(100% - 48px);margin:0 auto;padding:clamp(12px,3vh,32px) 24px 20px;overflow:auto}
 .hero{text-align:center}.hero h1{margin:0;font-size:32px;font-weight:400;line-height:48px}

@@ -30,23 +30,12 @@ export function weekDays(start: Date): Date[] {
   return Array.from({ length: 7 }, (_, i) => new Date(start.getFullYear(), start.getMonth(), start.getDate() + i));
 }
 
-/** The [from, to) range of a local week as UTC instants for the server. */
-export function weekRange(start: Date): { from: string; to: string } {
-  const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 7);
-  return { from: start.toISOString(), to: end.toISOString() };
-}
-
 export const sameLocalDay = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth()
   && a.getDate() === b.getDate();
 
-/** Entries of one local day, in time order. */
-export function entriesOn(entries: ScheduleEntry[], day: Date): ScheduleEntry[] {
-  return entries.filter(entry => sameLocalDay(new Date(entry.at), day))
-    .sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
-}
-
 const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
 export const dayLabel = (day: Date) => `${day.getMonth() + 1}月${day.getDate()}日 ${WEEKDAYS[day.getDay()]}`;
+export const weekdayOf = (iso: string) => WEEKDAYS[new Date(iso).getDay()]!;
 const pad = (n: number) => String(n).padStart(2, '0');
 export const timeLabel = (iso: string) => { const d = new Date(iso); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
 export const dateTimeLabel = (iso: string) => {

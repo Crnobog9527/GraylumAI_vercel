@@ -9,6 +9,7 @@ vi.mock('@/hooks/use-credits',()=>({useCreditsBalance:()=>({status:'ready',credi
 vi.mock('@/components/layout/LanguageSwitch',()=>({LanguageSwitch:()=><button data-language-switch=""/>}));
 import HomePage from './page';
 import { HOME_STEPS } from './home-steps';
+import { HOME_VISUAL_WORDS } from './home-visuals';
 beforeEach(()=>{
  state.profile={data:{nickname:'Fixture',membership_level:'free'},isError:false};
  state.library={isSuccess:true,isPending:false,data:{businesses:[]},error:null,refetch:vi.fn()};
@@ -38,7 +39,7 @@ it.each(['PRECONDITION_FAILED','FORBIDDEN','SERVICE_UNAVAILABLE','INTERNAL_SERVE
 it('renders the six static steps with labelled parts and no catalog dependency',()=>{
  const html=renderToStaticMarkup(<HomePage/>);
  expect(HOME_STEPS).toHaveLength(6);
- expect(html.match(/<li>/g)).toHaveLength(6);
+ expect(html.match(/<li[ >]/g)).toHaveLength(6);
  HOME_STEPS.forEach((step,index)=>{
   expect(html).toContain(String(index+1).padStart(2,'0'));expect(html).toContain(step.title);
   expect(html).toContain(step.purpose);expect(html).toContain(step.outcome);expect(html).toContain(step.why);
@@ -65,10 +66,51 @@ it('greets without claiming a return visit, and shows a phone account without a 
  const html=renderToStaticMarkup(<HomePage/>);
  expect(html).toContain('你好，手机尾号 5678');expect(html).not.toContain('user-0a1b2c3d');expect(html).not.toContain('欢迎回来');
 });
-// Review of #1894: the two used to share one rule; changing the four boxes must not touch the six method steps (Owner 2026-11-12).
-it('the six method steps keep their cards; only the four items at the foot of the page lose the box',()=>{
- const css=readFileSync(fileURLToPath(new URL('./home.module.css',import.meta.url)),'utf8');
- expect(css).toContain('.method li{border:1px solid #eee;border-radius:10px;padding:18px}');
- expect(css).toContain('.capabilities article{border-top:1px solid #eee;padding:14px 0 0}');
- expect(css).not.toMatch(/\.method li,[^{]*\.capabilities article/);
+// Owner 2026-11-12 redesigned this page (sample H1), which replaces "the six method steps keep their cards … unchanged before launch"
+// (#1922): the two rules this test used to pin word for word are gone. What it protected still holds, below.
+const read=(name:string)=>readFileSync(fileURLToPath(new URL(name,import.meta.url)),'utf8');
+it('the four items at the foot of the page are named, not offered: no link, no box, nothing that answers a pointer',()=>{
+ const html=renderToStaticMarkup(<HomePage/>);
+ const foot=html.slice(html.indexOf('从策略，继续走向实际创作'));
+ expect(foot.match(/<article/g)).toHaveLength(4);expect(foot).not.toMatch(/<a |<button/);
+ const css=read('./home.module.css');
+ const [,rule='']=css.match(/\.capabilities article \{([^}]*)\}/)??[];
+ expect(rule).toContain('display: grid');expect(rule).not.toMatch(/border|box-shadow|background|cursor/);expect(css).not.toMatch(/\.capabilities[^{]*:hover/);
+});
+it('shows one of the six steps at a time, the first to begin with, and each stop of the route names the step it shows',()=>{
+ const html=renderToStaticMarkup(<HomePage/>);
+ const steps=[...html.matchAll(/<li id="([^"]+)"[^>]*>/g)];
+ expect(steps).toHaveLength(6);
+ expect(steps.map(step=>step[0].includes('data-on'))).toEqual([true,false,false,false,false,false]);
+ const stops=[...html.matchAll(/<button type="button" aria-controls="([^"]+)"([^>]*)>/g)];
+ expect(stops.map(stop=>stop[1])).toEqual(steps.map(step=>step[1]));
+ expect(stops.map(stop=>stop[2].includes('aria-current="step"'))).toEqual([true,false,false,false,false,false]);
+ expect(html).toContain('上一步');expect(html).toContain('下一步');
+});
+it("a step's picture says only what the step's own text says, and is kept from a screen reader",()=>{
+ const html=renderToStaticMarkup(<HomePage/>);
+ expect(HOME_VISUAL_WORDS).toHaveLength(HOME_STEPS.length);
+ HOME_VISUAL_WORDS.forEach((words,index)=>{
+  const step=HOME_STEPS[index];const said=step.purpose+step.outcome;
+  for(const word of words){expect(said,`${step.title}: ${word}`).toContain(word);expect(html).toContain(`>${word}<`);}
+ });
+ expect(html.match(/aria-hidden="true"><div class="[^"]*viz/g)).toHaveLength(6);
+});
+it('moves only where motion is welcome, and the light behind the page is the whole page\'s, not the column\'s',()=>{
+ for(const name of ['./home.module.css','./home-method.module.css']){
+  const css=read(name).replace(/\/\*[\s\S]*?\*\//g,'');
+  // Outside the "motion is welcome" blocks nothing animates or transitions; keyframes alone do nothing.
+  const still=css.replace(/@media[^{]*prefers-reduced-motion: no-preference[^{]*\{(?:[^{}]|\{[^{}]*\})*\}/g,'').replace(/@keyframes[^{]*\{(?:[^{}]|\{[^{}]*\})*\}/g,'');
+  expect(still,name).not.toMatch(/animation|transition/);
+ }
+ const html=renderToStaticMarkup(<HomePage/>);
+ // The light is the page root's first child, before the top bar and outside <main>, so the 1160px column cannot cut it.
+ expect(html).toMatch(/<div class="[^"]*home[^"]*"><div class="[^"]*glow[^"]*" aria-hidden="true">/);
+ expect(html.slice(html.indexOf('<main'))).not.toContain('glow');
+ expect(read('./home.module.css')).toMatch(/\.glow \{[^}]*inset: 0 0 auto;[^}]*overflow: hidden/);
+});
+it('choosing a step moves nothing below it: the six steps share one place and the ones not shown keep their room',()=>{
+ const css=read('./home-method.module.css');
+ expect(css).toMatch(/\.panels \{[^}]*display: grid/);expect(css).toMatch(/\.panel \{[^}]*grid-area: 1 \/ 1/);
+ expect(css).toContain('.panel:not([data-on]) { visibility: hidden; }');expect(css).not.toMatch(/\.panel[^{]*\{[^}]*display: none/);
 });

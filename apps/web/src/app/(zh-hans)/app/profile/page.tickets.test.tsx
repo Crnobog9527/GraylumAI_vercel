@@ -68,7 +68,6 @@ const STUBS: Record<string, string> = {
   '@/components/profile/DataUseConsentCard': nothing('DataUseConsentCard'),
   '@/components/profile/dataUseConsentVisibility': `export const DATA_USE_CONSENT_VISIBLE = false;`,
   '@/components/founder/FounderProfileCard': nothing('FounderProfileCard'),
-  '@/components/analytics/CookieSettingsCard': nothing('CookieSettingsCard'),
 };
 beforeAll(async () => {
   const require = createRequire(import.meta.url);
