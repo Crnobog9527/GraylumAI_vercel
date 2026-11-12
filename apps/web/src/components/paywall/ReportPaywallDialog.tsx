@@ -8,13 +8,13 @@ import { PaywallCompareTable, PaywallPlanPicker } from './PaywallPlanPicker';
 import { MethodCheckoutForm } from './MethodCheckoutForm';
 import { CHECKOUT_COPY, GOLD_FOUNDER_YEAR_USD } from './methodCheckout';
 import { SUPPORT_TICKET_HREF, UNPAID_SUBSCRIPTION_BLOCKS_PURCHASE } from '@/components/profile/subscriptionPlanButtonState';
-import { formatUsd, paywallQuote, type PaywallBilling, type PaywallLevel } from './paywallPlans';
+import { formatUsd, fusionPlanLevel, paywallQuote, type PaywallBilling, type PaywallLevel } from './paywallPlans';
 import { usePaywallCheckout } from './usePaywallCheckout';
 import { reportPaywallView } from '@/lib/analytics/events';
 import { trpc } from '@/trpc/client';
 import { profileTabHref } from '@/lib/profile-tabs';
 import { REPORT_DELIVERABLES, REPORT_PAYWALL_COPY as REPORT_COPY } from './reportPaywallCopy';
-import { GOLD_SCENE_COPY, GOLD_SCENE_DELIVERABLES, type GoldScene } from './goldScenePaywallCopy';
+import { GOLD_SCENE_DELIVERABLES, goldSceneCopy, upgradeTarget, type GoldScene } from './goldScenePaywallCopy';
 import { COACH_SCENE_DELIVERABLES, coachSceneCopy } from './coachScenePaywallCopy';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 import { cn } from '@/lib/utils';
@@ -55,8 +55,15 @@ export function ReportPaywallView({ checkout: fullCheckout, onClose, scene = 're
   // (A Skill that needs Gold sells only the Gold plans, like the Gold-only scenes, so nobody buys Pro for it.)
   const goldOnly = scene !== 'report' && (scene !== 'coach' || minLevel === 'gold');
   const inlinePurchase = !goldOnly || memberLevel === 'free';
-  const checkout = goldOnly ? { ...fullCheckout, plans: fullCheckout.plans.filter(item => item.level === 'gold') } : fullCheckout;
-  const COPY = scene === 'coach' ? { ...REPORT_COPY, ...coachSceneCopy(minLevel) } : goldOnly ? { ...REPORT_COPY, ...GOLD_SCENE_COPY[scene] } : REPORT_COPY;
+  // The jury and the model comparison name and sell the plans whose own entitlement switch carries the tool (not a fixed "Gold");
+  // while the catalog names no such plan, the words name none and the Gold plans are offered as before.
+  const tool = scene === 'compare' || scene === 'jury' ? scene : null;
+  const need = tool ? fusionPlanLevel(fullCheckout.plans, tool) : null;
+  const carries = tool === 'jury' ? 'allowFusionReview' : 'allowFusionCompare';
+  const checkout = goldOnly ? { ...fullCheckout, plans: fullCheckout.plans.filter(item => (tool && need ? item[carries] === true : item.level === 'gold')) }
+    : fullCheckout;
+  const COPY = scene === 'coach' ? { ...REPORT_COPY, ...coachSceneCopy(minLevel) } : tool ? { ...REPORT_COPY, ...goldSceneCopy(tool, need) } : REPORT_COPY;
+  const target = tool ? upgradeTarget(need) : ' Gold';
   const deliverables = scene === 'coach' ? COACH_SCENE_DELIVERABLES : goldOnly ? GOLD_SCENE_DELIVERABLES[scene] : REPORT_DELIVERABLES;
   const [selected, setSelected] = useState<PaywallLevel>(goldOnly ? 'gold' : 'pro');
   const dialog = useRef<HTMLDivElement>(null);
@@ -131,9 +138,9 @@ export function ReportPaywallView({ checkout: fullCheckout, onClose, scene = 're
             <div className="grid gap-2 rounded-xl border p-3 text-sm" data-testid="paywall-upgrade-via-subscription"
               style={{ borderColor: 'var(--border-primary)', color: 'var(--text-secondary)' }}>
               {memberLevel === 'loading' ? <PageSkeleton compact rows={2} label="会员状态读取中"/> : <>
-                <p>{memberLevel === 'pro' ? '你现在是 Pro 会员，升级到 Gold 在订阅页完成：原 Pro 到本期结束，已有积分保留。'
-                  : '请到订阅页开通或升级到 Gold。'}</p>
-                <Button asChild className="h-11 sm:h-9"><a href={profileTabHref('subscription')} target="_blank" rel="noopener">去订阅页升级到 Gold</a></Button>
+                <p>{memberLevel === 'pro' ? `你现在是 Pro 会员，升级到${target}在订阅页完成：原 Pro 到本期结束，已有积分保留。`
+                  : `请到订阅页开通或升级到${target}。`}</p>
+                <Button asChild className="h-11 sm:h-9"><a href={profileTabHref('subscription')} target="_blank" rel="noopener">去订阅页升级到{target}</a></Button>
               </>}
             </div>
           ) : checkout.loading ? <PageSkeleton compact rows={3} label="会员方案读取中"/>

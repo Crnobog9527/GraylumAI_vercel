@@ -2,7 +2,7 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 
-const state = vi.hoisted(() => ({ entitlements: undefined as unknown, mine: [] as unknown[] }));
+const state = vi.hoisted(() => ({ entitlements: undefined as unknown, mine: [] as unknown[], plans: undefined as unknown }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: () => {} }) }));
 vi.mock('next/link', () => ({ default: (props: Record<string, unknown>) => <a {...props as object} /> }));
 vi.mock('@/trpc/client', () => {
@@ -10,12 +10,15 @@ vi.mock('@/trpc/client', () => {
   return { trpc: { fusionReview: {
     available: { useQuery: () => query({ enabled: true }) },
     mine: { useQuery: () => query(state.mine) }, panel: { useQuery: () => query(undefined) } },
-    user: { getEntitlements: { useQuery: () => ({ data: state.entitlements }) } } } };
+    user: { getEntitlements: { useQuery: () => ({ data: state.entitlements }) } },
+    settings: { getMembershipPlans: { useQuery: () => ({ data: state.plans }) } } } };
 });
 import { JuryEntry } from './JuryEntry';
 
 const report = { available: true, id: '11111111-2222-4333-8444-555555555555' };
-beforeEach(() => { state.entitlements = undefined; state.mine = []; });
+const plan = (level: string, jury: boolean) => ({ id: level, name: level, level, price: { monthly: level === 'pro' ? 29 : 69, yearly: 0 },
+  credits: { monthly: 1, monthlyBonus: 0 }, discount: 0, checkoutReady: { monthly: true, yearly: false }, allowFusionReview: jury });
+beforeEach(() => { state.entitlements = undefined; state.mine = []; state.plans = [plan('pro', false), plan('gold', true)]; });
 
 it('tags the entry Gold-only for a plan without the jury, and quotes no credits', () => {
   state.entitlements = { allowFusionReview: false };
@@ -24,6 +27,17 @@ it('tags the entry Gold-only for a plan without the jury, and quotes no credits'
   expect(html).toContain('Gold 专享');
   expect(html).not.toContain('积分');
   expect(html).not.toContain('开始评审');
+});
+
+// Owner 2026-11-12: which plan the tool needs comes from the plan catalog's entitlement switches, never a fixed "Gold".
+it('names the plan the catalog says carries the jury, and no plan while the catalog cannot be read', () => {
+  state.entitlements = { allowFusionReview: false };
+  state.plans = [plan('pro', true), plan('gold', true)];
+  expect(renderToStaticMarkup(<JuryEntry draftId="d" report={report} busy={false} />)).toContain('Pro 专享');
+  state.plans = undefined;
+  const html = renderToStaticMarkup(<JuryEntry draftId="d" report={report} busy={false} />);
+  expect(html).toContain('更高级别会员专享');
+  expect(html).not.toContain('Gold');
 });
 
 it('shows the normal entry for a plan with the jury, and while the plan is still unknown (the server still guards a start)', () => {

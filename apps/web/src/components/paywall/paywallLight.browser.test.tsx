@@ -24,7 +24,7 @@ const trpcMock = `
   const q = value => ({ data: value, isLoading: false, isError: false, isSuccess: true });
   const plan = (level, monthly, yearly) => ({ id: level + '-plan', name: level, level, price: { monthly, yearly },
     credits: { monthly: level === 'pro' ? 3480 : 8970, monthlyBonus: 0 }, discount: level === 'pro' ? 0.05 : 0.1,
-    checkoutReady: { monthly: true, yearly: true } });
+    checkoutReady: { monthly: true, yearly: true }, allowFusionReview: level === 'gold', allowFusionCompare: level === 'gold' });
   const routes = { version: 7, card: { enabled: true }, card_cn: { enabled: true }, wechat_pay: { enabled: true, annualVerified: true },
     alipay: { enabled: true, annualVerified: true } };
   export const trpc = {

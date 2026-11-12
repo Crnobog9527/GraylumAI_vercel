@@ -1,7 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 /* FUSION-COMPARE: the composer entry, the picker and the compare card. Colours follow the composer (work-composer.module.css). */
-.entry{display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 12px;border:1px solid #e5e5e5;border-radius:999px;background:#fff;color:#2d2d2d;font-size:12px;white-space:nowrap}
-.entry:hover:not(:disabled){background:#f6f6f6}.entry:disabled{color:#b9b9b9;cursor:not-allowed}
+/* What the rail's "多模型对比" entry says beside the message box when a compare cannot start yet (nothing written, or a
+   message a compare cannot take). The button that used to stand here is in the left rail now. */
+.entryHint{display:inline-flex;align-items:center;min-height:34px;padding:0 4px;color:#6b6b6b;font-size:12px;line-height:18px}
 .muted{color:#6b6b6b;font-size:12px}
 .error{color:var(--color-destructive,#b42318);font-size:12px}
 .spin{animation:spin 1s linear infinite;display:inline-block;vertical-align:-2px}

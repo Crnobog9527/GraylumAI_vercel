@@ -15,7 +15,7 @@ import { SaveReplyButton, SessionResultsPanel } from '@/components/opc/session-r
 import composerStyles from '@/components/opc/work-composer.module.css';
 import { trpc } from '@/trpc/client';
 import { RUNTIME_CHOICES_STALE_MS } from '@/lib/runtime-choices';
-import { CompareButton } from '@/components/fusion-compare/ComparePicker';
+import { CompareHost } from '@/components/fusion-compare/ComparePicker';
 import { CompareThread, useCompareThread } from '@/components/fusion-compare/CompareThread';
 import {
   clearForSend, forgetPending, markPendingRestored, openingDraftWithReferences, readPending, rememberPending,
@@ -178,7 +178,7 @@ export function TurnWorkspace({ sessionId }: { sessionId: string }) {
         </section>
       </div>
       <footer className={`${composerStyles.zone} ${workStyles.composerZone}`}><div className={composerStyles.wrap}>
-        <CompareButton sessionId={sessionId} question={input} disabled={chat.busy || !compareSkill.ready} skill={compareSkill.skill}
+        <CompareHost sessionId={sessionId} question={input} disabled={chat.busy || !compareSkill.ready} skill={compareSkill.skill}
           blockedReason={COMPOSER_REFERENCES_ENABLED && referencesNamedIn(input, references).length
             ? '带 @ 引用资料的消息暂时不能多模型对比，请去掉引用后再试。'
             // Compare sends no image: with screenshots attached it would charge several models that never saw them.

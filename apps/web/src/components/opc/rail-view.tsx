@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { CSSProperties, KeyboardEvent, ReactNode, Ref, SyntheticEvent } from 'react';
 import Link from 'next/link';
-import { ChevronDown, Ellipsis, Grid2X2, Pencil, Pin, Sparkles, X } from 'lucide-react';
+import { ChevronDown, Columns3, Ellipsis, Grid2X2, Pencil, Pin, Scale, Sparkles, X } from 'lucide-react';
 import { HoverPrefetchLink } from './hover-prefetch-link';
 import styles from './workspace-frame.module.css';
 
@@ -44,8 +44,11 @@ export function AnnouncementBar({ notice, returnParam = '', onClose }: { notice?
  * These fixed entries fetch their page ahead while the pointer rests on them (HoverPrefetchLink, SITE-SPEED); every other
  * link of the shell, the rows of the lists included, fetches on the click (#1392).
  */
-export function RailView({ area, returnParam = '', onCloseMobile, launched = false, dataReview = false, children }: {
+export function RailView({ area, returnParam = '', onCloseMobile, launched = false, dataReview = false, onCompare, onJury, children }: {
   area: RailArea; returnParam?: string; onCloseMobile?: () => void; launched?: boolean; dataReview?: boolean;
+  /** The member tools (Owner 2026-11-12): each entry shows when its handler is given. Anyone may press them; the frame decides
+   *  between the tool and its paywall (rail-gold-tools.tsx). */
+  onCompare?: () => void; onJury?: () => void;
   children: ReactNode;
 }) {
   return <aside className={styles.rail} aria-label="工作区导航">
@@ -59,6 +62,8 @@ export function RailView({ area, returnParam = '', onCloseMobile, launched = fal
         <img className={styles.navIcon} src="/opc-reference/magnifying-glass.svg" alt=""/>搜索</HoverPrefetchLink>
       <HoverPrefetchLink href={'/app/library'+returnParam} aria-current={area==='library'?'page':undefined}>
         <img className={styles.navIcon} src="/opc-reference/books.svg" alt=""/>资料库</HoverPrefetchLink>
+      {onCompare&&<button type="button" onClick={onCompare}><Columns3 className={styles.navIcon} strokeWidth={1.5} aria-hidden="true"/>多模型对比</button>}
+      {onJury&&<button type="button" onClick={onJury}><Scale className={styles.navIcon} strokeWidth={1.5} aria-hidden="true"/>评审团</button>}
       {launched ? <>
         {/* Shown as available, like the other items, but not controls: there is nothing to open yet (no href, not focusable). */}
         <a><img className={styles.navIcon} src="/opc-reference/calendar-blank.svg" alt=""/>发布排期</a>

@@ -10,7 +10,8 @@ import { GOLD_SCENE_COPY } from './goldScenePaywallCopy';
 import { COACH_SCENE_COPY, COACH_SCENE_DELIVERABLES } from './coachScenePaywallCopy';
 
 const plan = (level: 'pro' | 'gold', monthly: number) => ({ id: level + '-id', name: level === 'pro' ? 'Pro 会员' : 'Gold 会员', level,
-  price: { monthly, yearly: monthly * 10 }, credits: { monthly: 1000, monthlyBonus: 0 }, discount: 0, checkoutReady: { monthly: true, yearly: true } });
+  price: { monthly, yearly: monthly * 10 }, credits: { monthly: 1000, monthlyBonus: 0 }, discount: 0, checkoutReady: { monthly: true, yearly: true },
+  allowFusionReview: level === 'gold', allowFusionCompare: level === 'gold' });
 const checkout = {
   plans: [plan('pro', 29), plan('gold', 59)], loading: false, catalogFailed: false, unpaidSubscription: false, quoteOptions: {},
   founderSeats: 0, founderSoldOut: false, method: { pending: false, entry: null, methodsFor: () => [] },

@@ -19,3 +19,25 @@
 .gold {
   margin-left: 8px; padding: 1px 8px; border: 1px solid var(--border-primary); border-radius: 999px; font-size: 12px; font-weight: 600;
 }
+
+/* The rail's 评审团 entry: "which report?" (JuryChooser), in the light dialog. One row per confirmed positioning. */
+.chooser { max-width: 480px; }
+.chooserList { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; max-height: min(52vh, 420px); overflow-y: auto; }
+.chooserList li { display: grid; gap: 2px; }
+.chooserRow {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 48px; padding: 10px 14px;
+  border: 1px solid #e7e7e7; border-radius: 12px; background: #fff; color: #262626; font-size: 14px; line-height: 20px; text-decoration: none;
+  transition: background-color .15s ease, border-color .15s ease;
+}
+.chooserRow:hover { background: #fafafa; border-color: #dcdcdc; }
+.chooserRow small { display: block; color: #6b6b6b; font-size: 12px; line-height: 18px; }
+.chooserList .link { padding-left: 14px; min-height: 28px; font-size: 13px; color: #444; }
+.chooserEmpty { display: grid; justify-items: start; gap: 12px; color: #444; font-size: 14px; line-height: 22px; }
+.chooserEmpty p { margin: 0; }
+.chooserAction {
+  display: inline-flex; align-items: center; min-height: 36px; padding: 8px 16px; border-radius: 8px; background: #262626; color: #fff;
+  font-size: 13px; line-height: 20px; text-decoration: none;
+}
+.chooserAction:hover { background: #3a3a3a; }
+.chooserWait { height: 104px; border-radius: 12px; background: #f1f1f1; }
+@media (prefers-reduced-motion: reduce) { .chooserRow { transition: none; } }
