@@ -16,7 +16,9 @@ export type GoldToolEntry = 'hidden' | 'tool' | 'paywall';
  * What each entry is, from the server's answers. `compare`: the compare options read (absent while unknown). `juryOn`: the
  * site-wide jury switch. `juryPlan`: whether the member's plan has the jury (null while unknown).
  */
-export function goldToolEntries(compare: CompareOptions | undefined, juryOn: boolean, juryPlan: boolean | null): { compare: GoldToolEntry; jury: GoldToolEntry } {
+export function goldToolEntries(
+  compare: CompareOptions | undefined, juryOn: boolean, juryPlan: boolean | null,
+): { compare: GoldToolEntry; jury: GoldToolEntry } {
   return {
     compare: !compare || (compare.enabled === false && compare.reason === 'disabled') ? 'hidden' : compare.enabled ? 'tool' : 'paywall',
     jury: !juryOn || juryPlan === null ? 'hidden' : juryPlan ? 'tool' : 'paywall',

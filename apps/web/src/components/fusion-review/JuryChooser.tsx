@@ -24,7 +24,9 @@ export type JuryChoice = { draftId: string; name: string; business: string; revi
  * The positionings a jury can review: one row per confirmed positioning (a published version, or a draft round on top of
  * one), named by its account, with its newest review when there is one. The same rule as the topic list of the start page.
  */
-export function juryChoices(businesses: readonly Business[] | undefined, drafts: readonly Draft[] | undefined, reviews: readonly MineItem[] | undefined): JuryChoice[] {
+export function juryChoices(
+  businesses: readonly Business[] | undefined, drafts: readonly Draft[] | undefined, reviews: readonly MineItem[] | undefined,
+): JuryChoice[] {
   const latest = latestByDraft(reviews ?? []);
   const seen = new Set<string>();
   return (businesses ?? []).flatMap(business => business.accounts.flatMap(account => {
