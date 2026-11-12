@@ -8,6 +8,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { chromium, type Browser } from '@playwright/test';
 import { afterAll, beforeAll, expect, it } from 'vitest';
+import { fileHintText } from './work-composer';
 
 /**
  * UI-UNIFY (Codex batch D-1): typing @ in a new conversation showed the library candidates, but they sat under the top bar and could not be
@@ -46,7 +47,7 @@ beforeAll(async () => {
           // The app: a header, then a work panel that clips its overflow. A new conversation puts the box near the top of the panel,
           // a long one at its bottom.
           const box=which==='files'
-            ? React.createElement('div',{style:{margin:'0 20px'}},React.createElement(ComposerView,{menu:'files',fileHint:'支持 txt、md、docx',onPickFile:()=>window.picked.push('file'),
+            ? React.createElement('div',{style:{margin:'0 20px'}},React.createElement(ComposerView,{menu:'files',fileHint:params.hint||'支持 txt、md、docx',onPickFile:()=>window.picked.push('file'),
                 editor:React.createElement('div',{style:{minHeight:60}},'输入框')}))
             : React.createElement('div',{className:styles.composer,style:{margin:'0 20px',minHeight:96}},
                 React.createElement(ReferenceMenuView,{choices,footnote:'每条消息最多引用 3 篇文档。',onPick:i=>window.picked.push(i)}));
@@ -132,4 +133,28 @@ for (const [width, height] of [[1280, 800], [390, 800]]) {
       } finally { await page.close(); }
     }, 30000);
   }
+}
+
+// Validation of #1889 (2026-11-12): on a 360px phone the positioning conversation leaves 158px above the box; the "+" menu was 232px
+// tall with its real explanation, so the last sentence was only reached by scrolling inside the menu.
+for (const [name, hint] of [['the positioning conversation', fileHintText(false, true)], ['a box without library references', fileHintText(false, false)]] as const) {
+  it(`360px: the + menu shows the whole explanation of ${name} without scrolling, inside the screen`, async () => {
+    const page = await browser.newPage({ viewport: { width: 360, height: 740 } });
+    try {
+      await page.route('**/*', route => route.abort());
+      await page.setContent('<style>body{margin:0;font:400 16px/24px sans-serif}</style><div id="root"></div>');
+      await page.addStyleTag({ content: css });
+      await page.evaluate(text => { (window as unknown as { fixtureParams: object }).fixtureParams = { menu: 'files', where: 'bottom', hint: text }; }, hint);
+      await page.addScriptTag({ content: code });
+      const menu = page.getByRole('dialog', { name: '添加资料' });
+      await menu.waitFor();
+      const measured = await menu.evaluate(element => ({ content: element.scrollHeight, shown: element.clientHeight,
+        left: element.getBoundingClientRect().left, right: element.getBoundingClientRect().right }));
+      expect(measured.content, 'taller than the room a phone leaves above the box').toBeLessThanOrEqual(158);
+      expect(measured.content, 'the menu scrolls').toBeLessThanOrEqual(measured.shown);
+      expect(measured.left).toBeGreaterThanOrEqual(0);
+      expect(measured.right).toBeLessThanOrEqual(360);
+      await expect(menu.textContent()).resolves.toContain(hint.slice(-12));
+    } finally { await page.close(); }
+  }, 30000);
 }
