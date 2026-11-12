@@ -1,3 +1,5 @@
+-- Copyright (c) 2026 Grayscale Luminary LLC.
+-- All rights reserved. This code is proprietary and confidential.
 -- PROFILE-AVATAR (Owner 2026-11-12: users set their own avatar, before launch).
 --
 -- 1. A public-read bucket for avatars. An avatar is shown on every signed-in page (profile header, rail account button,
