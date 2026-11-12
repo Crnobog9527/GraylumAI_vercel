@@ -63,6 +63,8 @@ describe('renderAlert', () => {
     expect(renderAlert('dispute', { code: 'PAY_DISPUTE_SOMETHING_NEW', disputeId: 'x', dueBy: null }, ctx))
       .toContain('有一笔拒付有新情况');
     expect(renderAlert('billing_review', { code: 'PAY_NEW_THING', count: null }, ctx)).toContain('一项付款检查需要人工处理');
+    expect(renderAlert('billing_review', { code: 'PAY_STRIPE_MP_RECONCILIATION_DISABLED', count: null }, ctx))
+      .toContain('每日 Stripe 银行卡对账没有开启');
     expect(renderAlert('ops_backlog', { code: 'X', level: 'fatal' }, ctx)).toMatch(/^【紧急】/);
   });
 
@@ -101,6 +103,9 @@ describe('dedupeKey', () => {
     const now = new Date('2026-11-08T10:30:00Z');
     expect(dedupeKey('refund', EXAMPLES.refund, now)).toBe('refund:refunded:6f1c2a9e-1111-4c3b-9d1e-000000000000:re_1');
     expect(dedupeKey('billing_review', EXAMPLES.billing_review, now)).toBe('billing_review:PAY_STRIPE_MP_RECONCILIATION_REVIEW_REQUIRED:2026-11-08');
+    // The "card backstop off" warning: one message a day per environment, however many runs.
+    expect(dedupeKey('billing_review', { code: 'PAY_STRIPE_MP_RECONCILIATION_DISABLED', count: null }, now))
+      .toBe('billing_review:PAY_STRIPE_MP_RECONCILIATION_DISABLED:2026-11-08');
     expect(dedupeKey('error_spike', EXAMPLES.error_spike, now)).toBe('error_spike:site');
     // A condition per model: the same model is one message a window, another model is its own.
     expect(dedupeKey('model_blocked', EXAMPLES.model_blocked, now)).toBe('model_blocked:00000000-0000-4000-8000-000000000020');

@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   stripeCard: vi.fn(),
   stripeClient: vi.fn(),
   reportStripeCard: vi.fn(),
+  reportCardDisabled: vi.fn(),
   fusionKick: vi.fn(),
   voice: vi.fn(),
   researchPrices: vi.fn(),
@@ -34,7 +35,7 @@ vi.mock('@repo/api/src/services/payments/waffoTestOperationsClient', () => ({ ge
 vi.mock('@repo/api/src/services/payments/stripeCardReconciliation', () => ({ reconcileStripeCardPayments: mocks.stripeCard }));
 vi.mock('@repo/api/src/services/stripe', () => ({ getStripeClient: mocks.stripeClient }));
 vi.mock('@/lib/payment-alert.mjs', () => ({ reportStripeCardReconciliation: mocks.reportStripeCard,
-  reportPaymentEvidenceConflict: vi.fn() }));
+  reportStripeCardReconciliationDisabled: mocks.reportCardDisabled, reportPaymentEvidenceConflict: vi.fn() }));
 vi.mock('@repo/api/src/services/voice/recovery', () => ({ recoverVoiceGenerations: mocks.voice }));
 vi.mock('@repo/api/src/services/research/priceRefresh', () => ({ refreshResearchPrices: mocks.researchPrices }));
 vi.mock('@repo/api/src/services/research/runtime/secrets', () => ({ platformSecretReader: () => async () => 'key' }));
@@ -389,6 +390,28 @@ describe('/api/cron/billing-reconcile', () => {
     expect(await (await GET(new Request('https://graylum.test/api/cron/billing-reconcile'))).json())
       .toMatchObject({ success: true, stripeCard: { skipped: true } });
     expect(mocks.stripeCard).not.toHaveBeenCalled();
+    // A local run stays quiet: no alert, no reason.
+    expect(mocks.reportCardDisabled).not.toHaveBeenCalled();
+    expect(mocks.finishRun.mock.lastCall![0].summary.stripeCard).not.toHaveProperty('reason');
+  });
+
+  it('on a deployment without the card mode: still skipped, the Owner is warned and the summary says why', async () => {
+    vi.stubEnv('STRIPE_CARD_RECONCILIATION_MODE', '');
+    vi.stubEnv('VERCEL', '1');
+    const body = await (await GET(new Request('https://graylum.test/api/cron/billing-reconcile'))).json();
+    expect(body).toMatchObject({ success: true, stripeCard: { success: true, skipped: true, reason: 'MODE_UNSET' } });
+    expect(mocks.stripeCard).not.toHaveBeenCalled();
+    expect(mocks.stripeClient).not.toHaveBeenCalled();
+    expect(mocks.reportCardDisabled).toHaveBeenCalledOnce();
+    expect(mocks.reportStripeCard).not.toHaveBeenCalled();
+    expect(mocks.finishRun).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'success',
+      summary: expect.objectContaining({ stripeCard: expect.objectContaining({ skipped: true, reason: 'MODE_UNSET' }) }) }));
+    // Configured: no warning.
+    vi.stubEnv('STRIPE_CARD_RECONCILIATION_MODE', 'test');
+    mocks.reportCardDisabled.mockClear();
+    await GET(new Request('https://graylum.test/api/cron/billing-reconcile'));
+    expect(mocks.reportCardDisabled).not.toHaveBeenCalled();
+    expect(mocks.finishRun.mock.lastCall![0].summary.stripeCard).not.toHaveProperty('reason');
   });
 
   it('stops waiting for a stalled Stripe scan before the cron limit and reports it', async () => {

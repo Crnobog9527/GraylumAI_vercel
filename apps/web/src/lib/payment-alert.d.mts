@@ -2,4 +2,5 @@
 export function reportPaymentEvidenceConflict(eventType: string): void;
 export function reportAnnualReleaseAnomalies(anomalies: Array<{ subscriptionId: string | null; reason: string }>): void;
 export function reportStripeCardReconciliation(findings: Array<{ kind: string }>): void;
+export function reportStripeCardReconciliationDisabled(): void;
 export function reportPaymentNoticeAttention(results: Array<{ attention?: string | null }>): void;
