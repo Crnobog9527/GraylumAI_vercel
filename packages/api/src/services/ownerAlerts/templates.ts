@@ -69,6 +69,8 @@ function disputeLine(f: OwnerAlertFacts['dispute']): string {
 
 const REVIEWS: Record<string, Rendered> = {
   PAY_STRIPE_MP_RECONCILIATION_REVIEW_REQUIRED: { line: '每日 Stripe 对账发现了对不上的地方，请到后台看一下。', path: '/admin/finance' },
+  PAY_STRIPE_MP_RECONCILIATION_DISABLED: { line: '每日 Stripe 银行卡对账没有开启（Vercel 里的银行卡对账模式变量没设），'
+    + '付款通知丢了也不会被补上。请在这个环境的 Vercel 变量里设好后重新部署。', path: '/admin/finance' },
   PAY_COMMON_ANNUAL_RELEASE_REVIEW_REQUIRED: { line: '年付会员每月发积分时有几笔没发成，请到后台核对。', path: '/admin/finance' },
   PAY_NOTIFY_REVIEW_REQUIRED: { line: '有几封给用户的付款通知邮件没发出去，请到后台看一下。', path: '/admin/payment-notices' },
   PAY_COMMON_PAYMENT_EVIDENCE_CONFLICT: { line: 'Stripe 发来的付款信息和我们记的对不上，钱先留着待核对，请到后台看一下。', path: '/admin/orders' },

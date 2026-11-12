@@ -17,7 +17,8 @@ import { closeExpiredWaffoCheckouts } from '@repo/api/src/services/payments/waff
 import { describeWaffoFailure } from '@repo/api/src/services/payments/waffoFailure';
 import { reconcileStripeCardPayments } from '@repo/api/src/services/payments/stripeCardReconciliation';
 import { getStripeClient } from '@repo/api/src/services/stripe';
-import { reportPaymentEvidenceConflict, reportStripeCardReconciliation } from '@/lib/payment-alert.mjs';
+import { reportPaymentEvidenceConflict, reportStripeCardReconciliation, reportStripeCardReconciliationDisabled }
+  from '@/lib/payment-alert.mjs';
 import { recoverVoiceGenerations } from '@repo/api/src/services/voice/recovery';
 import { kickStalledReviews } from '@repo/api/src/services/fusion/background';
 import { stuckTurnScan } from '@repo/api/src/services/turn/settings/turnStuckRefund';
@@ -139,7 +140,13 @@ async function runWaffoReconciliation(supabase: SupabaseClient) {
  * with Owner approval at launch, REL-1). A key of the other mode is refused and alerted, never scanned. */
 async function runStripeCardReconciliation(supabase: SupabaseClient) {
   const expectedMode = process.env.STRIPE_CARD_RECONCILIATION_MODE;
-  if (!expectedMode) return { success: true, skipped: true, findings: [] };
+  if (!expectedMode) {
+    // Still skipped, but never silently on a deployment (staging ran without it for days, 2026-11-12): the Owner is told
+    // once a day and the run summary says why. A local run (no VERCEL) stays quiet.
+    const deployed = process.env.VERCEL === '1';
+    if (deployed) reportStripeCardReconciliationDisabled();
+    return { success: true, skipped: true, findings: [], ...(deployed ? { reason: 'MODE_UNSET' as const } : {}) };
+  }
   if (expectedMode !== 'test' && expectedMode !== 'live') {
     // A typo must not look like the intentional "off": it is a configuration failure, alerted.
     const findings = [{ kind: 'scan_failed' as const, code: 'STRIPE_CARD_RECONCILIATION_MODE_INVALID' }];
@@ -285,7 +292,8 @@ export async function GET(request: Request) {
         unresolvedReservations: readinessAudit.summary?.unresolvedReservations ?? null,
       },
       waffo: { success: waffo.success, skipped: Boolean((waffo as { skipped?: boolean }).skipped), findings: count(waffo.findings) },
-      stripeCard: { success: stripeCard.success, skipped: Boolean((stripeCard as { skipped?: boolean }).skipped), findings: count(stripeCard.findings) },
+      stripeCard: { success: stripeCard.success, skipped: Boolean((stripeCard as { skipped?: boolean }).skipped), findings: count(stripeCard.findings),
+        ...((stripeCard as { reason?: string }).reason ? { reason: (stripeCard as { reason?: string }).reason } : {}) },
       erasureFinancial: { success: erasureFinancial.success },
       fusionKick: { success: fusionKick.success },
       voice: { success: voice.success, failed: voice.failed },

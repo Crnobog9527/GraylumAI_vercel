@@ -36,6 +36,14 @@ export function reportStripeCardReconciliation(findings) {
   alertOwnerAfterResponse('billing_review', { code, count: findings.length });
 }
 
+// The daily Stripe card backstop is off on a deployed environment (STRIPE_CARD_RECONCILIATION_MODE unset): lost card
+// webhooks would never be repaired, silently. Warned once a day (billing_review dedupes per code and day), never a failure.
+export function reportStripeCardReconciliationDisabled() {
+  const code = 'PAY_STRIPE_MP_RECONCILIATION_DISABLED';
+  captureMessage(code, { level: 'warning', fingerprint: [code], tags: { category: 'billing', code } });
+  alertOwnerAfterResponse('billing_review', { code, count: null });
+}
+
 // PAY-NOTIFY: notices that need a person (uncertain after same-run retries, retries exhausted, digest
 // changed, missing template). Fixed codes and counts only: no notice ids, addresses or mail content.
 export function reportPaymentNoticeAttention(results) {

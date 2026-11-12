@@ -38,11 +38,13 @@ describe('every Sentry alert helper the Owner relied on also goes to Feishu', ()
     pay.reportAnnualReleaseAnomalies([{ subscriptionId: 's', reason: 'r' }]);
     pay.reportPaymentNoticeAttention([{ attention: 'PAY_NOTIFY_RETRIES_EXHAUSTED' }, { attention: null }]);
     pay.reportPaymentEvidenceConflict('invoice.paid');
+    pay.reportStripeCardReconciliationDisabled();
     expect(m.alert.mock.calls).toEqual([
       ['billing_review', { code: 'PAY_STRIPE_MP_RECONCILIATION_REVIEW_REQUIRED', count: 2 }],
       ['billing_review', { code: 'PAY_COMMON_ANNUAL_RELEASE_REVIEW_REQUIRED', count: 1 }],
       ['billing_review', { code: 'PAY_NOTIFY_REVIEW_REQUIRED', count: 1 }],
       ['billing_review', { code: 'PAY_COMMON_PAYMENT_EVIDENCE_CONFLICT', count: null }],
+      ['billing_review', { code: 'PAY_STRIPE_MP_RECONCILIATION_DISABLED', count: null }],
     ]);
     // Nothing found: neither Sentry nor Feishu.
     m.alert.mockClear();
