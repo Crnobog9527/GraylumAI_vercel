@@ -29,6 +29,8 @@ import { useAccountDiscussion } from './use-account-discussion';
 import { LanguageSwitch } from '@/components/layout/LanguageSwitch';
 import styles from './workspace-frame.module.css';
 import { READ_RETRY } from '@/trpc/read-retry';
+// The data review's name table (小红书, 抖音, TikTok …): a platform is stored by its code and shown by its name.
+import { platformName } from '@/components/publish-monitor/labels';
 
 type Item = {workItemId:string;sessionId:string;title:string;chatName?:string;uiRevision?:number;pinned?:boolean;archived?:boolean;deleted?:boolean;brief:string|null;day:string;revision:number;contentType?:string;lastActivityAt?:string};
 type Account = {projectId:string;platform:string;account:string;displayName?:string;uiRevision?:number;strategyDraftId?:string|null;pendingStrategyDraftId?:string|null;sourceVersionId?:string|null;sourceVersion?:number|null;profile?:Record<string,{label?:string;value?:string;status?:string}>|null;items:Item[]};
@@ -223,7 +225,7 @@ export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,acti
         .sort((a,b)=>Number(Boolean(b.pinned))-Number(Boolean(a.pinned))||(b.lastActivityAt??'').localeCompare(a.lastActivityAt??''))};})
        .filter(row=>archiveView?row.items.length:true);
       if(!visible.length)return null;
-      return <RailGroup key={platform} title={platform} open={groupOpen['platform:'+platform]??true}
+      return <RailGroup key={platform} title={platformName(platform)} open={groupOpen['platform:'+platform]??true}
        onToggle={next=>setGroupOpen(current=>current['platform:'+platform]===next?current:{...current,['platform:'+platform]:next})}>
        {visible.map(({account,items,showStrategy})=>{
         const shown=expanded.includes(account.projectId)?items:items.slice(0,6);
