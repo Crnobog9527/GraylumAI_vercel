@@ -1526,7 +1526,7 @@ export const paymentsRouter = router({
             const status: PaymentOrderStatus = projectBillingStatus(order);
             const title: string = itemType === 'membership_plan'
               ? membershipPlanNames.get(order.item_id) ?? '会员订阅'
-              : creditPackageNames.get(order.item_id) ?? '积分加油包';
+              : creditPackageNames.get(order.item_id) ?? '积分包';
             const billingCycle: BillingRecord['billingCycle'] = order.billing_cycle ?? 'one_time';
 
             return {
