@@ -27,6 +27,7 @@ import {
  RailWorkThread, type RailArea,
 } from './rail-view';
 import { PhoneTabs, type PhoneTab } from './phone-tabs';
+import { useAnnouncementOpen } from './use-announcement';
 import { useAccountDiscussion } from './use-account-discussion';
 import { LanguageSwitch } from '@/components/layout/LanguageSwitch';
 import styles from './workspace-frame.module.css';
@@ -59,7 +60,8 @@ export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,acti
  const [renameAccountId,setRenameAccountId]=useState(''),[renameAccountValue,setRenameAccountValue]=useState('');
  const [expanded,setExpanded]=useState<string[]>([]);
  const [strategyAccount,setStrategyAccount]=useState<Account|null>(null);
- const [noticeOpen,setNoticeOpen]=useState(true);
+ // The announcement under the top bar: closing it is remembered in the browser (use-announcement.ts), not for this visit only.
+ const [noticeOpen,closeNotice]=useAnnouncementOpen();
  const [bottomPanel,setBottomPanel]=useState<'credits'|'profile'|'feedback'|null>(null);
  const [popoverPosition,setPopoverPosition]=useState({left:264,bottom:16,maxHeight:600});
  const [feedbackDraft,setFeedbackDraft]=useState({title:'',description:'',category:'technical_support'});
@@ -220,7 +222,7 @@ export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,acti
 
  return <div className={styles.workspace} data-area={area} data-tabs={phoneTab?'':undefined}>
   <GlobalHeader area={area} onOpenNav={()=>setMobileNav(true)} end={<LanguageSwitch/>}/>
-  {noticeOpen&&<AnnouncementBar notice={notice} returnParam={returnParam} onClose={()=>setNoticeOpen(false)}/>}
+  {noticeOpen&&<AnnouncementBar notice={notice} returnParam={returnParam} onClose={closeNotice}/>}
   <div className={[styles.shell,right&&rightOpen?styles.withRight:'',mobileNav?styles.navOpen:'',mobileRight?styles.mobileRightOpen:'',!noticeOpen?styles.noNotice:''].join(' ')}>
    <RailView area={area} returnParam={returnParam} dataReview={publishMonitor.data?.ownData===true} onCloseMobile={()=>setMobileNav(false)}
     onCompare={goldTools.onCompare} onJury={goldTools.onJury}>

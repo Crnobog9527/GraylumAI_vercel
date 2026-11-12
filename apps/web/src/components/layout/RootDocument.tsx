@@ -11,6 +11,7 @@ import { SITE_LOCALES, type SiteLocale } from "@/lib/seo/site";
 import { organizationJsonLd, websiteJsonLd } from "@/lib/seo/structured-data";
 import { resolveSupportEmail } from "@/lib/site-config";
 import { LIGHT_FIRST_PAINT_SCRIPT } from "@/lib/light-app-paths";
+import { ANNOUNCEMENT_FIRST_PAINT_SCRIPT } from "@/lib/announcement";
 
 // The document shared by the root layouts. Each language has its own root layout (SEO_GEO_SPEC section 15):
 // app/(zh-hans) for the Simplified site and the app, app/zh-tw for Traditional Chinese (Taiwan), so the
@@ -45,11 +46,13 @@ export function RootDocument({ locale, children }: { locale: SiteLocale; childre
     (process.env.VERCEL === '1' || Boolean(process.env.VERCEL_URL));
 
   return (
-    // suppressHydrationWarning: the script below sets data-first-paint on <html> before React hydrates it.
+    // suppressHydrationWarning: the scripts below set data-first-paint and data-announcement-closed on <html> before React hydrates it.
     <html lang={SITE_LOCALES[locale].htmlLang} suppressHydrationWarning>
       <head>
         {/* A light signed-in page paints light from its first frame (light-app-paths.ts): this runs before the first paint. */}
         <script dangerouslySetInnerHTML={{ __html: LIGHT_FIRST_PAINT_SCRIPT }} />
+        {/* An announcement this browser closed stays out of the first frame too (announcement.ts): also before the first paint. */}
+        <script dangerouslySetInnerHTML={{ __html: ANNOUNCEMENT_FIRST_PAINT_SCRIPT }} />
       </head>
       <body className="antialiased">
         <JsonLd data={[organizationJsonLd({ supportEmail: publicSupportEmail() }), websiteJsonLd()]} />

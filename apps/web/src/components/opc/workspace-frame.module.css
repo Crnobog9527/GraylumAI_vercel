@@ -37,9 +37,28 @@
 .global nav a{display:flex;align-items:center;height:100%;padding:0 13px;color:#666;font-size:14px}
 .global nav a[aria-current=page]{border-bottom:1px solid #555;color:#262626;font-weight:500}
 .globalEnd{display:flex;align-items:center;margin-left:auto;color:#444}.globalEnd button{border:1px solid #e8e8e8;background:#fff}
-.announcement{height:40px;display:flex;align-items:center;justify-content:center;position:relative;padding:0 48px;background:#efefef;color:#444;font-size:13px;font-weight:500;line-height:20px}
-.announcement span{position:absolute;left:12px;font-size:10px;color:#6b6b6b}.announcement strong{font-weight:500}
-.announcement{gap:10px}.announcement a{margin-left:10px;color:#0a66cc;font-size:12px;text-decoration:none}.announcement a:hover{text-decoration:underline}.announcement>button{position:absolute;right:16px;top:8px;display:grid;place-items:center;width:24px;height:24px;border:0;border-radius:4px;background:transparent;color:#333;cursor:pointer}.announcement>button:hover{background:#e9e9e9}
+/*
+ * The announcement under the top bar (AnnouncementBar; Owner 2026-11-12: no longer "一片灰再加一点字", in the landing page's look and
+ * with its kind of motion). The landing page's morning light, gold to peach to lilac, lies along the bar and drifts slowly; the line
+ * stands on it in ink with a small ink button, as the landing page's buttons are. The bar is 40px tall as it always was, so nothing
+ * around it moves. A long line gives way (it is cut with an ellipsis) before the button does.
+ */
+.announcement{position:relative;isolation:isolate;overflow:hidden;height:40px;display:flex;align-items:center;justify-content:center;gap:10px;padding:0 52px;background:#fff1cf;color:#262626;font-size:13px;font-weight:500;line-height:20px}
+/* The light: twice the bar's width, its second half the same as its first, so moving it left by half its width comes back to where it began. */
+.announcement::before{content:'';position:absolute;inset:0 -100% 0 0;z-index:-1;background:linear-gradient(100deg,#fff1cf 0%,#ffe2d6 16.66%,#efe7fd 33.33%,#fff1cf 50%,#ffe2d6 66.66%,#efe7fd 83.33%,#fff1cf 100%)}
+.announcement span{position:absolute;left:12px;font-size:10px;color:#6b5a2e}
+.announcementMark{display:grid;place-items:center;flex:none;width:22px;height:22px;border-radius:50%;background:linear-gradient(135deg,#ffd27a,#ff9f6b);color:#fff}
+.announcement strong{min-width:0;overflow:hidden;font-weight:600;text-overflow:ellipsis;white-space:nowrap}
+.announcement a{display:inline-flex;align-items:center;flex:none;gap:4px;height:26px;padding:0 12px;border-radius:99px;background:linear-gradient(180deg,#3a3835,#1d1c1a);box-shadow:inset 0 1px 0 rgba(255,255,255,.18);color:#fff;font-size:12px;font-weight:500;text-decoration:none;white-space:nowrap}
+.announcement a:focus-visible,.announcement>button:focus-visible{outline:2px solid #262626;outline-offset:2px}
+.announcement>button{position:absolute;right:10px;top:6px;display:grid;place-items:center;width:28px;height:28px;padding:0;border:0;border-radius:50%;background:transparent;color:#55524c;cursor:pointer}.announcement>button:hover{background:rgba(38,38,38,.08)}
+@media(prefers-reduced-motion:no-preference){
+ .announcement::before{animation:announcementDrift 18s linear infinite}
+ .announcementMark svg{animation:announcementTwinkle 3.6s ease-in-out infinite}
+ .announcement a svg{transition:translate .2s cubic-bezier(.16,1,.3,1)}.announcement a:hover svg{translate:2px 0}
+}
+@keyframes announcementDrift{to{translate:-50% 0}}
+@keyframes announcementTwinkle{0%,62%,100%{scale:1;rotate:0deg}80%{scale:1.28;rotate:18deg}}
 .shell{height:calc(100dvh - 100px - var(--consent-bar-space, 0px));display:grid;grid-template-columns:264px minmax(0,1fr);gap:8px;padding:6px 8px 6px 0;overflow:hidden}
 .shell.noNotice{height:calc(100dvh - 60px - var(--consent-bar-space, 0px))}
 .shell.withRight{grid-template-columns:264px minmax(0,1fr) 330px}
@@ -98,8 +117,9 @@
  .global{height:56px;padding:0 12px;gap:10px}.brand{flex:none;font-size:0;gap:0}.global nav{flex:none;gap:2px}.global nav a{font-size:13px;padding:0 8px;white-space:nowrap}
  .mobileGlobalMenu{display:grid;place-items:center;flex:none;width:40px;height:40px;padding:0;border:0;border-radius:8px;background:none;color:#333}.mobileGlobalMenu:active{background:#f1f1f2}
  .globalEnd{flex:none}
- .announcement{height:40px;font-size:11px}
+ .announcement{justify-content:flex-start;gap:8px;padding:0 44px 0 12px;font-size:12px}
  .announcement span{display:none}
+ .announcement a{padding:0 10px;font-size:11.5px}
  .shell,.shell.withRight{height:calc(100dvh - 96px - var(--consent-bar-space, 0px));grid-template-columns:minmax(0,1fr);padding:4px}
  .shell.noNotice{height:calc(100dvh - 56px - var(--consent-bar-space, 0px))}
  .center,.right{border-radius:24px}
@@ -154,4 +174,15 @@
  .workspace[data-area=history] .phoneTitle{display:block;margin:10px 4px 0;font-size:28px;font-weight:700;letter-spacing:-.03em;line-height:1.2;color:#1f1e1c}
  .workspace[data-area=history] .newConversation{height:48px;margin:12px 0 6px;border-radius:99px;font-size:15px}
  .workspace[data-area=history] .thread,.workspace[data-area=history] .strategy{padding:12px 12px}
+}
+/*
+ * An announcement this browser closed (the mark on <html>, set before the first paint: lib/announcement.ts). The server's HTML always
+ * has the bar, so until the page's scripts have taken over, these keep it out and give the shell the height it has without it; once
+ * they have, the bar is not drawn at all and .noNotice says the same.
+ */
+:global(html[data-announcement-closed]) .announcement{display:none}
+:global(html[data-announcement-closed]) .shell{height:calc(100dvh - 60px - var(--consent-bar-space, 0px))}
+@media(max-width:639px){
+ :global(html[data-announcement-closed]) .shell,:global(html[data-announcement-closed]) .shell.withRight{height:calc(100dvh - 56px - var(--consent-bar-space, 0px))}
+ :global(html[data-announcement-closed]) .workspace[data-tabs] .shell,:global(html[data-announcement-closed]) .workspace[data-tabs] .shell.withRight{height:calc(100dvh - 56px - 56px - env(safe-area-inset-bottom, 0px) - var(--consent-bar-space, 0px))}
 }

@@ -1,7 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { CSSProperties, KeyboardEvent, ReactNode, Ref, SyntheticEvent } from 'react';
 import Link from 'next/link';
-import { ChevronDown, Columns3, Ellipsis, Grid2X2, Pencil, Pin, Scale, Sparkles, X } from 'lucide-react';
+import { ArrowRight, ChevronDown, Columns3, Ellipsis, Grid2X2, Pencil, Pin, Scale, Sparkles, X } from 'lucide-react';
+import { ANNOUNCEMENT } from '@/lib/announcement';
 import { HoverPrefetchLink } from './hover-prefetch-link';
 import styles from './workspace-frame.module.css';
 
@@ -32,11 +33,19 @@ export function GlobalHeader({ area, onOpenNav, end }: { area: RailArea; onOpenN
   </header>;
 }
 
-/** The line under the top bar. `notice` is an environment note shown before the slogan. */
-export function AnnouncementBar({ notice, returnParam = '', onClose }: { notice?: string; returnParam?: string; onClose?: () => void }) {
-  return <div className={styles.announcement}>{notice&&<span>{notice}</span>}<Sparkles size={15}/><strong>让好想法，继续向前。</strong>
-    <Link prefetch={false} href={'/app/workbench/marketplace'+returnParam}>探索创作功能</Link>
-    <button aria-label="关闭公告" onClick={onClose}><X size={15}/></button></div>;
+/**
+ * The line under the top bar (Owner 2026-11-12: "现在这个一片灰再加一点字，就是太单调了……视觉风格跟动效，还是要和我们落地页
+ * 现在上面的设计风格一致"): the announcement's words and its button on the landing page's morning light, which drifts slowly
+ * where motion is welcome. What it says is `message` (lib/announcement.ts; a promotion goes there). `notice` is an
+ * environment note shown before it. Closing is the caller's (useAnnouncementOpen remembers it).
+ */
+export function AnnouncementBar({ notice, returnParam = '', onClose, message = ANNOUNCEMENT }: {
+  notice?: string; returnParam?: string; onClose?: () => void; message?: { id: string; text: string; cta: string; href: string };
+}) {
+  return <div className={styles.announcement} data-announcement={message.id}>{notice&&<span>{notice}</span>}
+    <i className={styles.announcementMark} aria-hidden="true"><Sparkles size={13}/></i><strong>{message.text}</strong>
+    <Link prefetch={false} href={message.href+returnParam}>{message.cta}<ArrowRight size={13} aria-hidden="true"/></Link>
+    <button type="button" aria-label="关闭公告" onClick={onClose}><X size={15}/></button></div>;
 }
 
 /**
