@@ -5,11 +5,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 const state = vi.hoisted(() => ({
+  search: '',
   connections: {} as Record<string, unknown>, data: {} as Record<string, unknown>, library: {} as Record<string, unknown>,
   reviews: {} as Record<string, unknown>, features: {} as Record<string, unknown>, reviewAsked: [] as boolean[],
 }));
 const mutation = vi.hoisted(() => () => ({ mutate: () => {}, mutateAsync: async () => ({}), isPending: false, error: null,
   data: undefined }));
+vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams(state.search) }));
 vi.mock('@/trpc/client', () => ({ trpc: {
   useUtils: () => ({ publishMonitor: { connections: { invalidate: vi.fn() }, data: { invalidate: vi.fn() }, trend: { invalidate: vi.fn(), prefetch: vi.fn() },
     settings: { invalidate: vi.fn() }, review: { export: { fetch: vi.fn() }, pillars: { invalidate: vi.fn() } } } }),
@@ -41,6 +43,7 @@ const post = (over: Partial<Post> = {}): Post => ({ id: 'p1', connectionId: 'c1'
   workItemId: null, latest: { capturedOn: '2026-10-22', metrics: { likes: 0, views: 30 }, missingFields: ['shares'] }, ...over });
 
 beforeEach(() => {
+  state.search = '';
   state.connections = ok([]);
   state.data = ok({ windowDays: 30, connections: [], posts: [] });
   state.library = ok({ businesses: [] });
@@ -107,6 +110,23 @@ describe('data review page access follows the server', () => {
     expect(tabFromSearch('?returnTo=%2Fapp&tab=import')).toBe('import');
     expect(tabFromSearch('?tab=admin')).toBe('trend');
     expect(tabFromSearch('')).toBe('trend');
+    expect(tabFromSearch('tab=accounts')).toBe('accounts');
+  });
+  // Validation of #1882: from one-click publishing's "去连接账号" the address became ?tab=accounts but the page stayed on 数据趋势
+  // until a reload. The tab comes from the router's search params; there is no `window` in this test, as there is no new
+  // `window.location` yet when a page is drawn during an in-app navigation.
+  it('takes the tab from the router\'s search params, not from window.location', () => {
+    state.data = ok({ windowDays: 30, connections: [], posts: [] });
+    const active = (html: string) => html.match(/<button[^>]*role="tab"[^>]*data-state="active"[^>]*>([^<]*)</)?.[1]
+      ?? html.match(/<button[^>]*data-state="active"[^>]*role="tab"[^>]*>([^<]*)</)?.[1];
+    expect(typeof window).toBe('undefined');
+    expect(active(renderToStaticMarkup(<DataReviewView />))).toBe('数据趋势');
+    state.search = 'tab=accounts';
+    expect(active(renderToStaticMarkup(<DataReviewView />))).toBe('账号');
+    state.search = 'returnTo=%2Fapp&tab=import';
+    expect(active(renderToStaticMarkup(<DataReviewView />))).toBe('表格导入');
+    const source = readFileSync(fileURLToPath(new URL('./DataReviewView.tsx', import.meta.url)), 'utf8');
+    expect(source).not.toContain('window.location.search');
   });
 });
 
