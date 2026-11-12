@@ -51,9 +51,10 @@ async function readProfile(admin: SupabaseClient, profileId: string): Promise<Pr
 }
 const active = (row: ProfileRow) => row.status === 'active' && String(row.is_deleted) === 'false';
 
-/** Pro or Gold, read live (an expired membership is free). */
+/** Pro or Gold only, read live (an expired membership is free); any other or missing level is refused. */
+const PAID_LEVELS: readonly string[] = ['pro', 'gold'];
 async function paidMember(admin: SupabaseClient, profileId: string): Promise<boolean> {
-  try { return (await readOwnDataTier(admin, profileId))?.level !== 'free'; }
+  try { return PAID_LEVELS.includes(String((await readOwnDataTier(admin, profileId))?.level)); }
   catch { throw new ShotvivaConnectError('SHOTVIVA_UNAVAILABLE'); }
 }
 

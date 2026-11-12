@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({ tier: vi.fn(), secret: vi.fn() }));
 vi.mock('../../membershipEntitlements', () => ({ readOwnDataTier: mocks.tier }));
 vi.mock('../../platformSecrets/reader', async () => {
-  class PlatformSecretError extends Error { constructor(readonly code: string) { super(code); } }
+  class PlatformSecretError extends Error { constructor(readonly code: string, readonly slot: string) { super(code); } }
   return { getPlatformSecret: mocks.secret, PlatformSecretError };
 });
 import { ShotvivaError } from './client';
@@ -72,9 +72,15 @@ describe('start', () => {
   });
 
   it('refuses a free member, a closed account, and a connector that is not configured', async () => {
-    mocks.tier.mockResolvedValueOnce({ level: 'free' });
+    // Only Pro and Gold: free, an unknown level or no level at all are not let through by accident.
+    for (const tier of [{ level: 'free' }, { level: 'basic' }, { level: undefined }, undefined]) {
+      mocks.tier.mockResolvedValueOnce(tier);
+      expect(await code(startShotvivaConnect({ admin: db().admin, baseUrl: 'x', client: sv(), profileId: me, appOrigin: 'https://a' })))
+        .toBe('SHOTVIVA_MEMBERSHIP_REQUIRED');
+    }
+    mocks.tier.mockResolvedValueOnce({ level: 'gold' });
     expect(await code(startShotvivaConnect({ admin: db().admin, baseUrl: 'x', client: sv(), profileId: me, appOrigin: 'https://a' })))
-      .toBe('SHOTVIVA_MEMBERSHIP_REQUIRED');
+      .toBe('ok');
     expect(await code(startShotvivaConnect({ admin: db({ status: 'banned' }).admin, baseUrl: 'x', client: sv(), profileId: me,
       appOrigin: 'https://a' }))).toBe('SHOTVIVA_ACCOUNT_CLOSED');
     expect(await code(startShotvivaConnect({ admin: db().admin, baseUrl: 'x', client: null, profileId: me, appOrigin: 'https://a' })))
@@ -168,13 +174,13 @@ describe('loadShotvivaClient', () => {
   it('off without an address or a key; a Vault failure is "unavailable", not "off"', async () => {
     const { admin } = db();
     expect(await loadShotvivaClient({ admin, baseUrl: undefined })).toBeNull();
-    mocks.secret.mockRejectedValueOnce(new PlatformSecretError('PLATFORM_SECRET_NOT_CONFIGURED' as never));
+    mocks.secret.mockRejectedValueOnce(new PlatformSecretError('PLATFORM_SECRET_NOT_CONFIGURED', 'shotviva'));
     expect(await loadShotvivaClient({ admin, baseUrl: 'https://shotviva.test' })).toBeNull();
     mocks.secret.mockResolvedValueOnce({ value: 'not-a-shotviva-key-000000' });
     expect(await loadShotvivaClient({ admin, baseUrl: 'https://shotviva.test' })).toBeNull();
     mocks.secret.mockResolvedValueOnce({ value: 'sv_test_fixturekey0000' });
     expect((await loadShotvivaClient({ admin, baseUrl: 'https://shotviva.test' }))?.origin).toBe('https://shotviva.test');
-    mocks.secret.mockRejectedValueOnce(new PlatformSecretError('PLATFORM_SECRET_UNAVAILABLE' as never));
+    mocks.secret.mockRejectedValueOnce(new PlatformSecretError('PLATFORM_SECRET_UNAVAILABLE', 'shotviva'));
     expect(await code(loadShotvivaClient({ admin, baseUrl: 'https://shotviva.test' }))).toBe('SHOTVIVA_UNAVAILABLE');
   });
 });

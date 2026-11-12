@@ -1,7 +1,7 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC.
 -- All rights reserved. This code is proprietary and confidential.
 -- INTEGRATION-SHOTVIVA PR A (Owner 2026-11-05 / 2026-11-12: Shotviva is a connector inside Graylum, no internal settlement;
--- "打通再上线"). Placeholder number 9999: the controller assigns the real number before applying it.
+-- "打通再上线"). Number 0524 assigned by the controller.
 --   * profiles.shotviva_account_id: the one thing Graylum stores about a connected Shotviva account (no token: the
 --     partner key in the admin Vault proves "Graylum is calling", this id says for whom; Shotviva checks the pair against
 --     its own partner_links). One Graylum profile per Shotviva account (partial unique index). Clients never write it;
