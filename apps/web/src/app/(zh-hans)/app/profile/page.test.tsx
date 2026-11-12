@@ -1,4 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { existsSync, readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -128,5 +130,25 @@ describe('profile page', () => {
     }
     // Passing Next's own state (with __NA) makes its patched replaceState skip the useSearchParams sync.
     expect(replaceState).toHaveBeenCalledWith(null, '', '/app/profile?tab=security&checkout=success');
+  });
+});
+
+// Owner 2026-11-12: the account-security tab no longer carries the "Cookie 和统计设置" card; the footer's "Cookie 设置" stays,
+// because a visitor must keep a place to withdraw the statistics consent.
+describe('the Cookie settings card', () => {
+  const read = (path: string) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8');
+
+  it('is gone from the profile center', () => {
+    const page = read('./page.tsx');
+    expect(page).not.toContain('<CookieSettingsCard');
+    expect(page).not.toContain("from '@/components/analytics/CookieSettingsCard'");
+    expect(existsSync(fileURLToPath(new URL('../../../../components/analytics/CookieSettingsCard.tsx', import.meta.url)))).toBe(false);
+  });
+
+  it('leaves the footer link of the public pages, and what it opens, in place', () => {
+    expect(read('../../../../components/public-site/PublicShell.tsx')).toContain('<ConsentPreferenceLinks');
+    const links = read('../../../../components/analytics/ConsentPreferenceLinks.tsx');
+    expect(links).toContain("'zh-Hans': 'Cookie 设置'");
+    expect(links).toContain('openConsentPreferences');
   });
 });

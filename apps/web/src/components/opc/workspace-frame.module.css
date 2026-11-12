@@ -16,6 +16,15 @@
  height:calc(100dvh - var(--consent-bar-space, 0px));overflow:hidden;background:#f7f7f7;color:#262626;color-scheme:light;scrollbar-color:var(--scroll-thumb) var(--scroll-track);scrollbar-width:thin;
  font:400 16px/24px var(--font-primary);
 }
+/* The canvas behind the rail and the panels: the landing page's morning light (dawn-l.module.css: gold, lilac, peach), very
+   faint. Owner 2026-11-12: the signed-in pages were plain white, but the conversation must not be distracted from. So the
+   light lies on the canvas only, where the rail and the gaps are; the reading panels stay white, and the top bar and the
+   announcement keep their own backgrounds. Still (no animation), over the same #f7f7f7 the page's first frame is painted in. */
+.workspace{background:
+  radial-gradient(34% 46% at 0% 22%,rgba(255,178,56,.16),transparent 72%),
+  radial-gradient(30% 40% at 6% 100%,rgba(190,170,255,.13),transparent 72%),
+  radial-gradient(38% 30% at 100% 0%,rgba(255,176,150,.10),transparent 72%),
+  #f7f7f7}
 .workspace :global(.skeleton){background:#ebebeb}
 .workspace *{box-sizing:border-box;scrollbar-color:var(--scroll-thumb) var(--scroll-track);scrollbar-width:thin}
 .workspace *::-webkit-scrollbar{width:7px;height:7px}.workspace *::-webkit-scrollbar-thumb{background:var(--scroll-thumb);border-radius:9px}.workspace *::-webkit-scrollbar-thumb:hover{background:#999}

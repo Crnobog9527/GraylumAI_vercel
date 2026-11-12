@@ -1,0 +1,203 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/*
+ * The "发布排期" calendar (Owner 2026-11-12: like a desktop calendar, month first, with a week time axis). Signed-in light
+ * baseline (DESIGN.md "Light foundation"), written out as the data review page does because the workbench keeps its own
+ * scoped variables; the warm gold marks today and the current work, the one primary action is dark. The page is the scroll
+ * owner: the workbench's center panel clips whatever is taller than it.
+ */
+.page {
+  --sc-text: #262626;
+  --sc-body: #444;
+  --sc-secondary: #6b6b6b;
+  --sc-border: #ededed;
+  --sc-border-strong: #dcdcdc;
+  --sc-subtle: #fafafa;
+  --sc-muted: #f4f4f5;
+  --sc-gold: #ffbb17;
+  --sc-gold-soft: #faf4e5;
+  --sc-gold-text: #7a5f2c;
+  --sc-blue: #2563a8;
+  --sc-blue-bg: #eef4fb;
+  --sc-success: #2f6a3b;
+  --sc-success-bg: #f1f7f2;
+  --sc-warning: #76592a;
+  --sc-warning-bg: #faf6ee;
+  --sc-error: #a23b3b;
+  --sc-error-bg: #fcf1f1;
+  --sc-grey: #8a8a8a;
+  --sc-grey-bg: #f4f4f5;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: #fff;
+  color: var(--sc-text);
+  font-size: 13px;
+  line-height: 1.5;
+  container-type: inline-size;
+}
+
+.head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; flex: none; padding: 14px 20px 0; }
+.head h1 { margin: 0; font-size: 14px; font-weight: 600; line-height: 20px; }
+.zone { color: var(--sc-secondary); font-size: 12px; }
+
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; flex: none; padding: 10px 20px; border-bottom: 1px solid var(--sc-border); }
+.page .toolButton {
+  display: inline-flex; align-items: center; justify-content: center; min-width: 32px; height: 32px; padding: 0 12px;
+  border: 1px solid var(--sc-border-strong); border-radius: 8px; background: #fff; color: var(--sc-text); font-size: 13px; cursor: pointer;
+  transition: background 150ms ease, border-color 150ms ease;
+}
+.page .toolButton:hover:not(:disabled) { background: var(--sc-muted); }
+.page .toolButton:disabled { color: var(--sc-grey); cursor: default; }
+.page .iconButton { width: 32px; padding: 0; font-size: 16px; }
+.title { margin: 0 4px; font-size: 16px; font-weight: 600; white-space: nowrap; }
+.switch { display: inline-flex; margin-left: auto; padding: 2px; border-radius: 9px; background: var(--sc-muted); }
+.page .switch button {
+  min-width: 44px; height: 28px; padding: 0 12px; border: 0; border-radius: 7px; background: none; color: var(--sc-secondary);
+  font-size: 13px; cursor: pointer;
+}
+.page .switch button[aria-pressed='true'] { background: #fff; color: var(--sc-text); font-weight: 600; box-shadow: 0 1px 3px rgba(2, 4, 26, .1); }
+.page button:focus-visible, .page a:focus-visible { outline: 2px solid var(--sc-text); outline-offset: 2px; }
+
+/* Body: the side column (small month, legend, how to schedule) and the calendar. */
+.body { display: grid; grid-template-columns: 228px minmax(0, 1fr); flex: 1; min-height: 0; }
+.side { display: flex; flex-direction: column; gap: 18px; min-height: 0; padding: 14px 16px 24px; overflow-y: auto; border-right: 1px solid var(--sc-border); }
+.main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.notice { flex: none; margin: 12px 16px 0; padding: 12px 14px; border: 1px solid var(--sc-border); border-radius: 12px; background: var(--sc-subtle); }
+.notice p { margin: 0 0 8px; }
+.notice p:last-child { margin-bottom: 0; }
+.note { color: var(--sc-secondary); font-size: 12px; }
+.note a { color: var(--sc-text); text-decoration: underline; text-underline-offset: 2px; }
+.state { padding: 24px 16px; }
+
+/* Small month */
+.mini { width: 100%; }
+.miniHead { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; font-weight: 600; }
+.page .miniNav { width: 26px; height: 26px; border: 0; border-radius: 6px; background: none; color: var(--sc-secondary); font-size: 15px; cursor: pointer; }
+.page .miniNav:hover { background: var(--sc-muted); color: var(--sc-text); }
+.miniGrid { display: grid; grid-template-columns: repeat(7, 1fr); row-gap: 2px; text-align: center; }
+.miniGrid > span { color: var(--sc-secondary); font-size: 11px; line-height: 24px; }
+.page .miniDay {
+  position: relative; justify-self: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 50%; background: none;
+  color: var(--sc-text); font-size: 12px; font-variant-numeric: tabular-nums; cursor: pointer;
+}
+.page .miniDay:hover { background: var(--sc-muted); }
+.page .miniDay[data-outside] { color: #b0b0b0; }
+.page .miniDay[data-shown] { background: var(--sc-gold-soft); }
+.page .miniDay[data-today] { background: var(--sc-text); color: #fff; font-weight: 600; }
+.miniDay[data-busy]::after { content: ''; position: absolute; bottom: 2px; left: 50%; width: 4px; height: 4px; margin-left: -2px; border-radius: 50%; background: var(--sc-gold); }
+
+.sideTitle { margin: 0 0 8px; color: var(--sc-secondary); font-size: 12px; font-weight: 600; }
+.legend { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.legend li { display: flex; align-items: center; gap: 8px; }
+.swatch { flex: none; width: 10px; height: 10px; border-radius: 3px; background: var(--chip-bar); }
+
+/* Status colours: a soft background with a solid bar, the words always say the status too (title, screen readers, week cards). */
+/* `.tone` on chips, cards, swatches and the detail badge. Literal values: the detail dialog is portalled outside .page. */
+.tone[data-tone='scheduled'] { --chip-bar: #2563a8; --chip-bg: #eef4fb; --chip-text: #1d4f86; }
+.tone[data-tone='working'] { --chip-bar: #ffbb17; --chip-bg: #faf4e5; --chip-text: #7a5f2c; }
+.tone[data-tone='done'] { --chip-bar: #2f6a3b; --chip-bg: #f1f7f2; --chip-text: #2f6a3b; }
+.tone[data-tone='partial'] { --chip-bar: #c08a2e; --chip-bg: #faf6ee; --chip-text: #76592a; }
+.tone[data-tone='failed'] { --chip-bar: #a23b3b; --chip-bg: #fcf1f1; --chip-text: #a23b3b; }
+.tone[data-tone='cancelled'] { --chip-bar: #b5b5b5; --chip-bg: #f4f4f5; --chip-text: #6b6b6b; }
+
+/* Month grid */
+.month { display: flex; flex: 1; flex-direction: column; min-height: 0; overflow-y: auto; }
+.weekHead { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); flex: none; border-bottom: 1px solid var(--sc-border); }
+.weekHead > div { padding: 8px 10px; color: var(--sc-secondary); font-size: 12px; }
+.monthRows { display: grid; flex: 1; min-height: 0; grid-auto-rows: minmax(auto, 1fr); }
+.monthRow { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); min-height: 92px; border-bottom: 1px solid var(--sc-border); }
+.cell { display: flex; flex-direction: column; gap: 3px; min-width: 0; padding: 6px 6px 8px; border-right: 1px solid var(--sc-border); }
+.cell:last-child { border-right: 0; }
+.cell[data-outside] { background: var(--sc-subtle); }
+.cell[data-today] { background: #fffcf3; }
+.page .dateButton {
+  align-self: flex-start; min-width: 26px; height: 26px; padding: 0 6px; border: 0; border-radius: 13px; background: none;
+  color: var(--sc-text); font-size: 13px; font-variant-numeric: tabular-nums; cursor: pointer;
+}
+.page .dateButton:hover { background: var(--sc-muted); }
+.cell[data-outside] .dateButton { color: #a8a8a8; }
+.page .cell[data-today] .dateButton { background: var(--sc-gold); color: #262626; font-weight: 700; }
+.page .more { align-self: flex-start; padding: 1px 6px; border: 0; border-radius: 6px; background: none; color: var(--sc-secondary); font-size: 12px; cursor: pointer; }
+.page .more:hover { background: var(--sc-muted); color: var(--sc-text); }
+
+.page .chip {
+  display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; height: 24px; padding: 0 6px 0 0; border: 0;
+  border-radius: 6px; background: var(--chip-bg); color: var(--chip-text); font-size: 12px; text-align: left; cursor: pointer;
+  box-shadow: inset 3px 0 0 var(--chip-bar); transition: filter 150ms ease, transform 150ms ease;
+}
+.page .chip:hover { filter: brightness(.97); }
+.chip > time { flex: none; padding-left: 9px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.chipText { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chip[data-tone='cancelled'] .chipText { text-decoration: line-through; text-decoration-color: rgba(107, 107, 107, .5); }
+
+/* Week time axis */
+.week { display: flex; flex: 1; flex-direction: column; min-height: 0; overflow-y: auto; }
+.weekTop { position: sticky; top: 0; z-index: 3; display: grid; grid-template-columns: 52px repeat(7, minmax(0, 1fr)); flex: none;
+  border-bottom: 1px solid var(--sc-border); background: #fff; }
+.weekTop > div { display: flex; align-items: baseline; gap: 6px; padding: 8px 8px 6px; color: var(--sc-secondary); font-size: 12px; }
+.weekTop strong { color: var(--sc-text); font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.weekTop [data-today] strong { display: inline-grid; place-items: center; min-width: 28px; height: 28px; border-radius: 14px; background: var(--sc-gold); }
+.axis { position: relative; display: grid; grid-template-columns: 52px repeat(7, minmax(0, 1fr)); flex: none; }
+.hours { position: relative; }
+.hours span { position: absolute; right: 8px; color: var(--sc-secondary); font-size: 11px; transform: translateY(-50%); font-variant-numeric: tabular-nums; }
+/* --hour-px comes from WeekGrid (HOUR_PX); the fallback is the same value. */
+.column { position: relative; border-left: 1px solid var(--sc-border);
+  background-image: repeating-linear-gradient(to bottom, var(--sc-border) 0 1px, transparent 1px var(--hour-px, 56px)); }
+.column[data-today] { background-color: #fffcf3; }
+.now { position: absolute; left: 0; right: 0; z-index: 2; height: 2px; background: #e5484d; pointer-events: none; }
+.now::before { content: ''; position: absolute; top: -4px; left: -5px; width: 10px; height: 10px; border-radius: 50%; background: #e5484d; }
+.page .card {
+  position: absolute; z-index: 1; display: flex; flex-direction: column; gap: 1px; min-width: 0; padding: 4px 6px 4px 9px; overflow: hidden;
+  border: 1px solid #fff; border-radius: 7px; background: var(--chip-bg); color: var(--chip-text); font-size: 12px; line-height: 1.35;
+  text-align: left; cursor: pointer; box-shadow: inset 3px 0 0 var(--chip-bar);
+}
+.page .card:hover { z-index: 2; box-shadow: inset 3px 0 0 var(--chip-bar), 0 4px 12px rgba(2, 4, 26, .12); }
+.card time { font-weight: 600; font-variant-numeric: tabular-nums; }
+.cardLine { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Phones: the whole month as a grid (dots for posts), the picked day's posts listed below; the two scroll together. */
+.phone { flex: 1; min-height: 0; padding: 4px 14px 32px; overflow-y: auto; }
+.phoneGrid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); row-gap: 2px; padding-bottom: 10px;
+  border-bottom: 1px solid var(--sc-border); }
+.phoneHead { padding: 6px 0; color: var(--sc-secondary); font-size: 12px; text-align: center; }
+.page .phoneDay {
+  display: flex; flex-direction: column; align-items: center; gap: 3px; min-width: 0; height: 52px; padding: 5px 0 0; border: 0;
+  border-radius: 10px; background: none; color: var(--sc-text); cursor: pointer;
+}
+.phoneNumber { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 15px; font-size: 15px; font-variant-numeric: tabular-nums; }
+.phoneDay[data-today] .phoneNumber { background: var(--sc-gold); font-weight: 700; }
+.phoneDay[aria-pressed='true'] .phoneNumber { background: var(--sc-text); color: #fff; font-weight: 700; }
+.dots { display: flex; align-items: center; gap: 3px; height: 6px; }
+.dot { width: 6px; height: 6px; border-radius: 3px; background: var(--chip-bar); }
+.dots b { color: var(--sc-secondary); font-size: 10px; font-weight: 600; line-height: 6px; }
+.phoneDayList h2 { display: flex; align-items: baseline; gap: 8px; margin: 14px 0 8px; font-size: 14px; font-weight: 600; }
+.phoneDayList h2 span { color: var(--sc-gold-text); font-size: 12px; font-weight: 500; }
+.phoneCards { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.phone > .notice { margin: 18px 0 0; }
+.page .phoneCard { position: static; width: 100%; min-height: 56px; padding: 9px 12px 9px 14px; font-size: 13px; }
+
+/* Detail dialog */
+.detail { display: grid; gap: 12px; font-size: 13px; }
+.detailStatus { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 999px; background: var(--chip-bg);
+  color: var(--chip-text); font-size: 12px; font-weight: 600; }
+.detailStatus::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--chip-bar); }
+.detailRows { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 0; }
+.detailRows dt { color: #6b6b6b; }
+.detailRows dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.platforms { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 0; padding: 0; list-style: none; }
+.platforms a { text-decoration: underline; text-underline-offset: 2px; }
+.muted { color: #6b6b6b; }
+
+@container (max-width: 900px) {
+  .body { grid-template-columns: minmax(0, 1fr); }
+  .side { display: none; }
+}
+@container (max-width: 640px) {
+  .head, .toolbar { padding-left: 14px; padding-right: 14px; }
+  .title { order: -1; flex-basis: 100%; margin: 0; }
+  .notice { margin: 10px 14px 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .page .chip, .page .toolButton { transition: none; }
+}

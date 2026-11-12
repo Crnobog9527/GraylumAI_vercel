@@ -76,7 +76,8 @@ describe('the home page\'s 晨光 layer and the first screen\'s product window',
       const swapped = L_PLAIN_SWAPS.reduce((line, [from, to]) => line.split(from).join(to), J_FIELD_VALUES[id].value);
       expect(value).toBe(swapped);
       for (const [from] of L_PLAIN_SWAPS) expect(value, from).not.toContain(from);
-      expect(html.split('&quot;').join('"')).toContain(`<h3>${title}</h3><p>${value}</p>`);
+      // The card: the field's name with the 示例 tag beside it, then the value.
+      expect(html.split('&quot;').join('"').replace(/<span class="[^"]*tag[^"]*">[^<]*<\/span>/g, '')).toContain(`<h3>${title}</h3><p>${value}</p>`);
     }
     // The one judgement the swaps reword says what the coach says in the page's own conversation.
     const spoken = L_POSITIONING_MOMENTS.flatMap(moment => moment.lines.map(line => line.text)).join('\n');
@@ -88,6 +89,8 @@ describe('the home page\'s 晨光 layer and the first screen\'s product window',
     const sides = [...html.matchAll(/<div class="[^"]*side[^"]*" data-side="(left|right)" aria-hidden="true">(.*?)<\/div>(?=<div class="[^"]*(?:side|window))/gs)];
     expect(sides.map(side => side[1])).toEqual(['left', 'right']);
     for (const side of sides) expect(side[2].split('<h3>').length - 1).toBe(3);
+    // Review of #1921: read alone, a card must not pass for a promise, so each of the six says it is an example.
+    for (const side of sides) expect(side[2].match(new RegExp(`<h3>[^<]*<span class="[^"]*tag[^"]*">${DEMO_LABEL}</span></h3>`, 'g'))).toHaveLength(3);
     expect(html.split('aria-hidden="true"').length - 1).toBeGreaterThanOrEqual(2);
     const cards = html.slice(0, html.indexOf(J_STEPS[0].title));
     expect(cards).toContain(J_BENCHMARK_TABLE.title);

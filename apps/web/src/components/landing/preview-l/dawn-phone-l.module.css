@@ -1,0 +1,61 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/*
+ * The home page on a phone, laid out the way an app is (Owner 2026-11-12: "把它当成一个原生的网页 APP 界面来做……不要像
+ * 现在这样，就是生硬地挤压"; phone plan A). Step one of the phone work, the public home page only: what stood stacked in one
+ * long column is swiped sideways a card at a time, the menu takes the whole screen, and the sample report shows its top
+ * with the button that opens all of it. Nothing is added or removed from the page, and no words change.
+ *
+ * Like the other two layers (dawn-l, dawn-regions-l), only SampleL's root carries `.phone`, and the regions are reached
+ * by the marks the page already has. Everything here is inside one block for screens under 640px: a computer and a
+ * tablet see exactly what they saw.
+ */
+@media (max-width: 639px) {
+  /*
+   * The menu: the whole screen under the top bar, each place a full-width row a thumb can hit, instead of a short list
+   * hanging from the bar. The drawer is the header's own (SiteHeaderJ), shown and hidden as before.
+   */
+  .phone.phone header > [id]:not([hidden]) { height: calc(100dvh - 64px); max-height: none; background: rgba(250, 250, 249, .98); }
+  .phone.phone header > [id] > nav { align-content: start; gap: 20px; padding-top: 8px; padding-bottom: calc(28px + env(safe-area-inset-bottom, 0px)); }
+  .phone.phone header > [id] > nav > div > a {
+    display: flex; align-items: center; justify-content: space-between; min-height: 54px; padding: 0;
+    border-bottom: 1px solid var(--j-line); font-size: 20px; font-weight: 600; letter-spacing: -.01em;
+  }
+  .phone.phone header > [id] > nav > div > a::after {
+    content: ''; flex: none; width: 8px; height: 8px; margin-right: 4px; border-top: 1.5px solid var(--j-muted); border-right: 1.5px solid var(--j-muted); rotate: 45deg;
+  }
+  .phone.phone header > [id] > nav > div > p { margin-bottom: 0; }
+
+  /*
+   * A row of cards swiped sideways, one at a time, the next one showing at the edge so it is plain there is more. The row
+   * runs out to the screen's (or its panel's) edges; the cards keep the page's own margin. Used by the voices and by each
+   * step's modules, which were one tall column each.
+   */
+  .phone.phone [id='j-voice-wall'], .phone.phone [data-region='三步'] ol[data-count] {
+    display: flex; gap: 12px; overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x mandatory;
+    scrollbar-width: none; -webkit-overflow-scrolling: touch;
+  }
+  .phone.phone [id='j-voice-wall']::-webkit-scrollbar, .phone.phone [data-region='三步'] ol[data-count]::-webkit-scrollbar { display: none; }
+  .phone.phone [id='j-voice-wall'] > li, .phone.phone [data-region='三步'] ol[data-count] > li { scroll-snap-align: start; }
+
+  /* The voices: what they said and the coach's answer are one card. */
+  .phone.phone [id='j-voice-wall'] { columns: auto; margin-inline: -16px; padding: 4px 16px 20px; scroll-padding-inline: 16px; }
+  .phone.phone [id='j-voice-wall'] > li { flex: 0 0 86%; margin: 0; }
+
+  /* A step's modules: the row reaches the step panel's edges (the panel's padding is clamp(22px, 4vw, 60px)). */
+  .phone.phone [data-region='三步'] ol[data-count] {
+    --step-pad: clamp(22px, 4vw, 60px);
+    margin-inline: calc(-1 * var(--step-pad)); padding: 2px var(--step-pad) 6px; scroll-padding-inline: var(--step-pad);
+  }
+  .phone.phone [data-region='三步'] ol[data-count] > li { flex: 0 0 90%; }
+
+  /*
+   * The sample report: its top, then it fades into the two buttons. "查看完整报告" opens the whole report as before; on a
+   * computer the same box is a fixed height that scrolls inside, which a phone should not do.
+   */
+  .phone.phone [data-region='样例报告'] [role='region'] { position: relative; align-content: start; max-height: 620px; overflow: hidden; }
+  .phone.phone [data-region='样例报告'] [role='region'] > div:last-child {
+    position: absolute; inset: auto 0 0; z-index: 1; display: grid; gap: 10px; padding: 88px 16px 16px;
+    background: linear-gradient(rgba(255, 255, 255, 0), #fff 52%);
+  }
+  .phone.phone [data-region='样例报告'] [role='region'] > div:last-child > :is(a, button) { justify-content: center; width: 100%; min-height: 48px; }
+}
