@@ -42,7 +42,7 @@ test.describe('production-only stripe smoke', () => {
     test('credit package purchase redirects to Stripe Checkout for a paid member', async ({ page }) => {
       await gotoWithBypass(page, '/app/profile?tab=subscription');
 
-      await expect(page.getByRole('heading', { name: '积分加油包' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: '积分包', exact: true })).toBeVisible();
 
       // Packs are for paid members only; the buy button stays disabled for anyone else.
       const buyButton = await settledPackBuyButton(page);
