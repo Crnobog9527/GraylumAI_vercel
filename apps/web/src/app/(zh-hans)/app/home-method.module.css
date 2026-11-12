@@ -1,0 +1,196 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/*
+ * The /app home page's six method steps as a route (HomeMethod, Owner 2026-11-12, sample H1): six stops in a row, one
+ * step shown at a time with a picture that plays. The page's colours come from home.module.css (--home-*).
+ */
+.method { position: relative; }
+.method button { border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
+.method button:focus-visible { outline: 2px solid var(--home-ink); outline-offset: 3px; border-radius: 10px; }
+
+/* The route: six stops joined by a dashed line; the ones passed are gold, the one shown is ink. */
+.route { position: relative; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; }
+.route::before { content: ''; position: absolute; left: 8%; right: 8%; top: 21px; border-top: 2px dashed #dcd9d2; }
+.route button {
+  position: relative; display: grid; justify-items: center; align-content: start; gap: 8px; padding: 0 4px 12px;
+  color: var(--home-body); font-size: 13px; line-height: 1.4; text-align: center;
+}
+.route b {
+  display: grid; place-items: center; width: 42px; height: 42px; border-radius: 50%; background: #fff;
+  box-shadow: 0 0 0 1px #dcd9d2; color: var(--home-muted); font-size: 13px; font-weight: 600;
+}
+.route button[aria-current] { color: var(--home-ink); font-weight: 600; }
+.route button[aria-current] b {
+  background: var(--home-ink); color: #fff; scale: 1.06;
+  box-shadow: 0 0 0 5px rgba(255, 187, 23, .35), 0 12px 22px -10px rgba(20, 19, 18, .6);
+}
+.route button[data-done] b { background: var(--home-gold); color: var(--home-ink); box-shadow: none; }
+
+/* The six steps share one place, as tall as the tallest of them, so choosing a step moves nothing below. */
+.panels { display: grid; margin: 14px 0 0; padding: 0; list-style: none; }
+.panel {
+  grid-area: 1 / 1; display: grid; align-content: start; border-radius: 24px; overflow: hidden; background: #fff;
+  box-shadow: 0 0 0 1px var(--home-line), 0 40px 70px -50px rgba(120, 70, 0, .4);
+}
+.panel:not([data-on]) { visibility: hidden; }
+.picture { display: grid; place-items: center; min-height: 250px; overflow: hidden; }
+.warm { background: #fff4dc; }
+.lilac { background: #f0ebfd; }
+.peach { background: #ffeae1; }
+.text { display: grid; align-content: start; gap: 16px; padding: 22px 20px 26px; }
+.text h3 { display: flex; align-items: baseline; gap: 12px; margin: 0; font-size: clamp(21px, 2.2vw, 28px); font-weight: 600; line-height: 1.3; letter-spacing: -.02em; }
+.stepNumber { color: #8a5a00; font-size: 14px; font-weight: 600; letter-spacing: 0; }
+.text dl { display: grid; gap: 14px; margin: 0; }
+.text dt { margin-bottom: 3px; color: var(--home-muted); font-size: 12px; font-weight: 500; }
+.text dd { margin: 0; color: var(--home-body); font-size: 14.5px; line-height: 1.75; }
+/* 你会得到 is the line that matters most: it stands out. */
+.text [data-part='outcome'] { padding: 14px 16px; border-radius: 14px; background: #fff8e6; box-shadow: inset 3px 0 0 var(--home-gold); }
+.text [data-part='outcome'] dd { color: var(--home-ink); font-size: 15.5px; font-weight: 500; }
+
+.turn { display: flex; align-items: center; justify-content: space-between; margin-top: 14px; color: var(--home-muted); font-size: 13px; }
+.turn button {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 40px; padding: 0 14px; border-radius: 99px;
+  box-shadow: inset 0 0 0 1px #dcdcdc; background: rgba(255, 255, 255, .7); color: var(--home-ink); font-size: 13.5px;
+}
+.turn button:focus-visible { border-radius: 99px; }
+.turn button[disabled] { opacity: .35; cursor: default; }
+.turn b { color: var(--home-ink); font-weight: 600; }
+
+@media (min-width: 860px) {
+  .panel { grid-template-columns: 5fr 6fr; align-content: stretch; }
+  .picture { min-height: 320px; }
+  .viz { scale: 1.32; }
+  .text { align-content: center; padding: clamp(28px, 3.4vw, 44px); }
+}
+@media (max-width: 859px) {
+  /* A phone: the stops scroll sideways, out to the screen's edges. */
+  .route { display: flex; gap: 4px; margin-inline: -16px; padding-inline: 16px; overflow-x: auto; scrollbar-width: none; }
+  .route::-webkit-scrollbar { display: none; }
+  .route::before { display: none; }
+  .route button { flex: none; width: 112px; }
+  .viz { scale: 1.12; }
+}
+
+/* ---- The six pictures (home-visuals.tsx). Small drawings in plain boxes; they are decoration and carry no numbers. ---- */
+.viz { display: grid; justify-items: center; align-content: center; gap: 10px; width: 250px; color: var(--home-ink); font-size: 11.5px; line-height: 1.6; }
+.viz p { margin: 0; }
+.viz em { font-style: normal; }
+.viz [data-how='grow'] { transform-origin: 0 50%; }
+
+.sheet { width: 210px; padding: 12px 14px; border-radius: 12px; background: #fff; box-shadow: 0 0 0 1px rgba(38, 38, 38, .08), 0 16px 28px -18px rgba(38, 38, 38, .35); }
+.sheet[data-wide] { width: 224px; padding: 10px 12px; }
+.sheetTitle { margin-bottom: 6px; font-size: 12px; font-weight: 600; }
+.row { display: flex; align-items: center; gap: 8px; padding: 4px 0; color: var(--home-body); }
+.row i { display: grid; place-items: center; flex: none; width: 15px; height: 15px; border-radius: 50%; background: #2f6a3b; color: #fff; }
+.row i[data-no] { background: #b9b5ab; }
+.meters { display: grid; gap: 5px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--home-line); color: var(--home-muted); }
+.meters p { display: grid; grid-template-columns: 2.4em 1fr; align-items: center; gap: 8px; }
+.meters span { height: 5px; border-radius: 9px; background: #f0efec; }
+.meters b { display: block; width: 68%; height: 100%; border-radius: 9px; background: var(--home-gold); }
+.meters p:nth-child(2) b { width: 46%; }
+.meters p:nth-child(3) b { width: 30%; }
+
+.chain { display: flex; gap: 8px; font-weight: 500; }
+.chain span, .chips span, .path span { padding: 3px 9px; border-radius: 99px; background: #fff; box-shadow: 0 0 0 1px rgba(38, 38, 38, .1); white-space: nowrap; }
+.crowd { display: flex; }
+.crowd i {
+  display: grid; place-items: center; width: 42px; height: 42px; margin-left: -7px; border-radius: 50%; background: #fff; color: #8f8d9c;
+  box-shadow: 0 0 0 2px #e9e4fb, 0 8px 14px -8px rgba(38, 38, 38, .4);
+}
+.crowd i:first-child { margin-left: 0; }
+.crowd i[data-pay] { background: #fff6dc; color: #8a5a00; box-shadow: 0 0 0 2px var(--home-gold), 0 8px 14px -8px rgba(138, 90, 0, .5); }
+.legend { display: flex; gap: 12px; color: var(--home-body); }
+.legend span { display: flex; align-items: center; gap: 5px; }
+.legend span::before { content: ''; width: 9px; height: 9px; border-radius: 50%; background: #cfc8ee; }
+.legend span[data-pay]::before { background: var(--home-gold); }
+.legend[data-marks] { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--home-line); font-size: 10.5px; }
+.legend[data-marks] span::before { width: 8px; height: 8px; background: #2f6a3b; }
+.legend[data-marks] span[data-no]::before { background: #b9b5ab; }
+
+.platforms { display: flex; align-items: flex-end; gap: 8px; padding-top: 12px; }
+.platforms i { position: relative; width: 46px; height: 30px; border-radius: 9px; background: rgba(255, 255, 255, .75); box-shadow: 0 0 0 1px rgba(38, 38, 38, .08); }
+.platforms i[data-on] { height: 38px; background: #fff; box-shadow: 0 0 0 2px var(--home-gold), 0 10px 18px -10px rgba(138, 90, 0, .5); }
+.platforms b { position: absolute; left: 50%; top: -11px; margin-left: -29px; width: 58px; border-radius: 99px; background: var(--home-gold); font-size: 10px; font-weight: 600; text-align: center; white-space: nowrap; }
+.pairs { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; }
+
+.gauge { width: 170px; overflow: visible; fill: none; stroke-linecap: round; }
+.gaugeTrack { stroke: #e6e3dc; stroke-width: 14; }
+/* One dash as long as the arc, then a gap twice as long, so nothing of it shows before it is drawn. */
+.gaugeOn { stroke: var(--home-gold); stroke-width: 14; stroke-dasharray: 1 2; }
+.needle { stroke: var(--home-ink); stroke-width: 4; transform-box: view-box; transform-origin: 100px 100px; }
+.gauge circle { fill: var(--home-ink); }
+.verdict { display: flex; justify-content: space-between; width: 190px; margin-top: -6px; color: var(--home-muted); }
+.verdict strong { color: var(--home-ink); font-weight: 600; }
+.chips { display: flex; flex-wrap: wrap; justify-content: center; gap: 5px; color: var(--home-body); }
+
+.profile { position: relative; display: flex; align-items: center; gap: 10px; width: 214px; padding: 12px; border-radius: 14px; background: #fff; box-shadow: 0 0 0 1px rgba(38, 38, 38, .08), 0 16px 28px -18px rgba(38, 38, 38, .35); }
+.face { flex: none; width: 40px; height: 40px; border-radius: 50%; background: linear-gradient(135deg, #ffd27a, #ff9f6b); }
+.profile div { display: grid; flex: 1; gap: 6px; }
+.profile p { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.profile b, .sentence b { display: block; width: 38px; height: 7px; border-radius: 9px; background: #e9e7e2; }
+.profile b[data-name] { width: 52px; background: var(--home-ink); }
+.profile em, .sentence em { padding: 0 6px; border-radius: 99px; background: #f4f2ee; color: var(--home-body); font-size: 10px; white-space: nowrap; }
+.faceNote { position: absolute; left: 8px; bottom: -9px; }
+.sentence { display: flex; align-items: center; gap: 6px; width: 214px; margin-top: 10px; padding: 8px 12px; border-radius: 12px 12px 12px 4px; background: var(--home-ink); }
+.sentence em { background: var(--home-gold); color: var(--home-ink); font-weight: 600; }
+.sentence b { flex: 1; width: auto; background: rgba(255, 255, 255, .35); }
+.sentence b + b { flex: .5; }
+
+.weeks { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; width: 224px; }
+.weeks p { display: grid; align-content: start; gap: 4px; padding: 7px 6px; border-radius: 9px; background: #fff; box-shadow: 0 0 0 1px rgba(38, 38, 38, .08); }
+.weeks span { color: var(--home-body); font-size: 10px; white-space: nowrap; }
+.weeks b { height: 6px; border-radius: 9px; background: #e9e7e2; }
+.weeks p:first-child b { background: var(--home-gold); }
+.path { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.path span { padding: 3px 12px; }
+.path span[data-pay] { background: var(--home-gold); box-shadow: none; }
+.path i { position: relative; width: 54px; border-top: 2px dashed var(--home-ink); }
+.path i::after { content: ''; position: absolute; right: -2px; top: -5px; width: 7px; height: 7px; border-top: 2px solid var(--home-ink); border-right: 2px solid var(--home-ink); rotate: 45deg; }
+
+/*
+ * Motion, only where it is welcome. Without it every picture stands finished, which is what the rules above draw.
+ * The picture of the step shown plays as a loop of ten seconds: its parts come in one after another, half a second apart
+ * (a part's place is data-s, 0–11), the finished picture holds, then it fades and starts again. A step that is not shown
+ * does not play, and choosing a step starts its picture from the beginning. Only opacity and transforms move, except the
+ * dial's arc (one short stroke).
+ */
+@media (prefers-reduced-motion: no-preference) {
+  .route b { transition: background-color .25s, color .25s, box-shadow .25s, scale .25s cubic-bezier(.16, 1, .3, 1); }
+  .route { scroll-behavior: smooth; }
+  .panel[data-on] { animation: arrive .45s cubic-bezier(.16, 1, .3, 1); }
+  .panel[data-on] .viz { animation: loop 10s linear infinite; }
+  .panel[data-on] .viz [data-s] { animation: 10s linear infinite both; }
+  .viz [data-how='pop'] { --from-scale: .4; --from-shift: 0 0; }
+  .viz [data-how='grow'] { --from-scale: 0 1; --from-shift: 0 0; --from-opacity: 1; }
+  .panel[data-on] .viz [data-s='0'] { animation-name: s0; }
+  .panel[data-on] .viz [data-s='1'] { animation-name: s1; }
+  .panel[data-on] .viz [data-s='2'] { animation-name: s2; }
+  .panel[data-on] .viz [data-s='3'] { animation-name: s3; }
+  .panel[data-on] .viz [data-s='4'] { animation-name: s4; }
+  .panel[data-on] .viz [data-s='5'] { animation-name: s5; }
+  .panel[data-on] .viz [data-s='6'] { animation-name: s6; }
+  .panel[data-on] .viz [data-s='7'] { animation-name: s7; }
+  .panel[data-on] .viz [data-s='8'] { animation-name: s8; }
+  .panel[data-on] .viz [data-s='9'] { animation-name: s9; }
+  .panel[data-on] .viz [data-s='10'] { animation-name: s10; }
+  .panel[data-on] .viz [data-s='11'] { animation-name: s11; }
+  .panel[data-on] .gaugeOn { animation: draw 10s linear infinite both; }
+  .panel[data-on] .needle { animation: sweep 10s linear infinite both; }
+}
+@keyframes arrive { from { opacity: .4; translate: 0 8px; } }
+@keyframes loop { 0%, 95% { opacity: 1; } 100% { opacity: 0; } }
+/* One part coming in: from where its kind starts (--from-*; rising 10px by default) to its place. */
+@keyframes s0 { 0%, 3% { opacity: var(--from-opacity, 0); translate: var(--from-shift, 0 10px); scale: var(--from-scale, 1); animation-timing-function: cubic-bezier(.16, 1, .3, 1); } 8%, 100% { opacity: 1; translate: 0 0; scale: 1; } }
+@keyframes s1 { 0%, 8% { opacity: var(--from-opacity, 0); translate: var(--from-shift, 0 10px); scale: var(--from-scale, 1); animation-timing-function: cubic-bezier(.16, 1, .3, 1); } 13%, 100% { opacity: 1; translate: 0 0; scale: 1; } }
+@keyframes s2 { 0%, 13% { opacity: var(--from-opacity, 0); translate: var(--from-shift, 0 10px); scale: var(--from-scale, 1); animation-timing-function: cubic-bezier(.16, 1, .3, 1); } 18%, 100% { opacity: 1; translate: 0 0; scale: 1; } }
+@keyframes s3 { 0%, 18% { opacity: var(--from-opacity, 0); translate: var(--from-shift, 0 10px); scale: var(--from-scale, 1); animation-timing-function: cubic-bezier(.16, 1, .3, 1); } 23%, 100% { opacity: 1; translate: 0 0; scale: 1; } }
+@keyframes s4 { 0%, 23% { opacity: var(--from-opacity, 0); translate: var(--from-shift, 0 10px); scale: var(--from-scale, 1); animation-timing-function: cubic-bezier(.16, 1, .3, 1); } 28%, 100% { opacity: 1; translate: 0 0; scale: 1; } }
+@keyframes s5 { 0%, 28% { opacity: var(--from-opacity, 0); translate: var(--from-shift, 0 10px); scale: var(--from-scale, 1); animation-timing-function: cubic-bezier(.16, 1, .3, 1); } 33%, 100% { opacity: 1; translate: 0 0; scale: 1; } }
+@keyframes s6 { 0%, 33% { opacity: var(--from-opacity, 0); translate: var(--from-shift, 0 10px); scale: var(--from-scale, 1); animation-timing-function: cubic-bezier(.16, 1, .3, 1); } 38%, 100% { opacity: 1; translate: 0 0; scale: 1; } }
+@keyframes s7 { 0%, 38% { opacity: var(--from-opacity, 0); translate: var(--from-shift, 0 10px); scale: var(--from-scale, 1); animation-timing-function: cubic-bezier(.16, 1, .3, 1); } 43%, 100% { opacity: 1; translate: 0 0; scale: 1; } }
+@keyframes s8 { 0%, 43% { opacity: var(--from-opacity, 0); translate: var(--from-shift, 0 10px); scale: var(--from-scale, 1); animation-timing-function: cubic-bezier(.16, 1, .3, 1); } 48%, 100% { opacity: 1; translate: 0 0; scale: 1; } }
+@keyframes s9 { 0%, 48% { opacity: var(--from-opacity, 0); translate: var(--from-shift, 0 10px); scale: var(--from-scale, 1); animation-timing-function: cubic-bezier(.16, 1, .3, 1); } 53%, 100% { opacity: 1; translate: 0 0; scale: 1; } }
+@keyframes s10 { 0%, 53% { opacity: var(--from-opacity, 0); translate: var(--from-shift, 0 10px); scale: var(--from-scale, 1); animation-timing-function: cubic-bezier(.16, 1, .3, 1); } 58%, 100% { opacity: 1; translate: 0 0; scale: 1; } }
+@keyframes s11 { 0%, 58% { opacity: var(--from-opacity, 0); translate: var(--from-shift, 0 10px); scale: var(--from-scale, 1); animation-timing-function: cubic-bezier(.16, 1, .3, 1); } 63%, 100% { opacity: 1; translate: 0 0; scale: 1; } }
+/* Step four's dial: the arc is drawn while the needle swings over to it. */
+@keyframes draw { 0%, 10% { stroke-dashoffset: 1; animation-timing-function: cubic-bezier(.4, 0, .2, 1); } 32%, 100% { stroke-dashoffset: 0; } }
+@keyframes sweep { 0%, 10% { rotate: -100deg; animation-timing-function: cubic-bezier(.34, 1.4, .64, 1); } 36%, 100% { rotate: 0deg; } }
