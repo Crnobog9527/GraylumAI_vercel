@@ -11,7 +11,8 @@ AS $function$
 BEGIN
  IF EXISTS(SELECT 1 FROM account_erasure_requests WHERE profile_id=NEW.id AND profile_scrubbed_at IS NOT NULL)
   AND (NEW.email IS NOT NULL OR NEW.nickname IS NOT NULL OR NEW.avatar_url IS NOT NULL
-   OR NEW.last_ip IS NOT NULL OR NEW.last_login_at IS NOT NULL OR NEW.signup_attribution IS NOT NULL /* ANALYTICS signup attribution */) THEN
+   OR NEW.last_ip IS NOT NULL OR NEW.last_login_at IS NOT NULL OR NEW.signup_attribution IS NOT NULL /* ANALYTICS signup attribution */
+   OR NEW.shotviva_account_id IS NOT NULL /* INTEGRATION-SHOTVIVA */) THEN
   RAISE EXCEPTION 'ACCOUNT_ERASURE_IDENTITY_REFILL' USING ERRCODE='42501';
  END IF;
  RETURN NEW;

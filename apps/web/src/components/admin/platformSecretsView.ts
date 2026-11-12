@@ -2,7 +2,7 @@
 // Pure helpers for the ADMIN-SECRETS page (write-only third-party keys).
 
 export type PlatformSecretSlot = 'openrouter' | 'postforme' | 'postforme_webhook' | 'tikhub' | 'parallel' | 'firecrawl'
-  | 'resend';
+  | 'resend' | 'shotviva';
 export interface PlatformSecretItem {
   slot: PlatformSecretSlot;
   configured: boolean;
@@ -22,6 +22,8 @@ export const SLOT_INFO: Record<PlatformSecretSlot, { name: string; usage: string
   parallel: { name: 'Parallel', usage: '网页搜索', hint: '' },
   firecrawl: { name: 'Firecrawl', usage: '网页正文读取', hint: '' },
   resend: { name: 'Resend', usage: '付款相关提醒邮件（续费、到期等）', hint: '以 re_ 开头' },
+  shotviva: { name: 'Shotviva 伙伴密钥', usage: 'Shotviva 连接器（连接账号、出图）',
+    hint: '测试环境以 sv_test_ 开头，正式环境以 sv_live_ 开头，和 Shotviva 那边设置的一致' },
 };
 
 type ErrorLike = { data?: { code?: string } | null; message?: string } | null | undefined;

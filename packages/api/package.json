@@ -91,6 +91,7 @@
     "./src/services/turn/recovery": "./src/services/turn/recovery.ts",
     "./src/services/turn/admission/newWorkGate": "./src/services/turn/admission/newWorkGate.ts",
     "./src/services/redisRateLimiter": "./src/services/redisRateLimiter.ts",
+    "./src/services/connectors/shotviva/connect": "./src/services/connectors/shotviva/connect.ts",
     "./src/services/turn/settings/stopLossNotify": "./src/services/turn/settings/stopLossNotify.ts",
     "./src/services/ownerAlerts": "./src/services/ownerAlerts/index.ts",
     "./src/services/ownerAlerts/errorSpike": "./src/services/ownerAlerts/errorSpike.ts",

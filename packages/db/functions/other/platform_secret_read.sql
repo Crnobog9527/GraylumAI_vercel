@@ -10,7 +10,7 @@ CREATE OR REPLACE FUNCTION public.platform_secret_read(p_slot text)
 AS $function$
 DECLARE sid uuid;v text;
 BEGIN
- IF p_slot IS NULL OR p_slot NOT IN ('openrouter','postforme','postforme_webhook','tikhub','parallel','firecrawl','resend')
+ IF p_slot IS NULL OR p_slot NOT IN ('openrouter','postforme','postforme_webhook','tikhub','parallel','firecrawl','resend','shotviva')
  THEN RAISE EXCEPTION 'PLATFORM_SECRET_INPUT_INVALID' USING ERRCODE='23514';END IF;
  SELECT vault_secret_id INTO sid FROM platform_secrets WHERE slot=p_slot;
  IF sid IS NULL THEN RETURN NULL;END IF;

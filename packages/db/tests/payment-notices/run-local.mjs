@@ -210,7 +210,10 @@ try {
   await c.query(read('packages/db/tests/platform-secrets/vault_stub.sql'));
   await c.query('SET ROLE service_role');
   const slots = (await v('SELECT platform_secret_status() v')).map(item => item.slot);
-  assert.deepEqual(slots, ['openrouter', 'postforme', 'postforme_webhook', 'tikhub', 'parallel', 'firecrawl', 'resend']);
+  // INTEGRATION-SHOTVIVA (a later migration) appends its slot.
+  const later = readdirSync(new URL('../../migrations/', import.meta.url)).some(f => f.endsWith('_shotviva_connector.sql'));
+  assert.deepEqual(slots, ['openrouter', 'postforme', 'postforme_webhook', 'tikhub', 'parallel', 'firecrawl', 'resend',
+    ...(later ? ['shotviva'] : [])]);
   await v("SELECT platform_secret_set('resend','re_fakefakefake_0000',0,$1) v", [admin]);
   assert.equal(await v("SELECT platform_secret_read('resend') v"), 're_fakefakefake_0000');
   await code(v("SELECT platform_secret_read('sendgrid') v"), '23514');

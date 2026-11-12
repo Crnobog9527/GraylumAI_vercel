@@ -11,6 +11,6 @@ AS $function$
  SELECT jsonb_agg(jsonb_build_object('slot',s.slot,'configured',p.last4 IS NOT NULL,'last4',p.last4,
   'revision',coalesce(p.revision,0),'updatedBy',p.updated_by,
   'updatedAt',to_char(p.updated_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"')) ORDER BY s.n)
- FROM unnest(ARRAY['openrouter','postforme','postforme_webhook','tikhub','parallel','firecrawl','resend']) WITH ORDINALITY s(slot,n)
+ FROM unnest(ARRAY['openrouter','postforme','postforme_webhook','tikhub','parallel','firecrawl','resend','shotviva']) WITH ORDINALITY s(slot,n)
  LEFT JOIN platform_secrets p ON p.slot=s.slot
 $function$;

@@ -41,6 +41,7 @@ import { publishMonitorRouter } from './routers/publishMonitor';
 import { fusionSettingsRouter } from './routers/fusionSettings';
 import { fusionReviewRouter } from './routers/fusionReview';
 import { fusionCompareRouter } from './routers/fusionCompare';
+import { connectorsRouter } from './routers/connectors';
 
 /**
  * 主路由器
@@ -89,6 +90,8 @@ export const appRouter = router({
   library: libraryRouter,
   voice: voiceRouter,
   voiceFlag: voiceFlagRouter,
+  // INTEGRATION-SHOTVIVA: the user's own connector state.
+  connectors: connectorsRouter,
 });
 
 /**
