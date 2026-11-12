@@ -1,8 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
 import {
-  changeable, entriesOn, entryStatus, fromLocalInput, hasOpenEntries, scheduleErrorMessage, timeProblem, toLocalInput,
-  weekDays, weekRange, weekStart, type ScheduleEntry,
+  changeable, entryStatus, fromLocalInput, hasOpenEntries, scheduleErrorMessage, timeProblem, toLocalInput,
+  weekDays, weekStart, type ScheduleEntry,
 } from './schedule-view';
 
 const entry = (over: Partial<ScheduleEntry> = {}): ScheduleEntry => ({ id: 'j1', state: 'scheduled',
@@ -18,17 +18,6 @@ describe('the week in local time', () => {
     expect(weekStart(new Date(2026, 10, 16, 0, 5)).getDate()).toBe(16);
     expect(weekStart(new Date(2026, 10, 16), 1).getDate()).toBe(23);
     expect(weekDays(start).map(d => d.getDate())).toEqual([9, 10, 11, 12, 13, 14, 15]);
-    const { from, to } = weekRange(start);
-    expect(Date.parse(from)).toBe(start.getTime());
-    expect(new Date(to).getDate()).toBe(16);
-  });
-
-  it('groups entries by the local day and in time order', () => {
-    const day = new Date(2026, 10, 20);
-    const late = entry({ id: 'late', at: new Date(2026, 10, 20, 21).toISOString() });
-    const early = entry({ id: 'early', at: new Date(2026, 10, 20, 8).toISOString() });
-    const other = entry({ id: 'other', at: new Date(2026, 10, 21, 8).toISOString() });
-    expect(entriesOn([late, other, early], day).map(e => e.id)).toEqual(['early', 'late']);
   });
 
   it('converts the picker value from local time to a UTC instant and back', () => {

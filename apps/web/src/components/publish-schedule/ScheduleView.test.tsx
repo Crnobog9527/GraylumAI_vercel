@@ -13,7 +13,12 @@ vi.mock('@/trpc/client', () => ({ trpc: {
     reschedule: { useMutation: () => ({ mutate: () => {}, isPending: false, error: null }) },
   } },
 } }));
+vi.mock('@/components/ui/dialog', () => {
+  const Part = ({ children }: { children?: React.ReactNode }) => <div>{children}</div>;
+  return { Dialog: Part, DialogContent: Part, DialogDescription: Part, DialogFooter: Part, DialogHeader: Part, DialogTitle: Part };
+});
 import { isNewUser, positioningHref, positioningLabel, ScheduleView } from './ScheduleView';
+import { ScheduleDetailDialog } from './ScheduleDetailDialog';
 
 const text = (html: string) => html.replace(/<[^>]*>/g, '');
 const ok = (data: unknown) => ({ isPending: false, error: null, data });
@@ -26,39 +31,51 @@ beforeEach(() => {
 });
 afterEach(() => { vi.useRealTimers(); });
 
-describe('the schedule page', () => {
-  it('asks the server for this local week and shows seven days, the time zone and how to schedule', () => {
-    const html = text(renderToStaticMarkup(<ScheduleView />));
-    expect(html).toContain('发布排期');
-    expect(html).toContain('时间按你的时区显示');
-    expect((html.match(/没有安排/g) ?? []).length).toBe(7);
-    const range = state.asked[0] as { from: string; to: string };
-    expect(range).toEqual({ from: new Date(2026, 10, 16).toISOString(), to: new Date(2026, 10, 23).toISOString() });
-    expect(html).toContain('11月18日 周三（今天）');
+const post = (id: string, iso: string, extra: Record<string, unknown> = {}) => ({ id, state: 'scheduled', at: iso, scheduledAt: iso,
+  captionPreview: null, cancelReason: null, errorCode: null, manualReview: false, holdCredits: 6, chargedCredits: null, targets: [],
+  ...extra });
+
+describe('the schedule calendar', () => {
+  it('opens on this month: asks for its whole weeks, shows the month, Monday first, today and the time zone', () => {
+    const html = renderToStaticMarkup(<ScheduleView />);
+    expect(text(html)).toContain('发布排期');
+    expect(text(html)).toContain('时间按你的时区显示');
+    expect(text(html)).toContain('2026年11月');
+    expect(text(html)).toMatch(/周一周二周三周四周五周六周日/);
+    expect(html).toContain('aria-label="11月18日 周三（今天），0 条"');
+    // November 2026 in whole weeks: Monday 26 October to Sunday 6 December.
+    expect(state.asked[0]).toEqual({ from: new Date(2026, 9, 26).toISOString(), to: new Date(2026, 11, 7).toISOString() });
+    expect(html).toMatch(/<button[^>]*aria-pressed="true"[^>]*>月<\/button>/);
   });
 
-  it('a scheduled post shows its preview, platforms, the hold, and reschedule and cancel', () => {
-    const at = inHours(2);
-    state.list = ok([{ id: 'j1', state: 'scheduled', at, scheduledAt: at, captionPreview: '合成排期文案', cancelReason: null,
-      errorCode: null, manualReview: false, holdCredits: 12, chargedCredits: null,
-      targets: [{ connectionId: 'c1', platform: 'x', status: 'pending' }] }]);
-    const html = text(renderToStaticMarkup(<ScheduleView />));
-    expect(html).toContain('合成排期文案');
-    expect(html).toContain('已排期');
-    expect(html).toContain('X');
-    expect(html).toContain('冻结 12 积分');
-    expect(html).toContain('改期');
-    expect(html).toContain('取消排期');
+  it('a post is a chip on its day with its time and platforms in Chinese; its name says the status and the caption', () => {
+    const at = new Date(2026, 10, 19, 9, 30).toISOString();
+    state.list = ok([post('j1', at, { captionPreview: '合成排期文案', targets: [
+      { connectionId: 'c1', platform: 'xiaohongshu', status: 'pending' }, { connectionId: 'c2', platform: 'douyin', status: 'pending' }] })]);
+    const html = renderToStaticMarkup(<ScheduleView />);
+    expect(html).toContain('aria-label="11月19日 周四，1 条"');
+    expect(html).toContain('aria-label="09:30 小红书、抖音，已排期，合成排期文案"');
+    expect(html).toContain('data-tone="scheduled"');
+    expect(text(html)).toContain('09:30小红书、抖音');
+    expect(text(html)).not.toMatch(/douyin|xiaohongshu/);
   });
 
-  it('a post too close to its time, a cancelled one and a failure show no change buttons', () => {
-    const soon = inHours(0.1);
-    state.list = ok([{ id: 'j2', state: 'scheduled', at: soon, scheduledAt: soon, captionPreview: '快到点', cancelReason: null,
-      errorCode: null, manualReview: false, holdCredits: 6, chargedCredits: null, targets: [] }]);
+  it('a busy day shows two chips and counts the rest, which open that week', () => {
+    state.list = ok([8, 10, 12, 14, 16].map(hour => post(`j${hour}`, new Date(2026, 10, 20, hour).toISOString())));
     const html = text(renderToStaticMarkup(<ScheduleView />));
-    expect(html).toContain('快到点');
-    expect(html).toContain('已经不能改期或取消');
-    expect(html).not.toContain('取消排期');
+    expect(html).toContain('08:00');
+    expect(html).toContain('10:00');
+    expect(html).not.toContain('12:00');
+    expect(html).toContain('还有 3 条');
+  });
+
+  it('each status has its own colour', () => {
+    const day = (h: number) => new Date(2026, 10, 10 + h).toISOString();
+    state.list = ok([post('a', day(0)), post('b', day(1), { state: 'unknown' }), post('c', day(2), { state: 'completed', chargedCredits: 6 }),
+      post('d', day(3), { state: 'failed' }), post('e', day(4), { state: 'released', cancelReason: 'PUBLISH_SCHEDULE_CANCELLED' })]);
+    const html = renderToStaticMarkup(<ScheduleView />);
+    for (const tone of ['scheduled', 'working', 'done', 'failed', 'cancelled']) expect(html).toContain(`data-tone="${tone}"`);
+    expect(text(html)).toContain('部分成功');
   });
 
   it('shows a readable message and a retry when the list cannot be read', () => {
@@ -68,7 +85,7 @@ describe('the schedule page', () => {
     expect(html).toContain('重试');
   });
 
-  it('an empty week points a new user (no confirmed positioning) to positioning first (walkthrough 27)', () => {
+  it('an empty page points a new user (no confirmed positioning) to positioning first (walkthrough 27)', () => {
     const html = renderToStaticMarkup(<ScheduleView />);
     expect(text(html)).toContain('先完成定位、写好第一篇，就能在这里排期。');
     // No positioning at all: the button starts one (验收 of #1891: 继续定位 fits only when one is under way).
@@ -82,10 +99,10 @@ describe('the schedule page', () => {
     expect(renderToStaticMarkup(<ScheduleView />)).toMatch(/<a[^>]*href="\/app\/positioning\/d-new"[^>]*>继续定位<\/a>/);
   });
 
-  it('an existing user with a confirmed positioning sees the ordinary empty week, not the new-user guide (review of #1891)', () => {
+  it('an existing user with a confirmed positioning sees the ordinary empty month, not the new-user guide (review of #1891)', () => {
     state.drafts = ok({ drafts: [{ draftId: 'd-done', state: 'published' }, { draftId: 'd-rev', state: 'draft' }] });
     const html = text(renderToStaticMarkup(<ScheduleView />));
-    expect(html).toContain('这周还没有安排。');
+    expect(html).toContain('这个月还没有安排。');
     expect(html).toContain('请在资料库里打开一条内容');
     expect(html).not.toContain('先完成定位');
     expect(html).not.toContain('继续定位');
@@ -95,31 +112,56 @@ describe('the schedule page', () => {
     for (const drafts of [{ isPending: true, error: null, data: undefined }, { isPending: false, error: { message: 'x' }, data: undefined }]) {
       state.drafts = drafts;
       const html = text(renderToStaticMarkup(<ScheduleView />));
-      expect(html).toContain('这周还没有安排。');
+      expect(html).toContain('这个月还没有安排。');
       expect(html).not.toContain('先完成定位');
     }
   });
 
-  it('a week with posts keeps the note about scheduling from the library and editing after scheduling', () => {
-    const at = inHours(2);
-    state.list = ok([{ id: 'j1', state: 'scheduled', at, scheduledAt: at, captionPreview: '合成排期文案', cancelReason: null,
-      errorCode: null, manualReview: false, holdCredits: 12, chargedCredits: null, targets: [] }]);
+  it('a month with posts keeps the note about scheduling from the library and editing after scheduling', () => {
+    state.list = ok([post('j1', inHours(2), { captionPreview: '合成排期文案' })]);
     const html = text(renderToStaticMarkup(<ScheduleView />));
     expect(html).toContain('要改内容，请取消后重新排期');
+    expect(html).not.toContain('还没有安排');
     expect(html).not.toContain('继续定位');
   });
+});
 
-  it('names every platform in Chinese where it has a Chinese name, never its code (抖音, 小红书)', () => {
-    const at = inHours(2);
-    state.list = ok([{ id: 'j3', state: 'failed', at, scheduledAt: at, captionPreview: '平台名', cancelReason: null, errorCode: null,
-      manualReview: false, holdCredits: null, chargedCredits: null, targets: [
-        { connectionId: 'c1', platform: 'douyin', status: 'failed' }, { connectionId: 'c2', platform: 'xiaohongshu', status: 'failed' },
-        { connectionId: 'c3', platform: 'instagram', status: 'failed' }] }]);
-    const html = text(renderToStaticMarkup(<ScheduleView />));
+describe('a post opened from the calendar', () => {
+  const detail = (entry: Record<string, unknown>) => text(renderToStaticMarkup(
+    <ScheduleDetailDialog entry={entry as never} onClose={() => {}} onChange={() => {}} />));
+
+  it('a scheduled post shows its status, the hold, platforms, caption and reschedule and cancel', () => {
+    const html = detail(post('j1', inHours(2), { captionPreview: '合成排期文案', holdCredits: 12,
+      targets: [{ connectionId: 'c1', platform: 'x', status: 'pending' }] }));
+    expect(html).toContain('已排期');
+    expect(html).toContain('冻结 12 积分');
+    expect(html).toContain('X');
+    expect(html).toContain('合成排期文案');
+    expect(html).toContain('改期');
+    expect(html).toContain('取消排期');
+    expect(html).toContain('要改内容，请取消后重新排期');
+  });
+
+  it('a post too close to its time, a cancelled one and a failure show no change buttons', () => {
+    const near = detail(post('j2', inHours(0.1), { captionPreview: '快到点' }));
+    expect(near).toContain('已经不能改期或取消');
+    expect(near).not.toContain('取消排期');
+    expect(detail(post('j3', inHours(2), { state: 'released', cancelReason: 'PUBLISH_SCHEDULE_CANCELLED' }))).not.toContain('改期');
+    expect(detail(post('j4', inHours(-2), { state: 'failed' }))).not.toContain('改期');
+  });
+
+  it('names every platform in Chinese where it has a Chinese name, never its code (抖音, 小红书), and links a sent post', () => {
+    const html = detail(post('j3', inHours(2), { state: 'failed', targets: [
+      { connectionId: 'c1', platform: 'douyin', status: 'failed' }, { connectionId: 'c2', platform: 'xiaohongshu', status: 'failed' },
+      { connectionId: 'c3', platform: 'instagram', status: 'failed' }] }));
     expect(html).toContain('抖音 · 失败');
     expect(html).toContain('小红书 · 失败');
     expect(html).toContain('Instagram · 失败');
     expect(html).not.toMatch(/douyin|xiaohongshu/);
+    const sent = renderToStaticMarkup(<ScheduleDetailDialog entry={post('j5', inHours(-2), { state: 'completed', chargedCredits: 6,
+      targets: [{ connectionId: 'c1', platform: 'xiaohongshu', status: 'published', url: 'https://example.com/p/1' }] }) as never}
+      onClose={() => {}} onChange={() => {}} />);
+    expect(sent).toMatch(/<a[^>]*href="https:\/\/example.com\/p\/1"[^>]*>查看帖子<\/a>/);
   });
 });
 
