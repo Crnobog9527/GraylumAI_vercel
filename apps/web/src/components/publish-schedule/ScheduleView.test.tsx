@@ -13,7 +13,7 @@ vi.mock('@/trpc/client', () => ({ trpc: {
     reschedule: { useMutation: () => ({ mutate: () => {}, isPending: false, error: null }) },
   } },
 } }));
-import { isNewUser, positioningHref, ScheduleView } from './ScheduleView';
+import { isNewUser, positioningHref, positioningLabel, ScheduleView } from './ScheduleView';
 
 const text = (html: string) => html.replace(/<[^>]*>/g, '');
 const ok = (data: unknown) => ({ isPending: false, error: null, data });
@@ -71,14 +71,15 @@ describe('the schedule page', () => {
   it('an empty week points a new user (no confirmed positioning) to positioning first (walkthrough 27)', () => {
     const html = renderToStaticMarkup(<ScheduleView />);
     expect(text(html)).toContain('先完成定位、写好第一篇，就能在这里排期。');
-    expect(html).toMatch(/<a[^>]*href="\/app\/positioning"[^>]*>\s*继续定位<\/a>/);
+    // No positioning at all: the button starts one (验收 of #1891: 继续定位 fits only when one is under way).
+    expect(html).toMatch(/<a[^>]*href="\/app\/positioning"[^>]*>开始定位<\/a>/);
     expect(text(html)).not.toContain('请在资料库里打开一条内容');
     // A positioning under way: the same one the guide card's 继续我的定位 opens (the newest profile not archived).
     state.drafts = ok({ drafts: [{ draftId: 'd-old', state: 'draft' }, { draftId: 'd-new', state: 'draft' }] });
     state.businesses = ok([{ businessId: 'b1', isArchived: false, drafts: [{ draftId: 'd-old' }] },
       { businessId: 'b2', isArchived: false, drafts: [{ draftId: 'd-new' }] },
       { businessId: 'b3', isArchived: true, archivedAt: '2026-11-01', drafts: [{ draftId: 'd-gone' }] }]);
-    expect(renderToStaticMarkup(<ScheduleView />)).toMatch(/<a[^>]*href="\/app\/positioning\/d-new"[^>]*>\s*继续定位<\/a>/);
+    expect(renderToStaticMarkup(<ScheduleView />)).toMatch(/<a[^>]*href="\/app\/positioning\/d-new"[^>]*>继续定位<\/a>/);
   });
 
   it('an existing user with a confirmed positioning sees the ordinary empty week, not the new-user guide (review of #1891)', () => {
@@ -127,6 +128,8 @@ describe('who is new, and where 继续定位 goes', () => {
     expect(isNewUser(ok({ drafts: [] }))).toBe(true);
     expect(isNewUser(ok({ drafts: [{ draftId: 'a', state: 'draft' }] }))).toBe(true);
     expect(isNewUser(ok({ drafts: [{ draftId: 'a', state: 'published' }] }))).toBe(false);
+    // A confirmed positioning being revised (not published right now, but published before) is not new.
+    expect(isNewUser(ok({ drafts: [{ draftId: 'a', state: 'draft', currentVersion: 2 }] }))).toBe(false);
     expect(isNewUser({ isPending: true, error: null })).toBe(false);
     expect(isNewUser({ isPending: false, error: { message: 'x' } })).toBe(false);
   });
@@ -135,5 +138,8 @@ describe('who is new, and where 继续定位 goes', () => {
     expect(positioningHref({ state: 'draft', draftId: 'd1' })).toBe('/app/positioning/d1');
     expect(positioningHref({ state: 'none' })).toBe('/app/positioning');
     expect(positioningHref({ state: 'checking' })).toBe('/app/positioning');
+    expect(positioningLabel({ state: 'draft', draftId: 'd1' })).toBe('继续定位');
+    expect(positioningLabel({ state: 'none' })).toBe('开始定位');
+    expect(positioningLabel({ state: 'checking' })).toBe('开始定位');
   });
 });
