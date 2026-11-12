@@ -40,6 +40,7 @@ describe('the schedule calendar', () => {
     const html = renderToStaticMarkup(<ScheduleView />);
     expect(text(html)).toContain('发布排期');
     expect(text(html)).toContain('时间按你的时区显示');
+    expect(text(html)).toContain('只发布到你授权的账号，发布前由你确认。');
     expect(text(html)).toContain('2026年11月');
     expect(text(html)).toMatch(/周一周二周三周四周五周六周日/);
     expect(html).toContain('aria-label="11月18日 周三（今天），0 条"');

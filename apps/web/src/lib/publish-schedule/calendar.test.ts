@@ -1,10 +1,10 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   byDay, chipTone, dayKey, firstHour, HOUR_PX, monthWeeks, placeDay, platformsLabel, shiftAnchor, showsToday, viewDays,
   viewRange, viewTitle,
 } from './calendar';
-import { entryStatus, type ScheduleEntry } from './schedule-view';
+import { entryStatus, timeLabel, type ScheduleEntry } from './schedule-view';
 
 const at = (y: number, m: number, d: number, h = 0, min = 0) => new Date(y, m, d, h, min).toISOString();
 const job = (id: string, iso: string, extra: Partial<ScheduleEntry> = {}): ScheduleEntry => ({ id, state: 'scheduled', at: iso,
@@ -88,5 +88,32 @@ describe('posts on the calendar', () => {
     expect(firstHour([])).toBe(8);
     expect(firstHour([job('a', at(2026, 10, 18, 6, 30))])).toBe(5);
     expect(firstHour([job('a', at(2026, 10, 18, 13))])).toBe(8);
+  });
+});
+
+describe('in Shanghai (UTC+8): a post at 23:30 local stays on its own local day', () => {
+  // Node re-reads TZ when it is assigned; the rest of this file runs in the machine's own zone.
+  const before = process.env.TZ;
+  beforeAll(() => { process.env.TZ = 'Asia/Shanghai'; });
+  afterAll(() => { if (before === undefined) delete process.env.TZ; else process.env.TZ = before; });
+
+  it('Sunday 23:30 is in that week and that day, Monday 00:30 in the next, though both are the same UTC date', () => {
+    const late = job('late', '2026-11-22T15:30:00.000Z'); // Sunday 22 November, 23:30 in Shanghai
+    const early = job('early', '2026-11-22T16:30:00.000Z'); // Monday 23 November, 00:30 in Shanghai
+    expect(timeLabel(late.at)).toBe('23:30');
+    expect(timeLabel(early.at)).toBe('00:30');
+    const days = byDay([late, early]);
+    expect(days.get(dayKey(new Date(2026, 10, 22)))!.map(entry => entry.id)).toEqual(['late']);
+    expect(days.get(dayKey(new Date(2026, 10, 23)))!.map(entry => entry.id)).toEqual(['early']);
+    // The week of the 22nd is read from Monday 16 November 00:00 Shanghai (15 November 16:00 UTC): 23:30 is inside it,
+    // 00:30 on Monday the 23rd is where the next week starts.
+    const week = viewRange('week', new Date(2026, 10, 22));
+    expect(week).toEqual({ from: '2026-11-15T16:00:00.000Z', to: '2026-11-22T16:00:00.000Z' });
+    expect(Date.parse(late.at)).toBeLessThan(Date.parse(week.to));
+    expect(Date.parse(early.at)).toBeGreaterThanOrEqual(Date.parse(week.to));
+    // On the week axis 23:30 is the last half hour of the day, not the first of the next.
+    expect(placeDay([late])[0]!.top).toBe(23.5 * HOUR_PX);
+    // The month reads from Monday 26 October 00:00 Shanghai.
+    expect(viewRange('month', new Date(2026, 10, 22)).from).toBe('2026-10-25T16:00:00.000Z');
   });
 });

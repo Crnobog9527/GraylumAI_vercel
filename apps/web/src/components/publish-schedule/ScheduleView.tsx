@@ -86,7 +86,7 @@ export function ScheduleView() {
     <main className={styles.page}>
       <header className={styles.head}>
         <h1>发布排期</h1>
-        <span className={styles.zone}>时间按你的时区显示：{zoneLabel()}</span>
+        <span className={styles.zone}>时间按你的时区显示：{zoneLabel()}。只发布到你授权的账号，发布前由你确认。</span>
       </header>
       <nav className={styles.toolbar} aria-label="切换日期">
         <button type="button" className={styles.toolButton} disabled={showsToday(view, anchor, now)}
