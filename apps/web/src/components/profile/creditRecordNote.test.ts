@@ -46,6 +46,9 @@ describe('creditRecordNote', () => {
     expect(creditRecordNote('Stripe refund credit clawback [order:ord_1 refund:re_1 shortfall:0]')).toBe('订单退款');
     expect(creditRecordNote('Stripe subscription refund credit clawback [subscription:sub_1 refund:re_1 grants:1]')).toBe('会员退款');
     expect(creditRecordNote('Approved package refund')).toBe('积分包退款');
+    // Review of #1907: also written when a WeChat Pay or Alipay payment is refunded, so the note names no payment method.
+    expect(creditRecordNote('External card refund')).toBe('订单退款');
+    expect(creditRecordNote('External card refund')).not.toContain('银行卡');
     expect(creditRecordNote('Failed cash refund credit restoration')).toBe('退款没有成功，积分已恢复');
     expect(creditRecordNote('Payment dispute hold')).toBe('付款争议处理中，积分暂时冻结');
     // Lifting the hold does not say the dispute is over (review of #1907).

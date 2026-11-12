@@ -189,7 +189,8 @@ const INTERNAL_RECORD_NOTES: Record<string, string> = {
   'Membership paid period': '会员积分',
   // Refunds and payment disputes.
   'Approved package refund': '积分包退款',
-  'External card refund': '银行卡退款',
+  // The database writes this for every externally recorded refund, WeChat Pay and Alipay ones too: it names no payment method.
+  'External card refund': '订单退款',
   'Refunded credit pack settled': '积分包退款',
   'Refunded credit pack settled (returned reservation)': '积分包退款',
   'Refunded dispute reservation return': '争议订单退款',
