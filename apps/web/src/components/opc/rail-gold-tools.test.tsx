@@ -115,5 +115,5 @@ describe('the jury entry\'s list of reports', () => {
 // Seven entries stand above the conversation list now. Measured locally on 2026-11-12: at a 650px-high window the list had 0px.
 it('a short desktop window: the rail scrolls as a whole and the list keeps 120px, as the phone drawer does', () => {
   const css = readFileSync(fileURLToPath(new URL('./workspace-frame.module.css', import.meta.url)), 'utf8');
-  expect(css).toContain('@media(min-width:701px) and (max-height:780px){.rail{overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin}.rail .history{min-height:120px}}');
+  expect(css).toContain('@media(min-width:640px) and (max-height:780px){.rail{overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin}.rail .history{min-height:120px}}');
 });

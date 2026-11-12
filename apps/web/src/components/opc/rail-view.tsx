@@ -12,7 +12,11 @@ import styles from './workspace-frame.module.css';
  * page renders the same markup from the fixtures in `components/chat-display/fixtures/rail.ts`.
  */
 
-export type RailArea = 'chat' | 'library' | 'topics' | 'marketplace' | 'search' | 'start' | 'review' | 'schedule';
+/**
+ * Which page the shell is around. `tools` is the phone's 功能 page and `history` its 对话 page (the rail's own list, shown as
+ * the page): both exist for a phone's bottom bar (phone-tabs.tsx) and look like any other area on a computer.
+ */
+export type RailArea = 'chat' | 'library' | 'topics' | 'marketplace' | 'search' | 'start' | 'review' | 'schedule' | 'tools' | 'history';
 type Click = (event: SyntheticEvent<HTMLElement>) => void;
 
 /** Top bar: logo, "首页 / 对话 / 个人中心", and the phone menu button. */
@@ -53,6 +57,8 @@ export function RailView({ area, returnParam = '', onCloseMobile, launched = fal
 }) {
   return <aside className={styles.rail} aria-label="工作区导航">
     <div className={styles.railMobile}><button aria-label="关闭导航" onClick={onCloseMobile}>关闭工作列表</button></div>
+    {/* The phone's 对话 page: the rail is the page, under its name (workspace-frame.module.css shows it on a phone only). */}
+    {area==='history'&&<h1 className={styles.phoneTitle}>对话</h1>}
     <HoverPrefetchLink className={styles.newConversation} href="/app/positioning">
       <img className={styles.newConversationIcon} src="/opc-reference/new-chat.svg" alt=""/>新对话</HoverPrefetchLink>
     <nav className={styles.railNav} aria-label="工作区功能">

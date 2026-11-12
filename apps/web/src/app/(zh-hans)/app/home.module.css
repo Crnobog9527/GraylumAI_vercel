@@ -73,4 +73,5 @@
 .capabilities p { margin: 0; color: var(--home-muted); font-size: 12.5px; }
 
 @media (max-width: 820px) { .capabilities > div { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media(max-width:700px){.home header{gap:8px}.home header>a:first-child{font-size:0;gap:0}.home header nav{gap:0}.home header nav a{padding:0 6px}.headerEnd{gap:6px}.headerEnd>a:first-of-type{padding:4px 6px;font-size:11px;white-space:nowrap}.avatar{width:26px;height:26px}.page{padding:24px 16px 56px}}
+/* A phone: the bottom bar (PhoneTabs) is the way round, so the top bar keeps the logo and what stands at its right; the page ends above the bar. */
+@media(max-width:639px){.home header{gap:8px}.home header>a:first-child{font-size:0;gap:0}.home header nav{display:none}.headerEnd{gap:8px}.headerEnd>a:first-of-type{padding:5px 9px;font-size:12px;white-space:nowrap}.avatar{width:28px;height:28px}.page{padding:24px 16px calc(56px + env(safe-area-inset-bottom, 0px) + 40px)}}

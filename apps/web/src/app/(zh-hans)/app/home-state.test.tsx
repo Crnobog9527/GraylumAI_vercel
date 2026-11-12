@@ -71,7 +71,7 @@ it('greets without claiming a return visit, and shows a phone account without a 
 const read=(name:string)=>readFileSync(fileURLToPath(new URL(name,import.meta.url)),'utf8');
 it('the four items at the foot of the page are named, not offered: no link, no box, nothing that answers a pointer',()=>{
  const html=renderToStaticMarkup(<HomePage/>);
- const foot=html.slice(html.indexOf('从策略，继续走向实际创作'));
+ const foot=html.slice(html.indexOf('从策略，继续走向实际创作'),html.indexOf('</main>'));
  expect(foot.match(/<article/g)).toHaveLength(4);expect(foot).not.toMatch(/<a |<button/);
  const css=read('./home.module.css');
  const [,rule='']=css.match(/\.capabilities article \{([^}]*)\}/)??[];
@@ -113,4 +113,10 @@ it('choosing a step moves nothing below it: the six steps share one place and th
  const css=read('./home-method.module.css');
  expect(css).toMatch(/\.panels \{[^}]*display: grid/);expect(css).toMatch(/\.panel \{[^}]*grid-area: 1 \/ 1/);
  expect(css).toContain('.panel:not([data-on]) { visibility: hidden; }');expect(css).not.toMatch(/\.panel[^{]*\{[^}]*display: none/);
+});
+it('carries the phone\'s bottom bar, on 首页, after the page itself',()=>{
+ const html=renderToStaticMarkup(<HomePage/>);
+ const bar=html.slice(html.indexOf('</main>'));
+ expect(bar).toMatch(/<nav [^>]*aria-label="主导航"/);
+ expect(bar).toMatch(/aria-current="page"[^>]*href="\/app"|href="\/app"[^>]*aria-current="page"/);expect(bar.match(/aria-current="page"/g)).toHaveLength(1);
 });
