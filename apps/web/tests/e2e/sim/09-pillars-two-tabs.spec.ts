@@ -95,3 +95,23 @@ test('a save from a tab that missed another tab\'s save is refused and reads the
   await unfoldSettings(other);
   await expect(other.getByLabel('内容方向 4 名称')).toHaveValue('冲突验收临时', { timeout: 60_000 });
 });
+
+// Validation of #1882 (2026-11-12): one-click publishing's "去连接账号" links to /app/publish-monitor?tab=accounts. Followed inside the
+// app (no reload) the page opened on 数据趋势, because it read the tab from window.location, which still held the page left behind.
+test('a link inside the app that names a tab opens the data review page on that tab', async ({ page }) => {
+  const carol = seed().users.carol;
+  await brandWithPillars(carol.id);
+  await signIn(page, 'carol');
+  const push = (href: string) => page.evaluate(to => (window as unknown as { next: { router: { push(href: string): void } } }).next.router.push(to), href);
+  await page.goto('/app/library');
+  await expect(page.getByRole('link', { name: '数据复盘' }).first()).toBeVisible({ timeout: 60_000 });
+  await push('/app/publish-monitor?tab=accounts');
+  await expect(page).toHaveURL(/\/app\/publish-monitor\?tab=accounts$/, { timeout: 60_000 });
+  await expect(page.getByRole('tab', { name: '账号' })).toHaveAttribute('data-state', 'active', { timeout: 60_000 });
+  await expect(page.getByRole('heading', { name: '我的账号' })).toBeVisible();
+  // Another in-app link to the same page, naming another tab, is followed too; a plain link goes back to the first tab.
+  await push('/app/publish-monitor?tab=import');
+  await expect(page.getByRole('tab', { name: '表格导入' })).toHaveAttribute('data-state', 'active');
+  await push('/app/publish-monitor');
+  await expect(page.getByRole('tab', { name: '数据趋势' })).toHaveAttribute('data-state', 'active');
+});

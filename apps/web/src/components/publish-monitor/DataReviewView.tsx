@@ -2,6 +2,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import * as Tabs from '@radix-ui/react-tabs';
 import { Sparkles } from 'lucide-react';
 import { trpc } from '@/trpc/client';
@@ -20,7 +21,9 @@ const TABS = [['trend', '数据趋势'], ['posts', '作品数据'], ['accounts',
 type TabId = typeof TABS[number][0];
 /**
  * The tab named in the address (`?tab=accounts`), for links from other pages such as one-click publishing's "去连接账号".
- * Read once when the page opens; the page is drawn in the browser only (the server sends the empty frame).
+ * The page takes it from the router's search params, not from `window.location`: on an in-app navigation the page is drawn
+ * before the browser's address changes, so `window.location` still held the page the user came from and the link opened
+ * 数据趋势 until a reload (validation of #1882, 2026-11-12).
  */
 export function tabFromSearch(search: string): TabId {
   const named = new URLSearchParams(search).get('tab');
@@ -47,7 +50,11 @@ export function DataReviewView() {
   const brands = useMemo(() => brandsFromLibrary(library.data), [library.data]);
   const refresh = useMemo(() => new Map<string, RefreshState>((data.data?.connections ?? []).map(c => [c.id, c])),
     [data.data]);
-  const [tab, setTab] = useState<TabId>(() => (typeof window === 'undefined' ? 'trend' : tabFromSearch(window.location.search)));
+  // The tab the address names. It is followed when the page opens and whenever the address changes (another link to this
+  // page while it is open); a click on a tab is the user's own choice and stays until then.
+  const named = tabFromSearch(useSearchParams()?.toString() ?? '');
+  const [tab, setTab] = useState<TabId>(named);
+  useEffect(() => { setTab(named); }, [named]);
   // The page opens on the trend tab, but that tab is only drawn once the first reads are back. Its data and its drawing
   // code are asked for now, not after that (PERF 2026-11-11: the trend read was a second wave, one round trip later).
   // An account without access gets one refused read here; the tab's own read (same key) then finds the answer waiting.
