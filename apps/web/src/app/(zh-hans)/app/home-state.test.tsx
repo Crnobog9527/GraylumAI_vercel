@@ -114,3 +114,24 @@ it('choosing a step moves nothing below it: the six steps share one place and th
  expect(css).toMatch(/\.panels \{[^}]*display: grid/);expect(css).toMatch(/\.panel \{[^}]*grid-area: 1 \/ 1/);
  expect(css).toContain('.panel:not([data-on]) { visibility: hidden; }');expect(css).not.toMatch(/\.panel[^{]*\{[^}]*display: none/);
 });
+// Owner 2026-11-12, phone plan A: "这 6 个步骤不要做左右滑动，直接从上到下排列好……带步骤动效、有箭头引导的展示".
+it('on a phone the six steps stand one under another with an arrow between them, and all six show before the page has looked',()=>{
+ const css=read('./home-method.module.css').replace(/\/\*[\s\S]*?\*\//g,'');
+ const [,phone='']=css.match(/@media \(max-width: 639px\) \{((?:[^{}]|\{[^{}]*\})*)\}/)??[];
+ // No row of stops and no 上一步 / 下一步; every step is laid out in its own place and shown; the arrow sits above each step but the first.
+ expect(phone).toContain('.route, .turn { display: none; }');
+ expect(phone).toMatch(/\.panel \{ grid-area: auto;/);expect(phone).toContain('.panel:not([data-on]) { visibility: visible; }');
+ expect(phone).toMatch(/\.panel \+ \.panel::before \{/);expect(phone).toMatch(/\.panel \+ \.panel::after \{/);
+ // A step waits out of sight only once the page is watching (data-watch) and only where motion is welcome; nothing else hides a step.
+ const waits=[...css.matchAll(/@media ([^{]*)\{((?:[^{}]|\{[^{}]*\})*)\}/g)].filter(block=>block[2].includes(':not([data-seen])'));
+ expect(waits).toHaveLength(1);
+ expect(waits[0][1]).toContain('(max-width: 639px)');expect(waits[0][1]).toContain('prefers-reduced-motion: no-preference');
+ expect(waits[0][2]).toContain('.panels[data-watch] .panel:not([data-seen]) { opacity: 0;');
+ expect(css.replace(waits[0][0],'')).not.toContain('data-seen');
+ // As the server draws it (and wherever the script does not run): no watching, nothing marked seen, the first step's picture playing.
+ const html=renderToStaticMarkup(<HomePage/>);
+ expect(html).not.toContain('data-watch');expect(html).not.toContain('data-seen');
+ expect([...html.matchAll(/<li id="[^"]+"[^>]*>/g)].map(step=>step[0].includes('data-play'))).toEqual([true,false,false,false,false,false]);
+ // The pictures play by that one mark, on a computer and on a phone alike.
+ expect(css).toContain('.panel[data-play] .viz { animation: loop');expect(css).not.toMatch(/\.panel\[data-on\][^{]*\{[^}]*animation/);
+});
