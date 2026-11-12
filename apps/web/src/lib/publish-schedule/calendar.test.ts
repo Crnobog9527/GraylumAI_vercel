@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
-  byDay, chipTone, dayKey, firstHour, HOUR_PX, monthWeeks, placeDay, platformsLabel, shiftAnchor, showsToday, viewDays,
+  byDay, chipTone, dayKey, firstHour, HOUR_PX, monthWeeks, pickedDay, placeDay, platformsLabel, shiftAnchor, showsToday, viewDays,
   viewRange, viewTitle,
 } from './calendar';
 import { entryStatus, timeLabel, type ScheduleEntry } from './schedule-view';
@@ -82,6 +82,15 @@ describe('posts on the calendar', () => {
     // 9:55 starts after 9:00's card ends (50 minutes), so it takes the first column again in the same group.
     expect([by.c!.column, by.c!.columns]).toEqual([0, 2]);
     expect([by.d!.column, by.d!.columns]).toEqual([0, 1]);
+  });
+
+  it('a phone lists the picked day of the shown month, else today in this month, else the 1st', () => {
+    const now = new Date(2026, 10, 18, 9);
+    expect(pickedDay(new Date(2026, 10, 1), null, now)).toEqual(new Date(2026, 10, 18));
+    expect(pickedDay(new Date(2026, 10, 1), new Date(2026, 10, 25, 14), now)).toEqual(new Date(2026, 10, 25));
+    // Paging to December forgets a November pick and lands on the 1st.
+    expect(pickedDay(new Date(2026, 11, 1), new Date(2026, 10, 25), now)).toEqual(new Date(2026, 11, 1));
+    expect(pickedDay(new Date(2026, 11, 1), new Date(2026, 11, 9), now)).toEqual(new Date(2026, 11, 9));
   });
 
   it('opens the week axis an hour before an early post, else at 8:00', () => {

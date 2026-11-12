@@ -167,15 +167,33 @@ it('"还有 2 条" opens that week on the time axis, scrolled inside the panel; 
   } finally { await close(); }
 }, 45000);
 
-it('fits a 375px phone: a list of the days with posts, opening a post works, and the page is not widened', async () => {
+it('a 375px phone shows the whole month as a grid, today picked; another day lists its posts below and opens them', async () => {
   const { page, errors, close } = await open(375, 812);
   try {
-    await ui(page.getByRole('heading', { name: '11月18日 周三' })).toBeVisible();
-    await ui(page.getByRole('table')).toHaveCount(0);
+    const grid = page.getByRole('group', { name: /2026年11月，选一天/ });
+    // 1 to 30 November, each a button; no day of October or December, no week switch on a phone.
+    await ui(grid.getByRole('button')).toHaveCount(30);
+    await ui(page.getByRole('group', { name: '视图' })).toHaveCount(0);
+    await ui(grid.getByRole('button', { name: '11月18日 周三（今天），2 条' })).toHaveAttribute('aria-pressed', 'true');
+    await ui(page.getByRole('heading', { name: /11月18日 周三/ })).toBeVisible();
+    await ui(page.getByRole('button', { name: /15:00 小红书、抖音，已排期/ })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(375);
-    if (SHOTS) await page.screenshot({ path: `${SHOTS}/phone.png`, fullPage: true });
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/phone.png` });
+    // The 25th has four posts: four cards below, the 18th's cards are gone.
+    await grid.getByRole('button', { name: '11月25日 周三，4 条' }).click();
+    await ui(page.getByRole('button', { name: /小红书，已排期/ })).toHaveCount(4);
+    await ui(page.getByRole('button', { name: /15:00 小红书、抖音/ })).toHaveCount(0);
+    await grid.getByRole('button', { name: '11月21日 周六，没有安排' }).click();
+    await ui(page.getByText('这天没有安排。')).toBeVisible();
+    // 今天 brings the pick back; a card opens the post with its actions.
+    await page.getByRole('button', { name: '今天', exact: true }).click();
     await page.getByRole('button', { name: /15:00 小红书、抖音/ }).click();
     await ui(page.getByRole('dialog').getByRole('button', { name: '取消排期' })).toBeVisible();
+    await page.getByRole('dialog').getByRole('button', { name: '关闭' }).click();
+    // Paging to December lands on the 1st.
+    await page.getByRole('button', { name: '下一月' }).click();
+    await ui(page.getByRole('group', { name: /2026年12月，选一天/ }).getByRole('button', { name: /12月1日 周二/ }))
+      .toHaveAttribute('aria-pressed', 'true');
     expect(errors).toEqual([]);
   } finally { await close(); }
 }, 45000);
