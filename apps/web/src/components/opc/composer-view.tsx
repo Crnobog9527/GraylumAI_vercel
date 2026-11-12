@@ -13,7 +13,7 @@ import styles from './work-composer.module.css';
  */
 export function ComposerView({
  rootRef,attachment,editor,referenceMenu,menu=null,disabled=false,reading=false,onToggleFiles,onPickFile,fileHint,fileInput,
- onToggleSkills,skillMenu,counter,skillName,sendDisabled=false,onSend,status,error,note,
+ onToggleSkills,skillMenu,counter,skillName,sendDisabled=false,onSend,status,error,note,tools,
 }:{
  rootRef?:Ref<HTMLDivElement>;
  /** Shown inside the frame above the text, for example the docked question card. */
@@ -42,6 +42,8 @@ export function ComposerView({
  /** Progress and notices of the files being stored (under the box). */
  status?:ReactNode;
  error?:string;note?:string;
+ /** More entries for the row of tools, after the two round buttons (a phone's "多模型对比"). */
+ tools?:ReactNode;
 }){
  return <div ref={rootRef} className={styles.wrap}><div className={styles.composer}>
   {attachment&&<div className={styles.attachment}>{attachment}</div>}
@@ -53,6 +55,7 @@ export function ComposerView({
    {fileInput}
    <div className={styles.menuAnchor}><button type="button" aria-label="使用技能" disabled={disabled} aria-expanded={menu==='skills'}
     onClick={onToggleSkills}><Box size={18}/></button>{menu==='skills'&&skillMenu}</div>
+   {tools}
   </div><div className={styles.toolRight}>{counter&&<span>{counter.length} / {counter.max}</span>}
   {skillName&&<span>{skillName}</span>}<ModelSlot/><button type="button" aria-label="发送" className={styles.send} disabled={sendDisabled}
    onClick={onSend}><ArrowUp size={18}/></button></div></div>

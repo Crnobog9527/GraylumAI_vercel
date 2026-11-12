@@ -81,7 +81,9 @@ beforeAll(async () => {
         window.opened=[];window.openedRelated=[];window.erasures=[];window.replaced=[];window.erased=[];window.cleanups=[];window.renames=[];
         new BroadcastChannel('graylum-content-erasure').onmessage=event=>window.erased.push(event.data);
         const root=createRoot(document.getElementById('root'));
-        const frame=()=>React.createElement(WorkspaceFrame,null,'对话内容');
+        // On a phone the list of conversations is a page of its own (/app/chats, the area called history): the conversation page fills
+        // the screen there and has no drawer to open the list from (Owner 2026-11-12, phone plan A).
+        const frame=()=>React.createElement(WorkspaceFrame,innerWidth<640?{area:'history'}:null,'对话内容');
         root.render(frame());
         // Like leaving the page: the old frame unmounts and a new page mounts its own frame.
         window.remount=()=>{root.render(null);setTimeout(()=>root.render(frame()),0);};`;
@@ -147,7 +149,6 @@ async function confirmDelete(page: Page) {
 
 it.each([1280, 375])('removes the row and closes the dialog at once, before the server answers (%ipx)', width =>
   open(width, async page => {
-    if (width === 375) await page.getByRole('button', { name: '打开导航' }).first().click();
     await confirmDelete(page);
     // Within one second the row is gone and the dialog closed, while the server call is still pending.
     await ui(page.getByText('周末选题讨论')).toHaveCount(0, { timeout: 1000 });
@@ -418,7 +419,6 @@ it('a reload right after renaming keeps the new name and sends it again', () => 
 }, '#rename-hang'));
 
 it('rename input fits a 375px screen', () => open(375, async page => {
-  await page.getByRole('button', { name: '打开导航' }).first().click();
   const input = await startRename(page);
   const box = await input.boundingBox();
   expect(box && box.x >= 0 && box.x + box.width <= 375).toBe(true);

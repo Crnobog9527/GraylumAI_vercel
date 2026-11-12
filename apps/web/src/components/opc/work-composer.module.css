@@ -37,12 +37,12 @@
 .skillGlyph{display:grid;place-items:center;width:31px;height:31px;flex:none;border:1px solid #ececec;border-radius:9px;background:#faf9f6;color:#6b6b6b}
 .skillList button:disabled{cursor:not-allowed;opacity:.56}.skillList button:disabled:hover{background:#fff}
 .skillFoot{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 13px;border-top:1px solid #ededed}.skillFoot a,.skillFoot button{display:block;padding:6px 10px;border:0;border-radius:9px;background:#fff;color:#666;text-decoration:none;text-align:left;font-size:12px}.skillFoot a:hover,.skillFoot button:hover{background:#f5f5f6}
-@media(max-width:700px){.skillMenu{left:-70px}}
+@media(max-width:639px){.skillMenu{left:-70px}}
 .note{margin:5px 3px 0;color:#6b6b6b;font-size:10px;line-height:16px}
-@media(max-width:700px){.zone{padding:8px 12px 4px}.composer{padding:16px 17px 12px;border-radius:25px}.editor,.editor :global(.ProseMirror){min-height:50px}.note{font-size:9px}}
+@media(max-width:639px){.zone{padding:8px 12px calc(4px + env(safe-area-inset-bottom, 0px))}.composer{padding:16px 17px 12px;border-radius:25px}.editor,.editor :global(.ProseMirror){min-height:50px}.note{font-size:9px}}
 /* Attached panel above the text box (the open question card): at most 40% of the viewport, scrolling on its own so the text box stays visible. */
 .attachment{max-height:min(320px,40dvh);margin:-4px -5px 12px;padding:0 5px;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin}
-@media(max-width:700px){.attachment{max-height:34dvh}}
+@media(max-width:639px){.attachment{max-height:34dvh}}
 /* UI-B skeleton: the `@` document picker above the box, and the inline reference chip. */
 .referenceMenu{position:absolute;left:12px;bottom:calc(100% + 6px);z-index:25;width:min(340px,calc(100vw - 24px));padding:8px;border:1px solid #ececec;border-radius:16px;background:#fff;box-shadow:0 12px 30px #0002;color:#333}
 .referenceBody{max-height:min(300px,45dvh);overflow-y:auto}
