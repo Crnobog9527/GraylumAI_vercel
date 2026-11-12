@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 import {
-  LEGEND, shiftAnchor, showsToday, startOfDay, viewDays, viewRange, viewTitle, type CalendarView,
+  isToday, LEGEND, pickedDay, shiftAnchor, showsToday, startOfDay, viewDays, viewRange, viewTitle, type CalendarView,
 } from '@/lib/publish-schedule/calendar';
 import { hasOpenEntries, scheduleErrorMessage, zoneLabel, type ScheduleEntry } from '@/lib/publish-schedule/schedule-view';
 import { existingPositioning, type ExistingPositioning } from '@/app/(zh-hans)/app/runtime/positioning-required';
@@ -14,7 +14,8 @@ import { trpc } from '@/trpc/client';
 import { MiniMonth, MonthGrid } from './MonthGrid';
 import { ScheduleChangeDialog } from './ScheduleChangeDialog';
 import { ScheduleDetailDialog } from './ScheduleDetailDialog';
-import { AgendaList, WeekGrid } from './WeekGrid';
+import { PhoneMonth } from './PhoneMonth';
+import { WeekGrid } from './WeekGrid';
 import styles from './schedule-calendar.module.css';
 
 /**
@@ -40,7 +41,8 @@ export function positioningHref(existing: ExistingPositioning): string {
 /** 继续定位 when a positioning is under way; 开始定位 when there is none yet (or while that is still being read). */
 export const positioningLabel = (existing: ExistingPositioning) => existing.state === 'draft' ? '继续定位' : '开始定位';
 
-// Phones get a list of days instead of seven narrow columns. The server render (and the first client render) is the grid.
+// Phones get the whole month as a small grid with the picked day's posts below (Owner 2026-11-12). The server render (and the
+// first client render) is the desktop calendar.
 const PHONE = '(max-width: 640px)';
 function usePhone(): boolean {
   return useSyncExternalStore(change => {
@@ -60,8 +62,12 @@ function useNow(): Date {
 export function ScheduleView() {
   const now = useNow();
   const phone = usePhone();
-  const [view, setView] = useState<CalendarView>('month');
+  const [chosenView, setView] = useState<CalendarView>('month');
+  // A phone always shows the month; the week axis is for wider screens.
+  const view: CalendarView = phone ? 'month' : chosenView;
   const [anchor, setAnchor] = useState(() => startOfDay(new Date()));
+  const [picked, setPicked] = useState<Date | null>(null);
+  const selected = pickedDay(anchor, picked, now);
   const [opened, setOpened] = useState<ScheduleEntry | null>(null);
   const [change, setChange] = useState<{ entry: ScheduleEntry; mode: 'reschedule' | 'cancel' } | null>(null);
   const range = useMemo(() => viewRange(view, anchor), [view, anchor]);
@@ -80,6 +86,17 @@ export function ScheduleView() {
   const unit = view === 'month' ? '月' : '周';
   // The opened post as last read: a re-read while the details are open (a result came in) updates them.
   const shown = opened ? entries.find(entry => entry.id === opened.id) ?? opened : null;
+  // On a phone with posts, the scheduling guide goes under the picked day's posts, so the grid and the cards come first.
+  const noteBelow = phone && !newUser && !list.isPending && !list.error && !empty;
+  const notice = newUser ? <section aria-label="还没有排期" className={styles.notice}>
+    <p>先完成定位、写好第一篇，就能在这里排期。</p>
+    <Button asChild><Link href={positioningHref(existing)}>{positioningLabel(existing)}</Link></Button>
+  </section> : <div className={styles.notice}>
+    {empty && <p>{view === 'month' ? '这个月还没有安排。' : '这周还没有安排。'}</p>}
+    <p className={styles.note}>
+      要排新的帖子，请在资料库里打开一条内容，选"一键发布"后选择发布时间。已排期的帖子不会跟着内容的修改变化；要改内容，请取消后重新排期。
+      <Link className="ml-1" href="/app/library">去资料库</Link></p>
+  </div>;
   const openWeek = (day: Date) => { setView('week'); setAnchor(startOfDay(day)); };
 
   return (
@@ -89,17 +106,17 @@ export function ScheduleView() {
         <span className={styles.zone}>时间按你的时区显示：{zoneLabel()}。只发布到你授权的账号，发布前由你确认。</span>
       </header>
       <nav className={styles.toolbar} aria-label="切换日期">
-        <button type="button" className={styles.toolButton} disabled={showsToday(view, anchor, now)}
-          onClick={() => setAnchor(startOfDay(new Date()))}>今天</button>
+        <button type="button" className={styles.toolButton} disabled={showsToday(view, anchor, now) && (!phone || isToday(selected, now))}
+          onClick={() => { setAnchor(startOfDay(new Date())); setPicked(null); }}>今天</button>
         <button type="button" className={`${styles.toolButton} ${styles.iconButton}`} aria-label={`上一${unit}`}
           onClick={() => step(-1)}>‹</button>
         <button type="button" className={`${styles.toolButton} ${styles.iconButton}`} aria-label={`下一${unit}`}
           onClick={() => step(1)}>›</button>
         <h2 className={styles.title} aria-live="polite">{viewTitle(view, anchor)}</h2>
-        <div className={styles.switch} role="group" aria-label="视图">
+        {!phone && <div className={styles.switch} role="group" aria-label="视图">
           {(['month', 'week'] as const).map(option => <button key={option} type="button" aria-pressed={view === option}
             onClick={() => setView(option)}>{option === 'month' ? '月' : '周'}</button>)}
-        </div>
+        </div>}
       </nav>
       <div className={styles.body}>
         <aside className={styles.side} aria-label="日历工具">
@@ -113,20 +130,13 @@ export function ScheduleView() {
           </section>
         </aside>
         <div className={styles.main}>
-          {newUser ? <section aria-label="还没有排期" className={styles.notice}>
-            <p>先完成定位、写好第一篇，就能在这里排期。</p>
-            <Button asChild><Link href={positioningHref(existing)}>{positioningLabel(existing)}</Link></Button>
-          </section> : <div className={styles.notice}>
-            {empty && <p>{view === 'month' ? '这个月还没有安排。' : '这周还没有安排。'}</p>}
-            <p className={styles.note}>
-              要排新的帖子，请在资料库里打开一条内容，选"一键发布"后选择发布时间。已排期的帖子不会跟着内容的修改变化；要改内容，请取消后重新排期。
-              <Link className="ml-1" href="/app/library">去资料库</Link></p>
-          </div>}
+          {!noteBelow && notice}
           {list.isPending ? <div className={styles.state}><PageSkeleton compact rows={4} label="发布排期读取中" /></div>
             : list.error ? <div className={styles.state}>
               <p role="alert" className="mb-2">{scheduleErrorMessage(list.error.message, list.error.data?.code)}</p>
               <Button variant="outline" onClick={refresh}>重试</Button></div>
-              : phone ? <AgendaList days={days} entries={entries} now={now} onOpen={setOpened} />
+              : phone ? <PhoneMonth anchor={anchor} entries={entries} now={now} selected={selected}
+                onSelect={day => setPicked(startOfDay(day))} onOpen={setOpened} footer={noteBelow ? notice : undefined} />
                 : view === 'month' ? <MonthGrid anchor={anchor} entries={entries} now={now} onOpen={setOpened} onOpenDay={openWeek} />
                   : <WeekGrid days={days} entries={entries} now={now} onOpen={setOpened} />}
         </div>

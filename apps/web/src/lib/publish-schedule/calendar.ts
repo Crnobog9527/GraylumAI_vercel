@@ -134,6 +134,16 @@ export function firstHour(entries: ScheduleEntry[]): number {
   return Math.max(0, Math.min(8, Math.floor(earliest / 60) - 1));
 }
 
+/**
+ * The day whose posts a phone lists under its month grid: the day the user picked when it is in the shown month, else today
+ * when the shown month is this month, else the month's 1st.
+ */
+export function pickedDay(anchor: Date, picked: Date | null, now: Date): Date {
+  const inMonth = (day: Date) => day.getFullYear() === anchor.getFullYear() && day.getMonth() === anchor.getMonth();
+  if (picked && inMonth(picked)) return startOfDay(picked);
+  return inMonth(now) ? startOfDay(now) : day(anchor.getFullYear(), anchor.getMonth(), 1);
+}
+
 /** In the month view a day shows at most this many chips; the rest are counted ("还有 2 条") and open the week. */
 export const MONTH_CHIPS = 3;
 export const isToday = (date: Date, now: Date) => sameLocalDay(date, now);
