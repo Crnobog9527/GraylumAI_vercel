@@ -355,8 +355,8 @@ export const settingsRouter = router({
     }),
 
   /**
-   * 获取积分加油包列表 (公开接口)
-   * 返回活跃的积分加油包供用户购买
+   * 获取积分包列表 (公开接口)
+   * 返回活跃的积分包供用户购买
    */
   getCreditPackages: publicProcedure.query(async ({ ctx }) => {
     const selectedChannel = ctx.hasSupabaseAdminPrivileges && ctx.supabaseAdmin

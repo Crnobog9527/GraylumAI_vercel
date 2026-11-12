@@ -64,7 +64,7 @@ export default function AdminPackagesPage() {
               套餐管理
             </h1>
             <p className="mt-1" style={{ color: 'var(--text-tertiary)' }}>
-              管理积分加油包和会员等级
+              管理积分包和会员等级
             </p>
           </div>
         </div>
@@ -79,7 +79,7 @@ export default function AdminPackagesPage() {
               className="shrink-0 data-[state=active]:bg-[var(--color-primary)] data-[state=active]:text-black"
             >
               <Package className="h-4 w-4 mr-2" />
-              积分加油包
+              积分包
             </TabsTrigger>
             <TabsTrigger
               value="membership-plans"

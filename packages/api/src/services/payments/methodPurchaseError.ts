@@ -23,7 +23,7 @@ const REJECTIONS: Record<string, Rejection> = {
   PAY_WAFFO_FOUNDER_EXPIRED: { code: 'PRECONDITION_FAILED', message: '创始会员续费资格已过期。' },
   PAY_WAFFO_UPGRADE_WAIT: { code: 'CONFLICT',
     message: '当前会员状态暂时不能升级，请稍后再试；临近续费日时需等续费完成后再升级。' },
-  PAY_WAFFO_MEMBERSHIP_REQUIRED: { code: 'PRECONDITION_FAILED', message: '积分加油包仅限会员购买。' },
+  PAY_WAFFO_MEMBERSHIP_REQUIRED: { code: 'PRECONDITION_FAILED', message: '积分包仅限会员购买。' },
   PAY_WAFFO_ACCOUNT_CLOSED: { code: 'FORBIDDEN', message: '账号已停用或正在注销，不能购买。' },
   PAY_WAFFO_OFFER_INVALID: { code: 'BAD_REQUEST', message: '这个优惠不适用于所选套餐，请刷新页面后重试。' },
   PAY_WAFFO_TRANSITION_DENIED: { code: 'BAD_REQUEST', message: '这次升级或续费请求无效，请刷新页面后重试。' },
