@@ -147,35 +147,69 @@
 .path i::after { content: ''; position: absolute; right: -2px; top: -5px; width: 7px; height: 7px; border-top: 2px solid var(--home-ink); border-right: 2px solid var(--home-ink); rotate: 45deg; }
 
 /*
+ * A phone (Owner 2026-11-12: "这 6 个步骤不要做左右滑动，直接从上到下排列好，让用户上下滑动……带步骤动效、有箭头引导的
+ * 展示，从第一步到第六步"): no row of stops and no 上一步 / 下一步. The six steps stand one under another, each whole, an
+ * arrow leading from one down to the next; a step arrives and its picture plays when it is scrolled to (HomeMethod marks
+ * the steps in view `data-play`), and without motion all six simply stand finished. A computer keeps the route.
+ */
+@media (max-width: 639px) {
+  .route, .turn { display: none; }
+  .panels { gap: 52px; margin-top: 0; }
+  .panel { grid-area: auto; overflow: visible; }
+  .panel:not([data-on]) { visibility: visible; }
+  .picture { border-radius: 24px 24px 0 0; }
+  /* The arrow in the gap above every step but the first: a dashed line down, ending in a head. */
+  .panel + .panel::before {
+    content: ''; position: absolute; left: 50%; top: -44px; width: 2px; height: 30px; margin-left: -1px;
+    background: repeating-linear-gradient(#cfc9bd 0 5px, transparent 5px 10px);
+  }
+  .panel + .panel::after {
+    content: ''; position: absolute; left: 50%; top: -23px; width: 10px; height: 10px; margin-left: -5px;
+    border-right: 2px solid #b9b2a4; border-bottom: 2px solid #b9b2a4; rotate: 45deg;
+  }
+  .panel { position: relative; }
+}
+@media (max-width: 639px) and (prefers-reduced-motion: no-preference) {
+  /* The dashes run down the line, toward the next step. */
+  .panel + .panel::before { animation: flow 1.2s linear infinite; }
+  /* Once the page is watching where the reader is (data-watch), a step not reached yet waits below its place and rises into it with its arrow. */
+  .panels[data-watch] .panel { transition: opacity .6s cubic-bezier(.16, 1, .3, 1), translate .6s cubic-bezier(.16, 1, .3, 1); }
+  .panels[data-watch] .panel:not([data-seen]) { opacity: 0; translate: 0 22px; }
+}
+@keyframes flow { from { background-position: 0 0; } to { background-position: 0 10px; } }
+
+/*
  * Motion, only where it is welcome. Without it every picture stands finished, which is what the rules above draw.
  * The picture of the step shown plays as a loop of ten seconds: its parts come in one after another, half a second apart
  * (a part's place is data-s, 0–11), the finished picture holds, then it fades and starts again. A step that is not shown
- * does not play, and choosing a step starts its picture from the beginning. Only opacity and transforms move, except the
+ * does not play (HomeMethod marks the one that does `data-play`: the step chosen, or on a phone each step in view), and
+ * a step's picture starts from the beginning each time it is marked. Only opacity and transforms move, except the
  * dial's arc (one short stroke).
  */
 @media (prefers-reduced-motion: no-preference) {
   .route b { transition: background-color .25s, color .25s, box-shadow .25s, scale .25s cubic-bezier(.16, 1, .3, 1); }
   .route { scroll-behavior: smooth; }
-  .panel[data-on] { animation: arrive .45s cubic-bezier(.16, 1, .3, 1); }
-  .panel[data-on] .viz { animation: loop 10s linear infinite; }
-  .panel[data-on] .viz [data-s] { animation: 10s linear infinite both; }
+  .panel[data-play] .viz { animation: loop 10s linear infinite; }
+  .panel[data-play] .viz [data-s] { animation: 10s linear infinite both; }
   .viz [data-how='pop'] { --from-scale: .4; --from-shift: 0 0; }
   .viz [data-how='grow'] { --from-scale: 0 1; --from-shift: 0 0; --from-opacity: 1; }
-  .panel[data-on] .viz [data-s='0'] { animation-name: s0; }
-  .panel[data-on] .viz [data-s='1'] { animation-name: s1; }
-  .panel[data-on] .viz [data-s='2'] { animation-name: s2; }
-  .panel[data-on] .viz [data-s='3'] { animation-name: s3; }
-  .panel[data-on] .viz [data-s='4'] { animation-name: s4; }
-  .panel[data-on] .viz [data-s='5'] { animation-name: s5; }
-  .panel[data-on] .viz [data-s='6'] { animation-name: s6; }
-  .panel[data-on] .viz [data-s='7'] { animation-name: s7; }
-  .panel[data-on] .viz [data-s='8'] { animation-name: s8; }
-  .panel[data-on] .viz [data-s='9'] { animation-name: s9; }
-  .panel[data-on] .viz [data-s='10'] { animation-name: s10; }
-  .panel[data-on] .viz [data-s='11'] { animation-name: s11; }
-  .panel[data-on] .gaugeOn { animation: draw 10s linear infinite both; }
-  .panel[data-on] .needle { animation: sweep 10s linear infinite both; }
+  .panel[data-play] .viz [data-s='0'] { animation-name: s0; }
+  .panel[data-play] .viz [data-s='1'] { animation-name: s1; }
+  .panel[data-play] .viz [data-s='2'] { animation-name: s2; }
+  .panel[data-play] .viz [data-s='3'] { animation-name: s3; }
+  .panel[data-play] .viz [data-s='4'] { animation-name: s4; }
+  .panel[data-play] .viz [data-s='5'] { animation-name: s5; }
+  .panel[data-play] .viz [data-s='6'] { animation-name: s6; }
+  .panel[data-play] .viz [data-s='7'] { animation-name: s7; }
+  .panel[data-play] .viz [data-s='8'] { animation-name: s8; }
+  .panel[data-play] .viz [data-s='9'] { animation-name: s9; }
+  .panel[data-play] .viz [data-s='10'] { animation-name: s10; }
+  .panel[data-play] .viz [data-s='11'] { animation-name: s11; }
+  .panel[data-play] .gaugeOn { animation: draw 10s linear infinite both; }
+  .panel[data-play] .needle { animation: sweep 10s linear infinite both; }
 }
+/* On a computer the step chosen arrives in the shared place; a phone's steps arrive as they are scrolled to (above). */
+@media (min-width: 640px) and (prefers-reduced-motion: no-preference) { .panel[data-play] { animation: arrive .45s cubic-bezier(.16, 1, .3, 1); } }
 @keyframes arrive { from { opacity: .4; translate: 0 8px; } }
 @keyframes loop { 0%, 95% { opacity: 1; } 100% { opacity: 0; } }
 /* One part coming in: from where its kind starts (--from-*; rising 10px by default) to its place. */
