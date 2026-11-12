@@ -6,6 +6,9 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { ReportPaywallDialog } from '@/components/paywall/ReportPaywallDialog';
+import { planOnlyTag } from '@/components/paywall/goldScenePaywallCopy';
+import { fusionPlanLevel, pickPaywallPlans } from '@/components/paywall/paywallPlans';
+import { JURY_ENTRY_PARAM } from './JuryChooser';
 import { trpc } from '@/trpc/client';
 import { estimateFusion, startJury } from '@/lib/turn-fusion';
 import { resolveSeatNames, SEATS } from '@/components/landing/preview-jury/jury-events';
@@ -65,6 +68,18 @@ function ReportJury({ draftId, sourceVersionId, busy }: { draftId: string; sourc
   const [open, setOpen] = useState(false);
   // The Gold paywall opens on this page (Owner 2026-10-25).
   const [paywall, setPaywall] = useState(false);
+  // From the rail's 评审团 entry (JuryChooser, ?jury=1): the card opens by itself, once, and is brought into view.
+  const card = useRef<HTMLElement>(null);
+  const arrived = useRef(false);
+  useEffect(() => {
+    if (arrived.current || !enabled || entitlements.data?.allowFusionReview !== true) return;
+    arrived.current = true;
+    if (new URLSearchParams(window.location.search).has(JURY_ENTRY_PARAM)) setOpen(true);
+  }, [enabled, entitlements.data]);
+  useEffect(() => { if (open && arrived.current) card.current?.scrollIntoView({ block: 'nearest' }); }, [open]);
+  // Which plan carries the jury, from the plan catalog (never a fixed "Gold"); asked only for a member without it.
+  const plans = trpc.settings.getMembershipPlans.useQuery(undefined, { enabled: enabled && entitlements.data?.allowFusionReview === false,
+    staleTime: 300_000, ...READ_RETRY });
   // The fixed price of a review and the balance a start needs (0294), shown before the user agrees.
   const estimate = useTurnEstimate(enabled && open, draftId, sourceVersionId);
   const cap = estimate.data?.estimateCredits;
@@ -87,7 +102,7 @@ function ReportJury({ draftId, sourceVersionId, busy }: { draftId: string; sourc
     // A review already paid for stays reachable after a downgrade; only starting a new one is Gold-only.
     return <>
       <Button variant="outline" disabled={busy} onClick={() => setPaywall(true)}>
-        请评审团审阅报告<span className={styles.gold}>Gold 专享</span></Button>
+        请评审团审阅报告<span className={styles.gold}>{planOnlyTag(fusionPlanLevel(pickPaywallPlans(plans.data), 'jury'))}</span></Button>
       {paywall && <ReportPaywallDialog scene="jury" onClose={() => setPaywall(false)} />}
       {latest ? <Link className={styles.link} href={reviewHref(draftId, latest.reviewId)}>
         {ACTIVE.has(latest.state) ? '评审团正在审阅，去看看 →' : latest.awaitingChoice ? '评审完成，去逐章选择 →' : '查看上次评审 →'}</Link> : null}
@@ -119,7 +134,7 @@ function ReportJury({ draftId, sourceVersionId, busy }: { draftId: string; sourc
       {latest ? <Link className={styles.link} href={reviewHref(draftId, latest.reviewId)}>
         {latest.awaitingChoice ? '评审完成，去逐章选择 →' : '查看上次评审 →'}</Link> : null}
       {open ? (
-        <section className={styles.card} aria-label="评审团">
+        <section ref={card} className={styles.card} aria-label="评审团">
           <p>
             {seats.length} 位评审（{seats.map(seat => names[seat]).join('、')}）会各自读完你的定位报告、提出修改意见，
             意见不一的地方再辩论一轮，最后由{names.S}逐条裁决、写出修订稿。用不用修订稿，由你逐章决定。

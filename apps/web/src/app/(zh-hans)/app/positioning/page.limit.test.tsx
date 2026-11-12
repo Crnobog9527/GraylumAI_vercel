@@ -25,6 +25,7 @@ const STUBS: Record<string, string> = {
     export const trpc = {
       runtime: { choices: read(undefined) },
       publishMonitor: { features: read(undefined) },
+      fusionCompare: { options: read(undefined) },
       user: { getEntitlements: read({ positioningProfileLimit: 1 }) },
       opc: {
         catalog: read([{ id: 'registration-1' }]),
@@ -42,7 +43,7 @@ const STUBS: Record<string, string> = {
   '@/components/opc/workspace-frame': `export const WorkspaceFrame = ({ children }) => children;`,
   '@/components/opc/work-composer': `export const WorkComposer = () => null;
     export const useFreeConversation = () => ({ send() {}, ensureSession: async () => '', busy: false, error: '', references: [], setReferences() {} });`,
-  '@/components/fusion-compare/ComparePicker': `export const CompareButton = () => null;`,
+  '@/components/fusion-compare/ComparePicker': `export const CompareHost = () => null;`,
 };
 beforeAll(async () => {
   const require = createRequire(import.meta.url);

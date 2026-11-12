@@ -16,6 +16,7 @@ import { ConversationDeleteDialog } from './conversation-delete-dialog';
 import { ConversationRow } from './conversation-row';
 import { DraftRow, type UnassignedDraft } from './draft-row';
 import { useSidebarReviewMarks } from './use-sidebar-review-marks';
+import { useRailGoldTools } from './rail-gold-tools';
 import { useConversationRename } from '@/hooks/use-conversation-rename';
 import { useConversationErasure } from '@/hooks/use-conversation-erasure';
 import { useContentErasureSync } from '@/hooks/use-content-erasure';
@@ -113,6 +114,8 @@ export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,acti
  const publishMonitor=trpc.publishMonitor.features.useQuery(undefined,{staleTime:300_000,...READ_RETRY});
  // The jury's mark on a draft row, asked with the lists above (use-sidebar-review-marks.ts).
  const reviewMarks=useSidebarReviewMarks(),reviewNote=reviewMarks.note;
+ // 多模型对比 and 评审团 in the rail (Owner 2026-11-12); a phone's drawer closes first, so what opens is not hidden under it.
+ const goldTools=useRailGoldTools({navigate:href=>router.push(href),beforeOpen:()=>setMobileNav(false)});
  const historyRef=useRef<HTMLDivElement>(null);
  const sidebarActor=profile.data?.id;
  const [restoredActor,setRestoredActor]=useState<string>();
@@ -215,7 +218,8 @@ export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,acti
   <GlobalHeader area={area} onOpenNav={()=>setMobileNav(true)} end={<LanguageSwitch/>}/>
   {noticeOpen&&<AnnouncementBar notice={notice} returnParam={returnParam} onClose={()=>setNoticeOpen(false)}/>}
   <div className={[styles.shell,right&&rightOpen?styles.withRight:'',mobileNav?styles.navOpen:'',mobileRight?styles.mobileRightOpen:'',!noticeOpen?styles.noNotice:''].join(' ')}>
-   <RailView area={area} returnParam={returnParam} dataReview={publishMonitor.data?.ownData===true} onCloseMobile={()=>setMobileNav(false)}>
+   <RailView area={area} returnParam={returnParam} dataReview={publishMonitor.data?.ownData===true} onCloseMobile={()=>setMobileNav(false)}
+    onCompare={goldTools.onCompare} onJury={goldTools.onJury}>
     <RailHistory historyRef={historyRef} archiveView={archiveView} onToggleArchive={()=>setArchiveView(value=>!value)} onControl={takeSidebarControl}
      onScroll={()=>{setMenuId('');if(!restoringScroll.current&&pendingScroll.current===null)saveSidebar();}}>
      {[...platforms].map(([platform,accounts])=>{
@@ -286,5 +290,6 @@ export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,acti
   onConfirm={()=>{const {id,related}=deletingConversation;setDeletingConversation(null);void conversationErasure.erase(id,related);}}/>}
  {erasing&&<ContentErasureDialog target={erasing.target} name={erasing.name} relatedIds={erasing.related}
   onClose={finished=>{const target=erasing.target;setErasing(null);if(finished)leaveErased(target);}}/>}
+  {goldTools.dialogs}
  </div>;
 }

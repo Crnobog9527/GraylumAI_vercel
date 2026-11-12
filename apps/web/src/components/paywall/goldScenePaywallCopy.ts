@@ -5,34 +5,52 @@ import type { REPORT_DELIVERABLES } from './reportPaywallCopy';
 /**
  * Copy of the Gold-only paywalls (Owner 2026-10-25: a member-only entry opens the paywall on the current page). Same rules as the
  * report paywall copy: no predicted credit cost, no model names, no unlaunched features, no refund promise on the card.
- * Only the Gold plans are offered here, so a Pro purchase can never leave the user without the feature they came for.
+ * Only the plans that carry the tool are offered here, so a purchase can never leave the user without the feature they came for.
  */
 export type GoldScene = 'compare' | 'jury';
 
-export const GOLD_SCENE_COPY = {
-  compare: {
-    eyebrow: '多模型对比 · Gold 专享',
+const PLAN_NAME = { pro: 'Pro', gold: 'Gold' } as const;
+
+/** "Gold 专享" / "更高级别会员专享": the tag beside a member-only entry. */
+export const planOnlyTag = (level: 'pro' | 'gold' | null) => (level ? `${PLAN_NAME[level]} 专享` : '更高级别会员专享');
+
+/**
+ * The words of a member-only tool's paywall. Which plan it needs is not written here: it is the lowest plan whose entitlement
+ * switch carries the tool (`fusionPlanLevel`, from the plan catalog). While that is not known (`null`: the catalog could not be
+ * read, or names no such plan) the words say "更高级别会员" and name no plan.
+ */
+export function goldSceneCopy(scene: GoldScene, level: 'pro' | 'gold' | null) {
+  // "Gold" / "更高级别会员" after 开通 and 升级到; "Gold 会员" / "更高级别会员" where the sentence speaks of the membership.
+  const plan = level ? ` ${PLAN_NAME[level]}` : '更高级别会员';
+  const member = level ? ` ${PLAN_NAME[level]} 会员` : '更高级别会员';
+  const only = planOnlyTag(level);
+  return scene === 'compare' ? {
+    eyebrow: `多模型对比 · ${only}`,
     dossierTitle: '同一个问题，让几个 AI 同时回答，你来挑',
-    dossierLede: '多模型对比是 Gold 会员功能。你写好的内容不会丢，开通后回到这里就能直接对比。',
+    dossierLede: `多模型对比是${member}功能。你写好的内容不会丢，开通后回到这里就能直接对比。`,
     deliverHeading: '开通后你可以',
-    title: '开通 Gold，使用多模型对比',
-    lede: '开通 Gold 会员，同一个问题交给几个 AI 同时回答，并排看清差别，再选你最想要的那个继续。',
-    cta: '开通 Gold，使用多模型对比',
+    title: `开通${plan}，使用多模型对比`,
+    lede: `开通${member}，同一个问题交给几个 AI 同时回答，并排看清差别，再选你最想要的那个继续。`,
+    cta: `开通${plan}，使用多模型对比`,
     ctaSub: '付款后会员立即生效，回到这一页就能开始对比',
     laterNote: '你写的内容还在，关闭后可以继续使用。',
-  },
-  jury: {
-    eyebrow: '评审团 · Gold 专享',
+  } : {
+    eyebrow: `评审团 · ${only}`,
     dossierTitle: '让评审团帮你把报告再审一遍',
-    dossierLede: '评审团是 Gold 会员功能。你的报告和已确认的信息都保留着，开通后回到这里就能请评审团审阅。',
+    dossierLede: `评审团是${member}功能。你的报告和已确认的信息都保留着，开通后回到这里就能请评审团审阅。`,
     deliverHeading: '开通后你可以',
-    title: '开通 Gold，请评审团审阅报告',
-    lede: '开通 Gold 会员，几位评审从不同角度审阅你的报告，逐章给出意见，由你决定采用哪些。',
-    cta: '开通 Gold，请评审团审阅',
+    title: `开通${plan}，请评审团审阅报告`,
+    lede: `开通${member}，几位评审从不同角度审阅你的报告，逐章给出意见，由你决定采用哪些。`,
+    cta: `开通${plan}，请评审团审阅`,
     ctaSub: '付款后会员立即生效，回到这一页就能请评审团审阅',
     laterNote: '你的报告和已确认的信息都保留着。',
-  },
-} as const;
+  };
+}
+/** "升级到 Gold" / "升级到更高级别会员": the plan to move to, for a member who already pays for a lower one. */
+export const upgradeTarget = (level: 'pro' | 'gold' | null) => (level ? ` ${PLAN_NAME[level]}` : '更高级别会员');
+
+/** The words with the plan the tools need today (Gold), as the catalog names it; kept for the callers and tests that read them. */
+export const GOLD_SCENE_COPY = { compare: goldSceneCopy('compare', 'gold'), jury: goldSceneCopy('jury', 'gold') } as const;
 
 export const GOLD_SCENE_DELIVERABLES: Record<GoldScene, typeof REPORT_DELIVERABLES> = {
   compare: [

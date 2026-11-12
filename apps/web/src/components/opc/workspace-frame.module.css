@@ -53,6 +53,9 @@
 .navIcon{display:block;flex:none;width:20px;height:20px}
 .railNav a:hover,.railNav button:hover:not(:disabled){background:#faf9f5}.railNav a[aria-current=page]{background:#faf4e5}.railNav button:disabled{color:#555;cursor:default}.railNav small{margin-left:auto;color:#6b6b6b;font-size:10px}
 .history{flex:1;min-height:0;margin-top:8px;margin-right:-3px;padding-right:3px;overflow:auto;scrollbar-width:thin}
+/* A short desktop window (a 768px-high laptop leaves about 650px): with the two member tools the entries above the list would
+   squeeze it to nothing. The rail then scrolls as a whole and the list keeps a usable height, as the phone drawer does below. */
+@media(min-width:701px) and (max-height:780px){.rail{overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin}.rail .history{min-height:120px}}
 .history details{margin:2px 0}
 .history summary{display:flex;align-items:center;justify-content:space-between;list-style:none;cursor:pointer;padding:8px 10px;color:#444;font-size:13px;font-weight:550}
 .history summary::-webkit-details-marker{display:none}

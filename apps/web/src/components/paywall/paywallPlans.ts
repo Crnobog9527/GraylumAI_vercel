@@ -37,6 +37,16 @@ export function fusionRowShown(plans: readonly PaywallPlanSource[], tool: 'revie
   return plans.length > 0 && plans.every(item => item[site] === true) && plans.some(item => item[plan] === true);
 }
 
+/**
+ * The lowest plan on sale that carries a member-only tool (the jury, the model comparison), by the plans' own entitlement
+ * switches (`membership_plans.allow_fusion_*`, set by administrators). Null while no plan that was read says so: the
+ * paywall then names no plan ("更高级别会员") instead of guessing one.
+ */
+export function fusionPlanLevel(plans: readonly PaywallPlan[], tool: 'compare' | 'jury'): PaywallLevel | null {
+  const carries = tool === 'jury' ? 'allowFusionReview' : 'allowFusionCompare';
+  return (['pro', 'gold'] as const).find(level => plans.some(plan => plan.level === level && plan[carries] === true)) ?? null;
+}
+
 /** "3 个" for a plan's positioning-profile limit, or null when the catalog did not send a usable number. */
 export function profileLimitLabel(plan: Pick<PaywallPlanSource, 'positioningProfileLimit'> | undefined) {
   const limit = plan?.positioningProfileLimit;

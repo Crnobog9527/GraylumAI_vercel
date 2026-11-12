@@ -11,7 +11,8 @@ import { QueryNotice } from '@/components/opc/query-notice';
 import { WorkspaceFrame } from "@/components/opc/workspace-frame";
 import styles from './start-work.module.css';
 import { WorkComposer, useFreeConversation } from '@/components/opc/work-composer';
-import { CompareButton } from '@/components/fusion-compare/ComparePicker';
+import { CompareHost } from '@/components/fusion-compare/ComparePicker';
+import { askCompare, COMPARE_ENTRY_PARAM } from '@/components/fusion-compare/compare-entry';
 import { readStartEntry, retainedMatches, START_TEXT, type StartMode } from './start-entry';
 import { grantOpeningIntent } from './[draftId]/opening-intent';
 import { ProfileArchiveList } from '@/components/opc/profile-archive/ProfileArchiveList';
@@ -32,6 +33,14 @@ export default function PositioningHome() {
   // Only a complete entry (mode and intent) auto-starts; anything else shows the ordinary start page.
   useEffect(()=>{const entry=readStartEntry(location.search);setDirectEntry(entry?.intent?entry.mode:null);},[]);
   const free = useFreeConversation({ withReferences: true });
+  // Arriving from the rail's "多模型对比" on a page without a message box (?compare=1): ask here, once the box below is ready.
+  const compareOptions = trpc.fusionCompare.options.useQuery(undefined, { staleTime: 60_000, ...READ_RETRY });
+  const compareAsked = useRef(false);
+  useEffect(() => {
+    if (compareAsked.current || !compareOptions.data || !new URLSearchParams(location.search).has(COMPARE_ENTRY_PARAM)) return;
+    compareAsked.current = true;
+    askCompare();
+  }, [compareOptions.data]);
   const [skillId,setSkillId]=useState('');
   // Same Skill the composer would send: the chosen one, else the account default; not ready until the choices are loaded.
   const composerChoices=trpc.runtime.choices.useQuery(undefined,{staleTime:RUNTIME_CHOICES_STALE_MS,...READ_RETRY});
@@ -136,7 +145,7 @@ export default function PositioningHome() {
           <Link prefetch={false} href="/app/publish-schedule"><CalendarDays size={15}/>发布排期</Link></>
           :<><button disabled><ChartNoAxesColumnIncreasing size={15}/>数据复盘</button><button disabled><CalendarDays size={15}/>发布排期</button></>}
       </section>
-      <CompareButton resolveSession={free.ensureSession} question={startInput}
+      <CompareHost resolveSession={free.ensureSession} question={startInput}
         disabled={free.busy||!compareSkill.ready}
         blockedReason={free.references.length?'带 @ 引用资料的消息暂时不能多模型对比，请去掉引用后再试。':undefined}
         skill={compareSkill.skill}
