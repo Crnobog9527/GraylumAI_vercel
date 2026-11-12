@@ -141,8 +141,9 @@
 .axis { position: relative; display: grid; grid-template-columns: 52px repeat(7, minmax(0, 1fr)); flex: none; }
 .hours { position: relative; }
 .hours span { position: absolute; right: 8px; color: var(--sc-secondary); font-size: 11px; transform: translateY(-50%); font-variant-numeric: tabular-nums; }
+/* --hour-px comes from WeekGrid (HOUR_PX); the fallback is the same value. */
 .column { position: relative; border-left: 1px solid var(--sc-border);
-  background-image: repeating-linear-gradient(to bottom, var(--sc-border) 0 1px, transparent 1px var(--hour-px)); }
+  background-image: repeating-linear-gradient(to bottom, var(--sc-border) 0 1px, transparent 1px var(--hour-px, 56px)); }
 .column[data-today] { background-color: #fffcf3; }
 .now { position: absolute; left: 0; right: 0; z-index: 2; height: 2px; background: #e5484d; pointer-events: none; }
 .now::before { content: ''; position: absolute; top: -4px; left: -5px; width: 10px; height: 10px; border-radius: 50%; background: #e5484d; }
