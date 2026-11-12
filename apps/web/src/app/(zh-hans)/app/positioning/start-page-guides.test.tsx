@@ -13,6 +13,7 @@ vi.mock('next/link', () => ({ default: ({ href, children, className }: { href: s
 vi.mock('@/trpc/client', () => ({ trpc: { opc: { list: { useQuery: () => ({ data: { drafts: state.drafts } }) } } } }));
 vi.mock('@/components/opc/profile-archive/profile-archive-api', () => ({ useProfileBusinesses: () => state.businesses }));
 
+import { platformName } from '@/components/publish-monitor/labels';
 import { StrategyCards } from './strategy-cards';
 import { TopicsEmpty } from './topics-empty';
 
@@ -85,6 +86,15 @@ describe('the start page itself', () => {
   it('"unknown" is not "no positioning": the mark and the notice wait for both reads', () => {
     expect(page).toContain('const noPositioning=library.isSuccess&&list.isSuccess&&!library.error&&!list.error&&!topicAccounts.length;');
     expect(page).toContain('<StrategyCards startHere={noPositioning}');
+  });
+
+  // 2026-11-12, after the rail (#1917): the account list under 做一批新选题 and the list of content work showed the stored code too.
+  it('names an account\'s platform by its name, not its stored code, in both lists', () => {
+    expect(page.match(/\{platformName\(a\.platform\)\} · \{a\.account\}/g)).toHaveLength(2);
+    expect(page).not.toMatch(/\{a\.platform\}/);
+    expect(platformName('xiaohongshu')).toBe('小红书');
+    expect(platformName('douyin')).toBe('抖音');
+    expect(platformName('我自己填的平台')).toBe('我自己填的平台');
   });
 
   it('the two shortcuts above the box follow the rail\'s switch, like the cards below', () => {
