@@ -135,3 +135,18 @@ it('on a phone the six steps stand one under another with an arrow between them,
  // The pictures play by that one mark, on a computer and on a phone alike.
  expect(css).toContain('.panel[data-play] .viz { animation: loop');expect(css).not.toMatch(/\.panel\[data-on\][^{]*\{[^}]*animation/);
 });
+// Controller 2026-11-12, from the phone sample the Owner chose (its first screen: the two buttons in the title's card).
+it('on a phone the two buttons sit under the title, before the six steps; the document keeps its order',()=>{
+ const css=read('./home.module.css').replace(/\/\*[\s\S]*?\*\//g,'');
+ const [,phone='']=css.match(/@media \(max-width: 639px\) \{((?:[^{}]|\{[^{}]*\})*)\}/)??[];
+ expect(phone).toContain('.page { display: flex; flex-direction: column; }');
+ // The steps (the one section with a label) and the four items at the foot are moved after everything else, in that order.
+ expect(phone).toContain('.page > section[aria-label] { order: 1;');expect(phone).toContain('.capabilities { order: 2; }');
+ expect(css.replace(phone,'')).not.toMatch(/[\s;{]order:/);
+ const html=renderToStaticMarkup(<HomePage/>);
+ const main=html.slice(html.indexOf('<main'));
+ expect(main.match(/<section[^>]* aria-label="/g)).toHaveLength(1);
+ // In the document: greeting, title, the six steps, the buttons, the four items.
+ const at=(text:string)=>main.indexOf(text);
+ expect([at('你好，Fixture'),at('拥有清楚的内容方向'),at('我们怎样帮你做定位'),at('开始新手引导'),at('从策略，继续走向实际创作')].every((place,index,all)=>place>0&&(index===0||place>all[index-1]))).toBe(true);
+});
