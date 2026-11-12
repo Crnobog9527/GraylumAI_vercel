@@ -110,7 +110,7 @@ Owner 原话（2026-11-12，总控对话，逐条节选）：
 
 - 登录后首页用样稿 H1，背景铺满不留分界线、加轻动效，6 步示意图做成动画（LANDING-ART）。
 - 多模型对比、评审团入口放进左侧栏；级别不够也能点，点了弹该功能的付费墙（介绍、升级理由、需要的级别）。落实方式（总控定，非原话）：多模型对比用当前输入框的问题打开选模型，评审团先选要审的报告；档名按方案接口算，不写死。
-- 发布排期改成日历式（月视图为主、周视图、卡片式排期）。
+- 发布排期改成日历式、卡片式排期。落实方式（总控据参考图定，非原话）：月视图为主，加周视图。
 - 对话页、个人中心背景按新视觉适配（对话页不抢注意力，个人中心可更明显、带动效）。
 - 个人中心隐藏"Cookie 和统计设置"卡片。落实方式（总控定，非原话）：页脚"Cookie 设置"链接保留，供用户撤回统计同意。
 - 全站顶部公告横幅按 D 视觉重做，带动效，能长期放促销公告。
@@ -4362,6 +4362,8 @@ node scripts/plan-progress.mjs --ref origin/staging
 | | LANDING-ART | 首页视觉改用 D「晨光」、首屏放产品对话窗口、便签墙按 D 换，排在上线前，分两步：公共层加首屏，再逐区块（第 2.1 节 2026-11-11 三条） | PUBLIC-SITE（#1842） | 普通 | 中 / 2 | — |
 | | UX-FIX | 新用户走查（2026-11-11）发现的引导与文案问题：空状态、积分记录英文内部字样、退款说明、"欢迎回来"、开发用语、价格表、付费墙改开站内选会员、"未命名业务"、显示名，以及定位对话里资料库的说明文字 | — | 普通 | 中 / 3–4 | 阻塞：任务卡等 Owner 启动 |
 | | SIM-FLAKE | CI 模拟浏览器测试里开发服务器空闲后写编译缓存、卡顿 7–12 秒，导致"402 from the provider"用例偶发失败；只改测试环境，不放宽时限、不加重试（#1872） | — | 普通 | 小 / 1 | — |
+| | MOBILE-UX | 落地页和应用内页面按原生 App 交互重做手机端（底部导航、全屏页面切换、底部弹层、大点击区等），开工前先出方案由 Owner 定稿；上线前做（第 2.1 节 2026-10-23、2026-11-12） | 方案由 Owner 定稿；与 LANDING-ART、UI-UNIFY、PUBLISH-SCHEDULE 按页面排队改同一批文件 | 高 | 大 / 待方案 | — |
+| | PROFILE-AVATAR | 用户自定义头像：上传、裁剪、换头像删旧文件、注销时一起删；上线前做（第 2.1 节 2026-11-12） | — | 中（含注销清理和存储策略） | 小 / 2 | — |
 | **5 上线后** | INTEGRATION-BASE → V3-FEISHU、SOCIAL-SYNC | 沿用 v11 §8（C1 套餐式自动追踪已确认）。2026-10-13：SOCIAL-SYNC 并入 PUBLISH-MONITOR 上线前完成（第 2.1 节），本行只剩 INTEGRATION-BASE、V3-FEISHU | REL-1 上线 | 高 | 大 | SOCIAL-SYNC：关闭：2026-10-13 并入 PUBLISH-MONITOR 上线前完成 |
 | | ANALYTICS-POSTHOG | 用户归因（第 2.1 节 2026-10-21 决定）：接入 PostHog 云（美国区），跟随现有 Termly 同意状态，用于用户级来源、路径、漏斗和 AI 推荐流量归因；注销时同步删除该用户在 PostHog 的数据。拒绝同意后的匿名计数、注册时加问题、服务器事件、GA4 去留、录像范围等具体范围都只是总控建议，以开工前方案经 Owner 确认的为准 | 10-31 上线后第一周开工，冻结前不做；开工前先出方案；PostHog 账号和项目编号由 Owner 提供 | 中（含注销对接） | 中 / 待方案 | — |
 | | CHARGEBACK | 方向（Owner 2026-10-04，第 2.1 节第 51 项，[记录 W](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981381009)、[记录 X](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981808905)；**上线后任务，不阻塞上线**）：拒付最终判定输了，按商品分别处理：订阅按退款规则处理这一期（扣掉还没用完的积分、终止这份订阅以后的积分发放，是创始会员的立即结束创始身份，名额不放回）；微信一次性会员结束这一期，1 年期的终止以后按月发放的积分、扣掉这一期还没用完的积分（是创始会员的同样结束创始身份）；订阅和微信一次性会员被冻结的已发积分判输扣回、判赢解冻，不动其他来源（[记录 AC](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982525998)）；积分包扣回这个包里没用完的积分、判赢解冻，不动其他来源的积分（[记录 Z](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982115736)）；所有拒付都不自动接受，由 Owner 人工处理（[记录 Y](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982111397)）；赢了就解除 PAY-DISPUTE-GUARD 的冻结、恢复，按幂等处理（拒付期间被暂停的按月积分，判赢后按原发放日逐期补发，幂等，不改变原会员期限和发放日期，不延到原到期日之后）；订阅判赢后不自动恢复扣费，提醒用户自己重新订阅；判输时订阅终止（[记录 AD](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982615688)），具体由 CHARGEBACK 方案提出、Owner 批准；一键导出申诉材料（用收款核心的同意记录和订单、付款、Stripe 记录；PAY-EVIDENCE 已于 2026-10-19 决定不做，不采集付款 IP/设备证据）；限制同一人反复拒付；信用卡账单商户名（由 Waffo 控制）。续费和到期提醒归 PAY-NOTIFY，拒付事件接收和可撤回冻结归 PAY-DISPUTE-GUARD，上线前完成（2026-10-09 拆分）。拒付通知方式、举证截止日和手续费（每笔 $25）已由 [Waffo 2026-10-10 答复](https://github.com/Crnobog9527/GraylumAI_vercel/pull/752#issuecomment-6095292601)；开工前仍须向 Waffo 核实要交的材料和账单商户名。2026-10-12 补充：新订单改走 Stripe（MP 订单由 Stripe 作为记录商户处理拒付，大陆通道和钱包单笔由我们处理），上文 Waffo 的通知方式、手续费、材料和账单商户名只适用于旧 Waffo 订单；按 Stripe 的做法实施时由方案细化 | PAY-STRIPE-MP、PAY-NOTIFY、PAY-DISPUTE-GUARD；拒付材料和账单商户名核实（旧 Waffo 订单仍向 Waffo 核实） | 高 | 待实施方案细化 | — |
@@ -4369,8 +4371,6 @@ node scripts/plan-progress.mjs --ref origin/staging
 | | LEARN-2 | 第 6.3 节：读取用户数据和社媒作品数据、依赖数据使用同意（同上） | 有真实用户 / PUBLISH-MONITOR（2026-10-13 起取代 SOCIAL-SYNC） | 高 | 中 | — |
 | | LIB-EXT（资料库扩展） | 全文检索或 pgvector（2026-10-17：自由对话自动检索的基础检索提前到上线前，由 CHAT-AUTO-CONTEXT 负责；向量检索仍在这里）、音频和视频、Agent 看图、Google Drive / Notion 导入（PDF 和图片已于 2026-10-10 移入 LIB-DOCS，第 2.1 节，[#770 决定记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/770#issuecomment-6095169943)） | LIB-DOCS | 高 | 大 | 阻塞：上线后再做（第 2.1 节 2026-10-10、10-17） |
 | | I18N-EN | 产品英文版（第 2.1 节 2026-10-12 多语言决定）：产品界面英文化、语言切换提示条、英文 Skill 用户可见文字、英文网站页面（/en）；Skill 内核仍以简体中文为唯一原版。上线前只做 SKILL-I18N-HOOK 打底。 | REL-1 上线、SKILL-I18N-HOOK | 高 | 中 | — |
-| | MOBILE-UX | 落地页和应用内页面按原生 App 交互重做手机端（底部导航、全屏页面切换、底部弹层、大点击区等），开工前先出方案由 Owner 定稿；上线前做（第 2.1 节 2026-10-23、2026-11-12） | REL-1 | 高 | 待出方案 | — |
-| | PROFILE-AVATAR | 用户自定义头像：上传、裁剪、换头像删旧文件、注销时一起删；上线前做（第 2.1 节 2026-11-12） | REL-1 | 中 | 进行中 | — |
 | | VOICE-2 | **上线后**文风 2.0（Owner 2026-10-25）：按需检索 2–3 篇同类型不同话题旧稿做范例、导入自己账号的历史帖子、代码统计句长/开头/结构、生成后代码查雷同并只改雷同句、学习用户对稿子的修改、网盘连接用 Google Picker 方式；开工前先出方案由 Owner 定稿（第 2.1 节 2026-10-25） | VOICE、REL-1 | 中 | 上线后，待出方案 | 阻塞：上线后再做，开工前先出方案（第 2.1 节 2026-10-25） |
 | | CONTENT-CONVERSATION-2 | 从 CONTENT-CONVERSATION-DRIVEN 拆出的上线后部分（Owner 2026-10-26）：内容对话剩余 7 个 PR、"一窗口一选题"提醒、整理纪要（REL-1 第 1.3 节） | CONTENT-CONVERSATION-DRIVEN | 高 | 中 / 7 | 阻塞：上线后再做（第 2.1 节 2026-10-26） |
 | | ANALYTICS-GA4 | 从 ANALYTICS 拆出的 GA4 部分（Owner 2026-10-26，沿用 2026-10-13 决定：上线后第一周再定）：GA4 编号和密钥、付款与首次来源上报接 GA4、`paywall_view` 结果 | ANALYTICS | 普通 | 小 / 1 | 阻塞：上线后再做（第 2.1 节 2026-10-26） |
