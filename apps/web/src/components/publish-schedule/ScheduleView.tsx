@@ -27,12 +27,15 @@ import { ScheduleChangeDialog } from './ScheduleChangeDialog';
  */
 export function isNewUser(drafts: { isPending: boolean; error: unknown; data?: unknown }): boolean {
   if (drafts.isPending || drafts.error) return false;
-  const list = (drafts.data as { drafts?: Array<{ state?: string }> } | undefined)?.drafts;
-  return Array.isArray(list) && !list.some(draft => draft.state === 'published');
+  const list = (drafts.data as { drafts?: Array<{ state?: string; currentVersion?: number }> } | undefined)?.drafts;
+  // Confirmed as the positioning page counts it: published, or a revision of one that was published before.
+  return Array.isArray(list) && !list.some(draft => draft.state === 'published' || (draft.currentVersion ?? 0) > 0);
 }
 export function positioningHref(existing: ExistingPositioning): string {
   return existing.state === 'draft' ? `/app/positioning/${existing.draftId}` : '/app/positioning';
 }
+/** 继续定位 when a positioning is under way; 开始定位 when there is none yet (or while that is still being read). */
+export const positioningLabel = (existing: ExistingPositioning) => existing.state === 'draft' ? '继续定位' : '开始定位';
 
 const TONE: Record<string, string> = { waiting: 'var(--text-primary)', working: 'var(--text-secondary)',
   done: 'var(--color-success, var(--text-primary))', partial: 'var(--color-warning, var(--text-primary))',
@@ -51,6 +54,7 @@ export function ScheduleView() {
   const empty = !list.isPending && !list.error && entries.length === 0;
   const newUser = empty && isNewUser(drafts);
   const profiles = useProfileBusinesses(newUser);
+  const existing = existingPositioning(profiles.businesses, Boolean(profiles.error));
   const days = weekDays(start);
   const today = new Date();
   const refresh = () => { void utils.publishMonitor.schedule.list.invalidate(); };
@@ -70,8 +74,7 @@ export function ScheduleView() {
       </nav>
       {newUser ? <section aria-label="还没有排期" className="space-y-2 rounded-lg border p-4">
         <p className="text-sm">先完成定位、写好第一篇，就能在这里排期。</p>
-        <Button asChild><Link href={positioningHref(existingPositioning(profiles.businesses, Boolean(profiles.error)))}>
-          继续定位</Link></Button>
+        <Button asChild><Link href={positioningHref(existing)}>{positioningLabel(existing)}</Link></Button>
       </section> : <div className="space-y-1">
         {empty && <p className="text-sm">这周还没有安排。</p>}
         <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
