@@ -62,7 +62,8 @@ test.describe('User Extended Flows', () => {
       steps.push('Open subscription management and verify subscription cards');
       await page.getByRole('button', { name: '订阅管理' }).click();
       await expect(page.getByText('会员订阅')).toBeVisible({ timeout: 10000 });
-      await expect(page.getByText('积分加油包')).toBeVisible({ timeout: 10000 });
+      // The section heading is "积分包" (walkthrough item 10); other text on this page also contains 积分包, so match the heading exactly.
+      await expect(page.getByRole('heading', { name: '积分包', exact: true })).toBeVisible({ timeout: 10000 });
 
       steps.push('Open credits records and verify the overview');
       await page.getByRole('button', { name: '积分记录' }).click();
