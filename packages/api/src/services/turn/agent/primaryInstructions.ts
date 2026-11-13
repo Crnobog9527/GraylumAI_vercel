@@ -109,7 +109,7 @@ export const VOICE_HINT_INSTRUCTIONS=
   'their voice in [资料库 · 我的文风](/app/library?tab=voice) and write like them. Skip it if it was already said in this conversation.';
 /** voice-v3 lists only word-sized phrases: a longer "phrase" is a whole sentence of the samples and could be copied. */
 export const VOICE_PHRASE_MAX=12;
-/** VOICE-2 PR-2 (voice-v4): the code-computed writing stats as one line of numbers (VoiceStats, 0539). */
+/** VOICE-2 PR-2 (voice-v4): the code-computed writing stats as one line of numbers (VoiceStats, 0543). */
 export function voiceStatsLine(stats:VoiceStats):string {
   if(!stats.sentences)return '';
   const o=stats.openings,p=stats.perThousandChars;

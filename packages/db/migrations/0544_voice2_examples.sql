@@ -2,8 +2,8 @@
 -- All rights reserved. This code is proprietary and confidential.
 -- VOICE-2 PR-2 (文风 2.0; Owner 2026-11-14): when the model loads a writing Skill flagged "使用用户文风", that load's result also
 -- carries 2-3 short passages of the user's own past writing (the type they write most, topics the current message does not
--- name; picked by code from the labels 0539 saved, never by guessing what the message asks for), and the confirmed voice
--- carries the code-computed writing stats. Number 0540 from the controller.
+-- name; picked by code from the labels 0543 saved, never by guessing what the message asks for), and the confirmed voice
+-- carries the code-computed writing stats. Number 0544 from the controller (first 0540).
 --   * voice_profile_read: whole current definition plus stats and documents of the version (callers built before read only
 --     the profile).
 --   * voice_examples_read(a, vid, ids): the opening text (at most 2,000 characters of its first three segments) of up to 3 documents, only when vid is the

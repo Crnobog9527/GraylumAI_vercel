@@ -3,7 +3,7 @@ import type { VoiceDocumentLabel } from './profile';
 
 /*
  * VOICE-2 PR-2: the user's past pieces that go with a loaded writing Skill as voice examples, chosen by code from the labels the
- * voice version saved (0539), never from guessing what the message wants (ENGINEERING 6): they are added only when the model
+ * voice version saved (0543), never from guessing what the message wants (ENGINEERING 6): they are added only when the model
  * itself loads a Skill flagged "使用用户文风", in that load's result. Type: the kind the user writes most (their own documents
  * say what they write). Topic: never one the current message names, and topics differing from each other. At most three,
  * each cut to a short passage.
