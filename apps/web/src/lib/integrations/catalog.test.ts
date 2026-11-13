@@ -17,9 +17,10 @@ describe('integration modules', () => {
     }
   });
 
-  it('the copy carries no numbers of our own (no counts, prices or promises; Owner to confirm the wording)', () => {
+  it('the copy carries no amounts of our own (no digits, prices or quotas; the Owner confirmed the wording 2026-11-13)', () => {
     for (const module of INTEGRATIONS) {
-      for (const line of [module.tagline, ...module.features, ...module.whenToUse, ...(module.inGraylum ?? [])]) {
+      for (const line of [module.tagline, module.philosophy ?? '', ...module.features, ...module.whenToUse, ...(module.inGraylum ?? [])]) {
+        expect(line, line).not.toMatch(/[¥$￥]|元|美元|积分\s*[0-9一二三四五六七八九十百千万]|[0-9一二三四五六七八九十百千万]+\s*(?:元|积分|张免费)/);
         expect(line, line).not.toMatch(/[0-9０-９]/);
       }
     }
@@ -34,6 +35,13 @@ describe('integration modules', () => {
     expect(buy.searchParams.get('utm_content')).toBe('buy');
     expect(buy.pathname).toBe('/zh/pricing');
     expect(trackedLink('https://shotviva.com/zh', 'shotviva', 'view')).not.toContain('ref=graylum');
+  });
+
+  it('Shotviva\'s copy is the Owner\'s confirmed version (2026-11-13), word for word', () => {
+    const shotviva = INTEGRATIONS[0]!;
+    expect(shotviva.tagline).toBe('Shotviva 是一款为普通人和小商家打造的 AI 照片工作室：用手机拍下的真实照片，选一个模板，三步就能做出能直接用的商品图、菜品图和宣传图。');
+    expect(shotviva.philosophy).toBe('我们相信，好看的照片不该只属于会写提示词、会用专业软件的人。Shotviva 保留你拍下的真实主体，只帮你换光线、场景和风格；不用写任何提示词，先看到效果再动手。');
+    expect(shotviva.inGraylum?.[1]).toBe('Graylum 只保存你的 Shotviva 账号 ID；在对话里配图时，会把你的出图要求发给 Shotviva 生成。Graylum 拿不到你的 Shotviva 密码。');
   });
 
   it('the page says in plain words what came back from Shotviva', () => {

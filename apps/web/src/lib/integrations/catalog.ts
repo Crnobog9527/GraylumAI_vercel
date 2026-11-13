@@ -6,14 +6,15 @@
  * link that takes the user there, tracked). A module is configuration only; the page renders whatever is listed here.
  * Shotviva is the only one so far; the others are added here once the Owner gives their names and links.
  *
- * Wording: only what the product already says about itself (Shotviva: src/site/messages/zh.json), no numbers or promises
- * of our own. Pending the Owner's confirmation (listed in the PR).
+ * Wording: Shotviva's confirmed by the Owner on 2026-11-13; no amounts, prices or quotas of our own.
  */
 export type IntegrationModule = {
   id: string;
   name: string;
   /** One line under the name. */
   tagline: string;
+  /** The product's belief, under the one line (absent: none). */
+  philosophy?: string;
   /** What it does, in a few short lines. */
   features: readonly string[];
   /** When it is worth using or buying. */
@@ -31,7 +32,9 @@ export const INTEGRATIONS: readonly IntegrationModule[] = [
   {
     id: 'shotviva',
     name: 'Shotviva',
-    tagline: '保留真实照片细节，AI 一键出大片',
+    // Owner 2026-11-13 ("文案可以，就按这版改"): the one line, the belief and inGraylum's second line, word for word.
+    tagline: 'Shotviva 是一款为普通人和小商家打造的 AI 照片工作室：用手机拍下的真实照片，选一个模板，三步就能做出能直接用的商品图、菜品图和宣传图。',
+    philosophy: '我们相信，好看的照片不该只属于会写提示词、会用专业软件的人。Shotviva 保留你拍下的真实主体，只帮你换光线、场景和风格；不用写任何提示词，先看到效果再动手。',
     features: [
       '每个模板都保留你拍的主体，只换光线、场景或画风。',
       '商品图、美食图、宠物照等模板，选一个就能出图。',
@@ -44,7 +47,7 @@ export const INTEGRATIONS: readonly IntegrationModule[] = [
     ],
     inGraylum: [
       '连接后，在 Graylum 的对话里配图，直接用你的 Shotviva 积分生成，Graylum 不另外收费。',
-      'Graylum 只拿到你的 Shotviva 账号 ID 和剩余积分，拿不到密码，也拿不到别的信息。',
+      'Graylum 只保存你的 Shotviva 账号 ID；在对话里配图时，会把你的出图要求发给 Shotviva 生成。Graylum 拿不到你的 Shotviva 密码。',
       '随时可以在这里断开，也可以在 Shotviva 的账号页里断开。',
     ],
     viewUrl: 'https://shotviva.com/zh',

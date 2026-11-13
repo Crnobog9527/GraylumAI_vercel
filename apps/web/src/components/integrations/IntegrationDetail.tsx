@@ -17,6 +17,7 @@ export function IntegrationDetail({ module, open, onOpenChange, shotviva }: {
       <DialogContent className={styles.detail} aria-describedby={`${module.id}-tagline`}>
         <DialogTitle className={styles.detailTitle}>{module.name}</DialogTitle>
         <DialogDescription id={`${module.id}-tagline`} className={styles.tagline}>{module.tagline}</DialogDescription>
+        {module.philosophy && <p className={styles.philosophy}>{module.philosophy}</p>}
         <IntegrationDetailBody module={module} {...(shotviva ? { shotviva } : {})}/>
       </DialogContent>
     </Dialog>
