@@ -150,7 +150,7 @@ export async function voiceCases(t){
   assert.equal(await balance(a),settled);
   report.checks.push('voice: a repeated request is one turn and one charge; a result for another version is refused');
  }
- // 8. VOICE-2 PR-1 (0536): the code-computed stats and the documents' labels are saved with the profile, only for documents the
+ // 8. VOICE-2 PR-1 (0539): the code-computed stats and the documents' labels are saved with the profile, only for documents the
  // version read; a malformed label set or an unknown key is refused; an edit of the confirmed profile copies them; the user can
  // correct one document's label on their own version only.
  {

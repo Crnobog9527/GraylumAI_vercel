@@ -58,13 +58,30 @@ export function parseVoiceDocuments(answer: string, material: VoiceMaterial[]): 
       byFile.set((item as { file: number }).file, item as { type?: unknown; topics?: unknown });
     }
   }
-  return material.map((doc, index) => {
+  return capVoiceDocuments(material.map((doc, index) => {
     const item = byFile.get(index + 1);
     const type = VOICE_DOCUMENT_TYPES.find(known => known === item?.type) ?? 'other';
     const topics = Array.isArray(item?.topics) ? [...new Set(item.topics.filter((t): t is string => typeof t === 'string')
       .map(t => [...t.trim()].slice(0, 20).join('')).filter(Boolean))].slice(0, 5) : [];
     return { documentId: doc.documentId, type, topics };
-  });
+  }));
+}
+
+/** The database keeps at most 200 labels in at most 32 KB of jsonb text (0539). A corpus of many short posts can be read
+ * whole (60 KB of text is several hundred posts), so the labels are cut to fit before the close: the first 200 documents keep
+ * a label, and topics are dropped from the last ones until the text fits. A profile is never refused for its labels. */
+export const VOICE_LABELS_MAX = 200;
+/** Below the 32,768-byte column limit with room to spare: jsonb text adds a space after every ':' and ','. */
+export const VOICE_LABELS_BYTES = 28000;
+export const voiceLabelsBytes = (labels: readonly VoiceDocumentLabel[]) => {
+  const json = JSON.stringify(labels);
+  return Buffer.byteLength(json) + (json.match(/[:,]/g) ?? []).length;
+};
+export function capVoiceDocuments(labels: VoiceDocumentLabel[]): VoiceDocumentLabel[] {
+  const kept = labels.slice(0, VOICE_LABELS_MAX).map(label => ({ ...label, topics: [...label.topics] }));
+  for (let i = kept.length - 1; i >= 0 && voiceLabelsBytes(kept) > VOICE_LABELS_BYTES; i--) kept[i]!.topics = [];
+  while (kept.length && voiceLabelsBytes(kept) > VOICE_LABELS_BYTES) kept.pop();
+  return kept;
 }
 
 /** The user message: each document under its own heading, in the frozen order. */

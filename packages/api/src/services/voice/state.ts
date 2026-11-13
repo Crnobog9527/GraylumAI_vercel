@@ -8,7 +8,7 @@ export type VoiceVersion = { id: string; version: number;
   status: 'generating' | 'draft' | 'confirmed' | 'superseded' | 'stale' | 'failed';
   profile: VoiceProfile | null; failure: string | null; createdAt: string; confirmedAt: string | null;
   sources: Array<{ documentId: string; filename: string | null }>;
-  /** VOICE-2 PR-1 (0536): null/empty for versions made before. The page shows them from PR-4. */
+  /** VOICE-2 PR-1 (0539): null/empty for versions made before. The page shows them from PR-4. */
   stats?: VoiceStats | null; documents?: Array<VoiceDocumentLabel & { edited?: boolean }> };
 export type VoiceState = { enabled: boolean; revision: number; needsUpdate: boolean;
   confirmed: VoiceVersion | null; latest: VoiceVersion | null;

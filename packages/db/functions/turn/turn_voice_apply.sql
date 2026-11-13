@@ -10,8 +10,8 @@ CREATE OR REPLACE FUNCTION public.turn_voice_apply(t turns, p_kind text, p_resul
 AS $function$
 BEGIN
   -- {versionId, profile[, stats, documents]}: the profile the caller parsed and checked against the corpus (voice.ts); VOICE-2
-  -- (0536) adds the code-computed writing stats and each read document's type and topics. Nothing else is accepted; a caller
-  -- built before 0536 sends only the first two keys.
+  -- (0539) adds the code-computed writing stats and each read document's type and topics. Nothing else is accepted; a caller
+  -- built before 0539 sends only the first two keys.
   IF jsonb_typeof(p_result) IS DISTINCT FROM 'object' OR jsonb_typeof(p_result->'profile') IS DISTINCT FROM 'object'
     OR jsonb_typeof(p_result->'versionId') IS DISTINCT FROM 'string'
     OR EXISTS (SELECT 1 FROM jsonb_object_keys(p_result) k WHERE k NOT IN ('versionId','profile','stats','documents'))
