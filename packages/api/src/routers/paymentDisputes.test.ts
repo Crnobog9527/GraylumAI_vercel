@@ -40,12 +40,13 @@ it('denies non-admin withdrawal and listing before financial queries', async () 
     await expect(f.caller.list()).rejects.toMatchObject({ code });
     await expect(f.caller.withdraw({ disputeId: ID })).rejects.toMatchObject({ code });
     await expect(f.caller.resolveExternal({ disputeId: ID })).rejects.toMatchObject({ code });
+    await expect(f.caller.confirmLost({ disputeId: ID })).rejects.toMatchObject({ code });
     expect(f.calls).toEqual([]); expect(f.filters).toEqual([]);
   }
 });
 it('returns only a boolean notice scoped to the authenticated profile', async () => {
   const f = harness('user');
-  expect(await f.caller.notice()).toEqual({ frozen: true });
+  expect(await f.caller.notice()).toEqual({ frozen: true, lost: false });
   expect(f.filters).toContainEqual(['payment_orders.user_id', ACTOR]);
   expect(f.filters).toContainEqual(['freeze_state', 'frozen']);
   await expect(harness('anonymous').caller.notice()).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
@@ -81,4 +82,14 @@ it('passes admin identity to off-site resolution and safely reports a matched-pa
   expect(f.calls).toEqual([['pay_dispute_resolve_external', { p_actor: ACTOR, p_dispute: ID }]]);
   await expect(harness('admin', { message: 'private details' }).caller.resolveExternal({ disputeId: ID }))
     .rejects.toMatchObject({ message: '未能结案，请核实是否已有对应订单' });
+});
+
+it('passes the admin identity to the lost-dispute confirmation and hides database errors', async () => {
+  const f = harness('admin');
+  await f.caller.confirmLost({ disputeId: ID });
+  expect(f.calls).toEqual([['pay_dispute_confirm_lost', { p_actor: ACTOR, p_dispute: ID }]]);
+  await expect(f.caller.confirmLost({ disputeId: 'bad' })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+  const failed = harness('admin', { message: 'PAY_DISPUTE_NOT_LOST private details' });
+  await expect(failed.caller.confirmLost({ disputeId: ID }))
+    .rejects.toMatchObject({ message: '未能结案，请先在原支付渠道核实这笔拒付已判输' });
 });
