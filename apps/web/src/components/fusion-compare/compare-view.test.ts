@@ -27,6 +27,9 @@ describe('compare refusals in plain words', () => {
   it('maps known codes and never shows anything raw', () => {
     expect(compareErrorText({ message: 'FUSION_COMPARE_ACTIVE' })).toBe('上一个多模型任务还在进行，结束后再开始新的对比。');
     expect(compareErrorText({ message: 'relation "x" does not exist' })).toBe('多模型对比暂时出了点问题，请稍后再试。');
+    // FUSION-COMPARE: the 500-credit limit of one compare says so in words, and how to get under it.
+    expect(compareErrorText({ message: 'TURN_COMPARE_LIMIT' })).toContain('超过了单次 500 积分的上限');
+    expect(compareErrorText({ message: 'TURN_COMPARE_LIMIT' })).toContain('少选几个模型');
     expect(isUpgradeRefusal({ message: 'FUSION_COMPARE_FORBIDDEN' })).toBe(true);
     expect(isUpgradeRefusal({ message: 'FUSION_COMPARE_ACTIVE' })).toBe(false);
   });
@@ -54,13 +57,31 @@ describe('column phases (§3.5, §4.4)', () => {
 
 import { placeCompareCards } from './CompareThread';
 describe('compare cards in the transcript', () => {
-  it('sit after the last turn that started before them', () => {
-    const card = (id: string, createdAt: string) => ({ compareId: id, state: 'finished', createdAt });
-    const turns = [{ createdAt: '2026-10-23T10:00:00Z' }, { createdAt: '2026-10-23T10:05:00Z' }];
-    const placed = placeCompareCards([card('a', '2026-10-23T09:00:00Z'), card('b', '2026-10-23T10:01:00Z'), card('c', '2026-10-23T11:00:00Z')], turns);
-    expect(placed.get(-1)?.map(c => c.compareId)).toEqual(['a']);
-    expect(placed.get(0)?.map(c => c.compareId)).toEqual(['b']);
-    expect(placed.get(1)?.map(c => c.compareId)).toEqual(['c']);
+  const card = (id: string, turnId?: number) => ({ compareId: id, state: 'finished', createdAt: '2026-10-23T10:00:00Z',
+    ...(turnId === undefined ? {} : { turnId }) });
+  // The order the page shows: replies with each card before the reply it is keyed to, the rest after the last reply.
+  const order = (cards: ReturnType<typeof card>[], replies: Array<{ turnId: number | null }>) => {
+    const placed = placeCompareCards(cards, replies);
+    return [...replies.flatMap((reply, index) => [...(placed.get(index) ?? []).map(c => c.compareId), `turn ${reply.turnId}`]),
+      ...(placed.get(replies.length) ?? []).map(c => c.compareId)];
+  };
+
+  it('FUSION-COMPARE: a refreshed compare sits where it was asked, before its adopted answer and the follow-up, not at the bottom', () => {
+    // Turn 10 asked first, compare turn 11 (its adopted question and answer are saved under turn 11), then follow-up turn 12.
+    expect(order([card('cmp', 11)], [{ turnId: 10 }, { turnId: 11 }, { turnId: 12 }])).toEqual(['turn 10', 'cmp', 'turn 11', 'turn 12']);
+    // Not adopted: the follow-up still comes after it.
+    expect(order([card('cmp', 11)], [{ turnId: 10 }, { turnId: 12 }])).toEqual(['turn 10', 'cmp', 'turn 12']);
+    // A compare as the first thing in the conversation, and two compares in a row.
+    expect(order([card('a', 1), card('b', 2)], [{ turnId: 3 }])).toEqual(['a', 'b', 'turn 3']);
+  });
+
+  it('the same order before and after a refresh: a compare just started (no turn listed yet) and the newest one go last', () => {
+    const live = order([card('old', 11), card('new')], [{ turnId: 10 }, { turnId: 12 }]);
+    const refreshed = order([card('old', 11), card('new', 13)], [{ turnId: 10 }, { turnId: 12 }]);
+    expect(live).toEqual(['turn 10', 'old', 'turn 12', 'new']);
+    expect(refreshed).toEqual(live);
+    // A reply without a turn (an older saved message) is never a place to put a card before.
+    expect(order([card('cmp', 5)], [{ turnId: null }, { turnId: 6 }])).toEqual(['turn null', 'cmp', 'turn 6']);
   });
 });
 
