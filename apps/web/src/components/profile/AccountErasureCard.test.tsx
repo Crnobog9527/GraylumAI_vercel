@@ -8,7 +8,6 @@ const pass = vi.hoisted(() => ({ children }: { children?: unknown }) => children
 vi.mock('@/components/ui/dialog', () => ({
   Dialog: pass, DialogContent: pass, DialogDescription: pass, DialogFooter: pass, DialogHeader: pass, DialogTitle: pass,
 }));
-vi.mock('@/components/auth/DialogCaptcha', () => ({ DialogCaptcha: () => null }));
 vi.mock('@/hooks/use-account-erasure', () => ({ useAccountErasure: () => state.erasure }));
 
 import { AccountErasureCard } from './AccountErasureCard';
@@ -68,7 +67,7 @@ describe('AccountErasureCard impact step', () => {
 describe('AccountErasureCard verify step by sign-in method (deep review 11-11 item 3)', () => {
   const verify = (auth_provider: string) => {
     state.erasure = { open: true, step: 'verify', busy: false, error: null, preview: facts, previewLoading: false,
-      previewFailed: false, setOpen: vi.fn(), setStep: vi.fn(), openPortal: vi.fn(), captchaKey: 0 };
+      previewFailed: false, setOpen: vi.fn(), setStep: vi.fn(), openPortal: vi.fn() };
     return renderToStaticMarkup(createElement(AccountErasureCard, { user: { id: 'u', email: 'fixture@example.test', auth_provider } }));
   };
 

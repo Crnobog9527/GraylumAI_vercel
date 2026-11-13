@@ -41,7 +41,8 @@ describe('security response headers', () => {
     expect(csp).toContain("object-src 'none'");
     expect(csp).toContain('https://*.supabase.co');
     expect(csp).toContain('wss://*.supabase.co');
-    expect(csp).toContain('https://*.hcaptcha.com');
+    expect(csp).not.toContain('hcaptcha'); // BOT-GUARD: no captcha script, frame or call
+    expect(csp).not.toContain('frame-src');
     expect(csp).toContain('https://*.ingest.sentry.io');
     expect(csp).toContain("font-src 'self'");
     expect(csp).toContain("worker-src 'self' blob:");

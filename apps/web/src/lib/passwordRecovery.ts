@@ -22,7 +22,6 @@ export const RESET_EMAIL_SENT_MESSAGE =
 // Seconds the request button stays disabled after a request, so one page does not hit the limit.
 export const RESET_REQUEST_COOLDOWN_SECONDS = 60;
 
-export const RESET_CAPTCHA_FAILED_MESSAGE = '人机验证没有通过，请重试。';
 export const RESET_RATE_LIMIT_MESSAGE = '请求太频繁，请稍后再试。';
 export const RESET_NETWORK_MESSAGE = '网络异常，请检查网络后重试。';
 export const RESET_INVALID_EMAIL_MESSAGE = '邮箱格式不正确，请检查后重试。';
@@ -51,7 +50,6 @@ function accountIndependentFailure(error: unknown): string | null {
   const code = errorCode(error);
   const status = errorStatus(error);
   if (typeof status === 'number' && status >= 500) return null;
-  if (code === 'captcha_failed') return RESET_CAPTCHA_FAILED_MESSAGE;
   if (code === 'over_request_rate_limit' || (status === 429 && !code)) return RESET_RATE_LIMIT_MESSAGE;
   if (code === 'validation_failed' || code === 'email_address_invalid') return RESET_INVALID_EMAIL_MESSAGE;
   if (status === 0 || error instanceof TypeError) return RESET_NETWORK_MESSAGE;

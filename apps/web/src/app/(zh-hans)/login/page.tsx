@@ -16,7 +16,6 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { trpc } from '@/trpc/client';
-import { invisibleCaptchaOptions } from '@/lib/invisibleCaptcha';
 import { signUpAfterRegistration } from '@/lib/signupRequest';
 import { AuthStatusBanner, type AuthStatus } from '@/components/auth/AuthStatusBanner';
 import { AuthRedirectNotice } from '@/components/auth/AuthRedirectNotice';
@@ -105,21 +104,11 @@ export function LoginPageContent() {
     setPendingAction('login');
     setStatus(null);
 
-    let captchaOptions: Awaited<ReturnType<typeof invisibleCaptchaOptions>>;
-    try {
-      captchaOptions = await invisibleCaptchaOptions();
-    } catch (error) {
-      setStatus({ tone: 'error', message: getSafeErrorMessage(error, '人机验证未完成，请重试。') });
-      setPendingAction(null);
-      return;
-    }
-
     rememberPendingEmail(email); // read by /verify-email, never put in a URL
     const supabase = createClient();
     const { data, error } = await supabase.auth.signInWithPassword({
       email,
       password,
-      options: captchaOptions,
     });
 
     if (error) {
@@ -149,14 +138,6 @@ export function LoginPageContent() {
 
     const supabase = createClient();
     const emailRedirectTo = getEmailConfirmRedirect(redirectTarget);
-    let captchaOptions: Awaited<ReturnType<typeof invisibleCaptchaOptions>>;
-    try {
-      captchaOptions = await invisibleCaptchaOptions();
-    } catch (error) {
-      setStatus({ tone: 'error', message: getSafeErrorMessage(error, '人机验证未完成，请重试。') });
-      setPendingAction(null);
-      return;
-    }
 
     // BOT-GUARD: register with our server first; Supabase's Before User Created hook refuses sign-ups that skipped it.
     const attempt = await signUpAfterRegistration(email, address => supabase.auth.signUp({
@@ -164,7 +145,6 @@ export function LoginPageContent() {
       password,
       options: {
         emailRedirectTo,
-        ...captchaOptions,
         data: {
           nickname: nickname.trim() || undefined,
           display_name: nickname.trim() || undefined,

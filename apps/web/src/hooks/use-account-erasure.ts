@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from 'react';
 import { trpc } from '@/trpc/client';
 import { createClient } from '@/lib/supabase';
 import { sendPhoneReauthCode, verifyPhoneReauth } from '@/lib/phoneReauth';
-import { CAPTCHA_EXPIRED_MESSAGE, captchaOptionsFromToken } from '@/lib/dialogCaptcha';
 import {
   OAUTH_REAUTH_MESSAGES, OAUTH_REAUTH_PARAM, OAUTH_REAUTH_VALUE, oauthReauthRedirect, rememberOAuthReauth,
   takeOAuthReauth, withoutOAuthReauthParam,
@@ -39,8 +38,6 @@ export function useAccountErasure(options: { email?: string; usesPassword: boole
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [codeSentAt, setCodeSentAt] = useState<number | null>(null);
-  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
-  const [captchaKey, setCaptchaKey] = useState(0);
   const requestId = useRef<string | null>(null);
   const [openedAt, setOpenedAt] = useState(0);
   const preview = trpc.account.erasurePreview.useQuery(undefined, { enabled: open, staleTime: 0 });
@@ -74,7 +71,6 @@ export function useAccountErasure(options: { email?: string; usesPassword: boole
     setStep('impact');
     setSecret('');
     setError(null);
-    setCaptchaToken(null);
     // One idempotency key per dialog session; a retry of the same confirm reuses it.
     requestId.current = nextOpen ? crypto.randomUUID() : null;
     if (nextOpen) setOpenedAt(Date.now());
@@ -90,21 +86,13 @@ export function useAccountErasure(options: { email?: string; usesPassword: boole
     }
   };
 
-  // Single use: read the token, then drop it and remount the widget before the attempt runs.
-  const takeCaptcha = () => {
-    const captcha = captchaOptionsFromToken(captchaToken);
-    setCaptchaToken(null);
-    setCaptchaKey((key) => key + 1);
-    return captcha;
-  };
-
   const sendCode = () => run(async () => {
     if (codeSentAt && Date.now() - codeSentAt < CODE_COOLDOWN_SECONDS * 1000) {
       return setError(`验证码已发送，请 ${CODE_COOLDOWN_SECONDS} 秒后再重新发送。`);
     }
-    const failure = await sendPhoneReauthCode(createClient(), takeCaptcha().captchaToken);
+    const failure = await sendPhoneReauthCode(createClient());
     return failure ? setError(failure) : setCodeSentAt(Date.now());
-  }).catch(() => setError('请完成人机验证后重试。'));
+  }).catch(() => setError('验证码没有发出去，请稍后重试。'));
 
   // Leaves the page for Google; the account chooser opens on this account's address. Back on the profile page the
   // effect above takes the note. The server still requires the new sign-in to be recent (accountErasure/reauth.ts).
@@ -131,12 +119,12 @@ export function useAccountErasure(options: { email?: string; usesPassword: boole
     if (!options.usesPassword) return;
     if (!options.email || !secret.trim()) return setError('请输入当前密码。');
     const { error: verifyError } = await createClient().auth.signInWithPassword({
-      email: options.email, password: secret, options: takeCaptcha(),
+      email: options.email, password: secret,
     });
     if (verifyError) return setError('密码验证失败，请重新输入。');
     setSecret('');
     setStep('confirm');
-  }).catch(() => setError('请完成人机验证后重试。'));
+  }).catch(() => setError('验证没有完成，请稍后重试。'));
 
   const confirm = () => run(async () => {
     try {
@@ -168,8 +156,6 @@ export function useAccountErasure(options: { email?: string; usesPassword: boole
     preview: settledPreview(preview, openedAt),
     previewLoading: preview.fetchStatus !== 'idle',
     previewFailed: Boolean(preview.error) && !preview.isFetching,
-    captchaKey, setCaptchaToken, captchaExpired: () => setError(CAPTCHA_EXPIRED_MESSAGE),
-    captchaUnavailable: () => setError('人机验证暂不可用，请稍后重试。'),
     setOpen: reset, setStep, setSecret, sendCode, verify, reauthWithGoogle, confirm, openPortal,
   };
 }

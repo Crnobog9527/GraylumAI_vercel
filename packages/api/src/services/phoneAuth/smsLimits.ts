@@ -31,7 +31,7 @@ export function authorizeSmsSend(db: Rpc, key: string): Promise<SmsLimitStatus> 
   return call(db, 'sms_authorize_send', { p_phone_key: key });
 }
 
-/** Supabase refused before the hook ran (failed hCaptcha, its own limit): the request no longer counts. */
+/** Supabase refused before the hook ran (its own limit): the request no longer counts. */
 export async function releaseSmsSend(db: Rpc, key: string): Promise<void> {
   const { error } = await db.rpc('sms_release_send', { p_phone_key: key });
   if (error) throw new SmsLimitError('sms_release_send');

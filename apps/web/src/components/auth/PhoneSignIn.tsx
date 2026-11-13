@@ -33,7 +33,7 @@ export function AuthMethodTabs({ value, onChange }: { value: AuthMethod; onChang
 }
 
 /**
- * Mainland phone sign-in (PHONE-OTP, Owner 2026-11-07): +86 number and the two separate PIPL boxes → invisible hCaptcha →
+ * Mainland phone sign-in (PHONE-OTP, Owner 2026-11-07): +86 number and the two separate PIPL boxes →
  * six-digit code (5 minutes) → signed in; a new number becomes an account. No password. `submitLabel`: 登录 or 创建账户.
  */
 export function PhoneSignIn({ redirectTarget, submitLabel, ready }: { redirectTarget: string; submitLabel: string; ready: boolean }) {

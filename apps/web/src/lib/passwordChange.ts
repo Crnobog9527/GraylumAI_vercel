@@ -1,5 +1,3 @@
-import type { AuthCaptchaOptions } from '@/lib/authCaptcha';
-import { getSafeErrorMessage } from '@/lib/safe-error-message';
 import { classifyPasswordUpdateError, validateNewPassword } from '@/lib/passwordRecovery';
 
 // Changing the password while signed in (profile security card). Owner 2026-10-01: accounts linked
@@ -35,12 +33,7 @@ export function passwordChangeEntry(user: { email?: string; auth_provider?: stri
 export type PasswordChangeForm = { current: string; next: string; confirm: string };
 
 export type PasswordChangeDeps = {
-  captcha: () => Promise<AuthCaptchaOptions>;
-  signInWithPassword: (credentials: {
-    email: string;
-    password: string;
-    options: AuthCaptchaOptions;
-  }) => Promise<{ error: unknown }>;
+  signInWithPassword: (credentials: { email: string; password: string }) => Promise<{ error: unknown }>;
   updatePassword: (password: string) => Promise<{ error: unknown }>;
 };
 
@@ -61,10 +54,6 @@ function isUnanswered(error: unknown) {
     || typeof status !== 'number';
 }
 
-function errorCode(error: unknown) {
-  return error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : '';
-}
-
 function errorStatus(error: unknown) {
   return error && typeof error === 'object' && 'status' in error ? error.status : null;
 }
@@ -72,7 +61,6 @@ function errorStatus(error: unknown) {
 function reauthFailureMessage(error: unknown) {
   const status = errorStatus(error);
   const name = error && typeof error === 'object' && 'name' in error ? error.name : null;
-  if (errorCode(error) === 'captcha_failed') return '人机验证没有通过，请重试。';
   if (status === 429) return '操作太频繁，请稍后再试。';
   // auth-js reports a failed request as status 0 and gateway errors (502/503/504/520-524/530) as
   // AuthRetryableFetchError; a call that throws instead is no answer either.
@@ -95,14 +83,7 @@ export async function changePasswordWithReauth(
   if (invalid) return { ok: false, message: invalid };
   if (!email) return { ok: false, message: '当前会话缺少邮箱信息，无法修改密码。' };
 
-  let captchaOptions: AuthCaptchaOptions;
-  try {
-    captchaOptions = await deps.captcha();
-  } catch (error) {
-    return { ok: false, message: getSafeErrorMessage(error, '人机验证未完成，请重试。') };
-  }
-
-  const reauth = await deps.signInWithPassword({ email, password: form.current, options: captchaOptions })
+  const reauth = await deps.signInWithPassword({ email, password: form.current })
     .catch(error => ({ error }));
   if (reauth.error) return { ok: false, message: reauthFailureMessage(reauth.error) };
 

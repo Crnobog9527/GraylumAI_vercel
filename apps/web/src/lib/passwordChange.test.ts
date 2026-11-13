@@ -37,7 +37,6 @@ const depsFor = (account: Account) => {
       : { error: Object.assign(new Error('Invalid login credentials'), { code: 'invalid_credentials', status: 400 }) }
   ));
   const deps = {
-    captcha: vi.fn(async () => ({ captchaToken: 'token' })),
     signInWithPassword,
     updatePassword: vi.fn(async () => ({ error: null as unknown })),
   };
@@ -72,7 +71,7 @@ describe('changePasswordWithReauth', () => {
     const deps = depsFor(account);
     expect(await changePasswordWithReauth(deps, 'a@example.test', form())).toEqual({ ok: true });
     expect(deps.signInWithPassword).toHaveBeenCalledWith({
-      email: 'a@example.test', password: CURRENT, options: { captchaToken: 'token' },
+      email: 'a@example.test', password: CURRENT,
     });
     expect(deps.updatePassword).toHaveBeenCalledExactlyOnceWith('new-password-1');
   });
@@ -94,23 +93,18 @@ describe('changePasswordWithReauth', () => {
     expect(deps.updatePassword).not.toHaveBeenCalled();
   });
 
-  it('checks the form before any human check or sign-in', async () => {
+  it('checks the form before any sign-in', async () => {
     const deps = depsFor(accounts.emailOnly);
     expect(await changePasswordWithReauth(deps, 'a@example.test', { current: '', next: 'x', confirm: 'x' }))
       .toEqual({ ok: false, message: '请完整填写当前密码和新密码。' });
     expect(await changePasswordWithReauth(deps, 'a@example.test', { current: CURRENT, next: 'short', confirm: 'short' }))
       .toEqual({ ok: false, message: '新密码至少需要 8 位字符。' });
     expect(await changePasswordWithReauth(deps, undefined, form())).toMatchObject({ ok: false });
-    expect(deps.captcha).not.toHaveBeenCalled();
     expect(deps.signInWithPassword).not.toHaveBeenCalled();
   });
 
-  it('stops at a failed human check, a refused token or too many attempts', async () => {
+  it('stops at too many attempts', async () => {
     const deps = depsFor(accounts.emailOnly);
-    deps.captcha.mockRejectedValueOnce(new Error('人机验证已取消，请重试。'));
-    expect(await changePasswordWithReauth(deps, 'a@example.test', form())).toEqual({ ok: false, message: '人机验证已取消，请重试。' });
-    deps.signInWithPassword.mockResolvedValueOnce({ error: Object.assign(new Error('raw'), { code: 'captcha_failed', status: 400 }) });
-    expect(await changePasswordWithReauth(deps, 'a@example.test', form())).toEqual({ ok: false, message: '人机验证没有通过，请重试。' });
     deps.signInWithPassword.mockResolvedValueOnce({ error: Object.assign(new Error('raw'), { code: 'over_request_rate_limit', status: 429 }) });
     expect(await changePasswordWithReauth(deps, 'a@example.test', form())).toEqual({ ok: false, message: '操作太频繁，请稍后再试。' });
     expect(deps.updatePassword).not.toHaveBeenCalled();
@@ -170,7 +164,6 @@ describe('an update whose answer is lost', () => {
   const gotrue = (lose: () => Promise<{ error: unknown }>) => {
     const server = { password: CURRENT };
     const deps = {
-      captcha: vi.fn(async () => ({ captchaToken: 'token' })),
       signInWithPassword: vi.fn<PasswordChangeDeps['signInWithPassword']>(async ({ password }) => (
         password === server.password ? { error: null } : invalid()
       )),
@@ -207,10 +200,9 @@ describe('an update whose answer is lost', () => {
     expect(retry.ok ? '' : retry.message).not.toMatch(/验证失败|不能和原来的密码相同/);
     expect(deps.updatePassword).toHaveBeenCalledTimes(1);
     expect(deps.signInWithPassword).toHaveBeenCalledTimes(1);
-    expect(deps.captcha).toHaveBeenCalledTimes(1);
     // What the text advises works: the new password signs in, the old one does not.
-    expect((await deps.signInWithPassword({ email: 'a@example.test', password: 'new-password-1', options: {} })).error).toBeNull();
-    expect((await deps.signInWithPassword({ email: 'a@example.test', password: CURRENT, options: {} })).error).toBeTruthy();
+    expect((await deps.signInWithPassword({ email: 'a@example.test', password: 'new-password-1' })).error).toBeNull();
+    expect((await deps.signInWithPassword({ email: 'a@example.test', password: CURRENT })).error).toBeTruthy();
   });
 
   it('keeps answered failures retryable', async () => {

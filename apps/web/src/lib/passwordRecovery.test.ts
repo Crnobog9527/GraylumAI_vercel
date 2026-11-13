@@ -18,7 +18,6 @@ import {
   readAccessTokenClaims,
   RECOVERY_SESSION_MAX_AGE_SECONDS,
   recoveryTimestamp,
-  RESET_CAPTCHA_FAILED_MESSAGE,
   RESET_EMAIL_SENT_MESSAGE,
   RESET_INVALID_EMAIL_MESSAGE,
   RESET_NETWORK_MESSAGE,
@@ -91,7 +90,6 @@ describe('reset request outcome', () => {
   });
 
   it.each([
-    ['the human check', authError('captcha_failed', 400), RESET_CAPTCHA_FAILED_MESSAGE],
     ['the per-visitor request limit', authError('over_request_rate_limit', 429), RESET_RATE_LIMIT_MESSAGE],
     ['a 429 without code', { status: 429 }, RESET_RATE_LIMIT_MESSAGE],
     ['a malformed address', authError('validation_failed', 400), RESET_INVALID_EMAIL_MESSAGE],
@@ -142,8 +140,6 @@ describe('reset request outcome for real SDK responses', () => {
     expect(noResponse.outcome).toEqual({ tone: 'error', message: RESET_NETWORK_MESSAGE, cooldownSeconds: 0 });
     expect((await outcomeFor(json(429, { code: 'over_request_rate_limit', message: 'x' }))).outcome)
       .toEqual({ tone: 'error', message: RESET_RATE_LIMIT_MESSAGE, cooldownSeconds: 0 });
-    expect((await outcomeFor(json(400, { code: 'captcha_failed', message: 'x' }))).outcome)
-      .toEqual({ tone: 'error', message: RESET_CAPTCHA_FAILED_MESSAGE, cooldownSeconds: 0 });
   });
 });
 
