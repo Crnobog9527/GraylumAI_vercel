@@ -6,6 +6,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { ArrowLeft, Loader2, CheckCircle, Clock, Send, Image as ImageIcon } from 'lucide-react';
 import { trpc } from '@/trpc/client';
 import { statusLabels, statusColors, categoryMap, type MockUser, type Ticket } from './ticketsShared';
+// Phones only (639px and below): the app-style layout of the ticket pages; a computer is unchanged.
+import phone from './tickets-phone.module.css';
 
 // 工单详情视图
 export const TicketDetailView = memo(function TicketDetailView({
@@ -57,7 +59,7 @@ export const TicketDetailView = memo(function TicketDetailView({
     <div className="space-y-6" data-testid="ticket-detail-view">
       {/* Header with Back Button */}
       <div
-        className="rounded-2xl p-6"
+        className={`rounded-2xl p-6 ${phone.card}`}
         style={{
           background: 'var(--bg-secondary)',
           border: '1px solid var(--border-primary)',
@@ -67,14 +69,14 @@ export const TicketDetailView = memo(function TicketDetailView({
         <Button
           variant="ghost"
           onClick={onBack}
-          className="mb-4 -ml-2"
+          className={`mb-4 -ml-2 ${phone.back}`}
           style={{ color: 'var(--text-secondary)' }}
         >
           <ArrowLeft className="h-4 w-4 mr-2" />
           返回工单列表
         </Button>
 
-        <div className="flex items-start justify-between gap-4 mb-4">
+        <div className={`flex items-start justify-between gap-4 mb-4 ${phone.detailHead}`}>
           <div className="flex-1">
             <div className="flex items-center gap-3 mb-2 flex-wrap">
               <span className="text-sm font-mono" style={{ color: 'var(--text-tertiary)' }}>
@@ -105,6 +107,7 @@ export const TicketDetailView = memo(function TicketDetailView({
               onClick={handleCloseTicket}
               disabled={closeMutation.isPending}
               size="sm"
+              className={phone.closeTicket}
               style={{
                 background: 'linear-gradient(135deg, #22C55E 0%, #16A34A 100%)',
                 color: 'white'
@@ -159,7 +162,7 @@ export const TicketDetailView = memo(function TicketDetailView({
 
       {/* Replies */}
       <div
-        className="rounded-2xl p-6"
+        className={`rounded-2xl p-6 ${phone.card}`}
         style={{
           background: 'var(--bg-secondary)',
           border: '1px solid var(--border-primary)',
@@ -250,7 +253,7 @@ export const TicketDetailView = memo(function TicketDetailView({
 
         {/* Reply Form */}
         {ticket.status !== 'closed' && (
-          <form onSubmit={handleReplySubmit} className="mt-6 pt-6" style={{ borderTop: '1px solid var(--border-primary)' }}>
+          <form onSubmit={handleReplySubmit} className={`mt-6 pt-6 ${phone.reply}`} style={{ borderTop: '1px solid var(--border-primary)' }}>
             <Textarea
               placeholder="输入您的回复..."
               value={replyMessage}
@@ -266,7 +269,7 @@ export const TicketDetailView = memo(function TicketDetailView({
               <Button
                 type="submit"
                 disabled={replyMutation.isPending || !replyMessage.trim()}
-                className="gap-2"
+                className={`gap-2 ${phone.send}`}
                 style={{
                   background: 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%)',
                   color: 'var(--bg-primary)'

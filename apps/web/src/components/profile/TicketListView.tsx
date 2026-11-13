@@ -5,6 +5,8 @@ import { Button } from '@/components/ui/button';
 import { Plus, AlertCircle, Inbox, Archive, Loader2 } from 'lucide-react';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 import { statusLabels, statusColors, categoryMap, type Ticket } from './ticketsShared';
+// Phones only (639px and below): the app-style layout of the ticket pages; a computer is unchanged.
+import phone from './tickets-phone.module.css';
 
 // 工单列表视图
 export const TicketListView = memo(function TicketListView({
@@ -33,20 +35,20 @@ export const TicketListView = memo(function TicketListView({
 
   return (
     <div
-      className="rounded-2xl p-6"
+      className={`rounded-2xl p-6 ${phone.card}`}
       style={{
         background: 'var(--bg-secondary)',
         border: '1px solid var(--border-primary)',
         boxShadow: '0 4px 20px rgba(0,0,0,0.2)'
       }}
     >
-      <div className="flex items-center justify-between mb-6">
+      <div className={`flex items-center justify-between mb-6 ${phone.head}`}>
         <h3 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>我的工单</h3>
         <Button
           data-testid="ticket-create-button"
           onClick={onCreateNew}
           size="sm"
-          className="gap-2"
+          className={`gap-2 ${phone.createButton}`}
           style={{
             background: 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%)',
             color: 'var(--bg-primary)'
@@ -58,10 +60,10 @@ export const TicketListView = memo(function TicketListView({
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-2 mb-6">
+      <div className={`flex gap-2 mb-6 ${phone.tabs}`}>
         <button
           onClick={() => setActiveTab('active')}
-          className={'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium '
+          className={`${phone.tab} flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium `
             + 'transition-[background-color,border-color,color] duration-200 motion-reduce:transition-none'}
           style={{
             background: activeTab === 'active' ? 'rgba(255, 215, 0, 0.1)' : 'transparent',
@@ -82,7 +84,7 @@ export const TicketListView = memo(function TicketListView({
         </button>
         <button
           onClick={() => setActiveTab('closed')}
-          className={'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium '
+          className={`${phone.tab} flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium `
             + 'transition-[background-color,border-color,color] duration-200 motion-reduce:transition-none'}
           style={{
             background: activeTab === 'closed' ? 'rgba(255, 215, 0, 0.1)' : 'transparent',
@@ -155,7 +157,7 @@ export const TicketListView = memo(function TicketListView({
                 // The border is a class, not an inline style (an inline border would override the hover colour), and both
                 // colours are `!` (important): globals.css sets `* { border-color }` outside any @layer, which beats every
                 // border-colour utility, so without it neither the list colour nor the hover colour applies.
-                className={'p-4 rounded-xl cursor-pointer transition-[border-color,transform,box-shadow] duration-200 '
+                className={`${phone.item} p-4 rounded-xl cursor-pointer transition-[border-color,transform,box-shadow] duration-200 `
                   + 'motion-reduce:transition-none border border-[var(--border-primary)]! hover:translate-x-1 '
                   + 'hover:border-[rgba(255,215,0,0.3)]! hover:shadow-[0_8px_24px_rgba(0,0,0,0.18)]'}
                 style={{ background: 'var(--bg-primary)' }}
