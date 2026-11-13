@@ -5,13 +5,16 @@
 // cream ground, so most of it could not be read; and there was no mark of the product. So: every line of words is read against
 // what is behind it, in each of the four states; the mark is a picture that loaded; on a phone it is a sheet with its head and
 // its link in place while the middle scrolls. Owner 2026-11-13, on staging: only 去查看 at the foot (no 去购买), and the
-// introduction said by Shotviva's sample pictures before words. INTEGRATION_SHOTS=<dir> saves a screenshot of each state.
+// introduction said by Shotviva's sample pictures before words. Third look, the same day: both kinds of credits by name; a
+// photo and its result for each kind of use; and "要保证手机版的性能": a picture is asked for only when it comes into view.
+// INTEGRATION_SHOTS=<dir> saves a screenshot of each state.
 import { mkdirSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import tailwind from '@tailwindcss/postcss';
 import { chromium, expect as ui, type Browser, type Page } from '@playwright/test';
 import { afterAll, beforeAll, expect, it } from 'vitest';
+import { INTEGRATIONS } from '@/lib/integrations/catalog';
 
 let browser: Browser;
 let html = '';
@@ -76,10 +79,12 @@ beforeAll(async () => {
 afterAll(async () => { await browser?.close(); }, 30000);
 
 /** The integrations page with Shotviva in the given state, and its introduction opened from its card. */
-async function open(state: StateName, width: number, height = 780): Promise<{ page: Page; errors: string[] }> {
+async function open(state: StateName, width: number, height = 780): Promise<{ page: Page; errors: string[]; asked: string[] }> {
   const page = await browser.newPage({ viewport: { width, height } });
   page.setDefaultTimeout(8000);
   const errors: string[] = [];
+  /** The sample pictures the page has asked the server for, in order. */
+  const asked: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.route('**/*', route => {
     const path = new URL(route.request().url()).pathname;
@@ -89,20 +94,25 @@ async function open(state: StateName, width: number, height = 780): Promise<{ pa
       return route.fulfill({ contentType: 'image/png', body: readFileSync(PUBLIC + path) });
     }
     // Shotviva's sample pictures, the same way.
-    if (/^\/integrations\/shotviva\/[a-z-]+\.webp$/.test(path)) return route.fulfill({ contentType: 'image/webp', body: readFileSync(PUBLIC + path) });
+    if (/^\/integrations\/shotviva\/[a-z-]+\.webp$/.test(path)) {
+      asked.push(path.slice('/integrations/shotviva/'.length, -'.webp'.length));
+      return route.fulfill({ contentType: 'image/webp', body: readFileSync(PUBLIC + path) });
+    }
     return route.abort();
   });
   const status = state === 'loading' ? { data: undefined, isLoading: true } : state === 'failed' ? { data: undefined, isLoading: false }
     : { data: STATES[state], isLoading: false };
   await page.addInitScript(value => { (window as unknown as { __status: unknown }).__status = value; }, status);
   await page.goto('https://app.test/app/integrations');
+  // Nothing of the introduction is fetched for a page whose card has not been opened.
+  expect(asked).toEqual([]);
   await page.getByRole('button', { name: /Shotviva/ }).click();
   const dialog = page.getByRole('dialog');
   await dialog.waitFor();
   await page.waitForFunction(() => document.querySelector('[role=dialog]')!.getAnimations().every(animation => animation.playState === 'finished'));
   // The click leaves the keyboard's focus ring on the close button; a person who clicked with a mouse does not see one.
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
-  return { page, errors };
+  return { page, errors, asked };
 }
 
 /**
@@ -203,7 +213,8 @@ it('the four states: what the connection says and offers, and which one action i
   ({ page } = await open('connected', 1280));
   try {
     const dialog = page.getByRole('dialog');
-    await ui(dialog.getByText('已连接：剩余 12 积分，另有 3 免费积分')).toBeVisible();
+    // Both kinds of credits, each by its name.
+    await ui(dialog.locator('[data-connection=connected] p').first()).toHaveText('已连接：付费积分 12 · 免费积分 3');
     await ui(dialog.getByRole('link', { name: '去 Shotviva 充值' })).toHaveAttribute('href', BALANCE.topUpUrl);
     // The line between the two marks is joined, with a tick on it.
     await ui(dialog.locator('[data-linked=true] svg')).toBeVisible();
@@ -224,52 +235,117 @@ it('the four states: what the connection says and offers, and which one action i
   } finally { await page.close(); }
 }, 60000);
 
-const SAMPLES = ['sneaker-phone', 'sneaker-lifestyle', 'sneaker-listing', 'menu-fish-dark', 'room-staged'];
+const TURN = ['coffee-phone', 'coffee-noir-bar'];
+const USES: [string, string, string][] = [['菜品图', 'salad-phone', 'salad-forest-moss'], ['商品图', 'tote-phone', 'tote-promo'],
+  ['房源图', 'room-phone', 'room-staged'], ['一键白底图', 'dress-phone', 'dress-white'], ['一键抠图', 'hair-phone', 'hair-cutout'],
+  ['精准编辑图片文字', 'poster-before', 'poster-after']];
+const SAMPLES = [...TURN, ...USES.flatMap(use => use.slice(1))];
+/** Each sample picture's description, by its file's name: a picture not fetched yet has no address to be found by. */
+const ALTS: Record<string, string> = Object.fromEntries((() => {
+  const { showcase } = INTEGRATIONS[0]!;
+  return [showcase!.before, showcase!.after, ...showcase!.uses.flatMap(use => [use.before, use.after])]
+    .map(item => [item.src.split('/').pop()!.replace('.webp', ''), item.alt]);
+})());
 for (const width of [1280, 390, 360]) {
-  it(`${width}px: the introduction is Shotviva's sample pictures first: a phone photo and what a template made of it, then one per use`, async () => {
-    const { page, errors } = await open('ready', width, width === 1280 ? 900 : 780);
+  it(`${width}px: the introduction is Shotviva's own pictures first: a phone photo and its result, then the same two for each of six uses`, async () => {
+    const { page, errors } = await open('connected', width, width === 1280 ? 900 : 780);
     try {
       const dialog = page.getByRole('dialog');
-      // The pictures load as they come near (loading="lazy"): bring each into view, as a reader scrolling does.
+      const picture = (name: string) => dialog.locator(`img[alt="${ALTS[name]}"]`);
+      // Each picture: loaded once it is scrolled to, described in words, and no larger than a sharp screen needs.
       for (const name of SAMPLES) {
-        const picture = dialog.locator(`img[src="/integrations/shotviva/${name}.webp"]`);
-        await picture.scrollIntoViewIfNeeded();
-        await page.waitForFunction(image => (image as HTMLImageElement).complete, await picture.elementHandle());
-        expect(await picture.evaluate((image: HTMLImageElement) => [image.naturalWidth, image.naturalHeight, image.alt.length > 8]), name).toEqual([480, 600, true]);
+        await picture(name).scrollIntoViewIfNeeded();
+        // (Until it is fetched its box holds one blank pixel.)
+        await page.waitForFunction(image => (image as HTMLImageElement).complete && (image as HTMLImageElement).naturalWidth > 1,
+          await picture(name).elementHandle());
+        const measured = await picture(name).evaluate((image: HTMLImageElement) => ({ natural: [image.naturalWidth, image.naturalHeight],
+          shown: image.getBoundingClientRect().width, ratio: image.getBoundingClientRect().height / image.getBoundingClientRect().width,
+          described: image.alt.length > 8 }));
+        expect([measured.natural, measured.described], name).toEqual([TURN.includes(name) ? [336, 420] : [200, 250], true]);
+        expect(Math.abs(measured.ratio - 1.25), name).toBeLessThan(.02);
+        // Twice the shown size on a computer; on a phone, where it is shown a little smaller, never three times.
+        expect(measured.natural[0]! / measured.shown, name).toBeGreaterThanOrEqual(1.9);
+        expect(measured.natural[0]! / measured.shown, name).toBeLessThanOrEqual(width === 1280 ? 2.02 : 2.6);
       }
-      const place = (name: string) => box(page, `[role=dialog] img[src="/integrations/shotviva/${name}.webp"]`);
+      const place = (name: string) => box(page, `[role=dialog] img[alt="${ALTS[name]}"]`);
       const column = await box(page, '[role=dialog] header + div');
       // 能做什么: the photo, an arrow, the result, side by side and the same size, each named under it.
       await dialog.getByRole('heading', { name: '能做什么' }).scrollIntoViewIfNeeded();
       if (shots) await page.screenshot({ path: `${shots}/pictures-turn-${width}.png` });
-      const [before, after] = [await place('sneaker-phone'), await place('sneaker-lifestyle')];
+      const [before, after] = [await place('coffee-phone'), await place('coffee-noir-bar')];
       expect([after.top, after.height, after.right - after.left]).toEqual([before.top, before.height, before.right - before.left]);
       expect(after.left).toBeGreaterThan(before.right);
       expect(before.right - before.left, 'the two pictures are large enough to see').toBeGreaterThanOrEqual(140);
-      expect(Math.abs(before.height / (before.right - before.left) - 1.25)).toBeLessThan(.02);
       const arrow = await box(page, '[role=dialog] figure + svg');
       expect([arrow.left >= before.right, arrow.right <= after.left, arrow.top > before.top, arrow.bottom < before.bottom]).toEqual([true, true, true, true]);
-      expect(await dialog.locator('figure').evaluateAll(list => list.map(figure => (figure.querySelector('figcaption')?.textContent ?? ''))))
-        .toEqual(['手机拍的照片', '选一个模板后', '商品图开店', '菜品图做餐饮', '房源图做民宿']);
-      // What the pictures show is said once, under them; the two pictures come before any of the row's words.
-      const lead = await box(page, '[role=dialog] figure ~ p, [role=dialog] div:has(> figure) + p');
-      expect(lead.top).toBeGreaterThan(before.bottom);
-      // 什么时候适合用: three square pictures in one row, inside the column.
-      await dialog.getByRole('heading', { name: '什么时候适合用' }).scrollIntoViewIfNeeded();
-      if (shots) await page.screenshot({ path: `${shots}/pictures-uses-${width}.png` });
-      const uses = [await place('sneaker-listing'), await place('menu-fish-dark'), await place('room-staged')];
-      expect(new Set(uses.map(use => use.top)).size).toBe(1);
-      for (const use of uses) {
-        expect(Math.abs(use.height - (use.right - use.left))).toBeLessThanOrEqual(1);
-        expect(use.right - use.left).toBeGreaterThanOrEqual(96);
-        expect([use.left >= column.left, use.right <= column.right]).toEqual([true, true]);
+      expect(await dialog.locator('figure:has(+ svg) figcaption, svg + figure figcaption').allInnerTexts()).toEqual(['手机拍的照片', '选一个模板后']);
+      // 什么时候适合用: one frame per use, the photo on the left and what came of it on the right, its name and a line under it.
+      const cards = dialog.locator('ul li figure');
+      expect(await cards.evaluateAll(list => list.map(card => [card.querySelector('b')?.textContent ?? '',
+        ...[...card.querySelectorAll('img')].map(image => image.alt)]))).toEqual(USES.map(([label, photo, result]) => [label, ALTS[photo], ALTS[result]]));
+      for (const [label, photo, result] of USES) {
+        await dialog.getByText(label, { exact: true }).scrollIntoViewIfNeeded();
+        const [left, right] = [await place(photo), await place(result)];
+        expect([right.top, right.height], label).toEqual([left.top, left.height]);
+        expect(Math.abs((right.right - right.left) - (left.right - left.left)), label).toBeLessThanOrEqual(1);
+        expect(Math.abs(right.left - left.right - 2), label).toBeLessThanOrEqual(1);
+        expect(left.right - left.left, label).toBeGreaterThanOrEqual(72);
+        expect([left.left >= column.left, right.right <= column.right], label).toEqual([true, true]);
+        const caption = await dialog.locator('ul li figure', { hasText: label }).locator('figcaption span').boundingBox();
+        expect(caption!.y, label).toBeGreaterThan(left.bottom);
+        // The line under a frame is one or two lines, not a paragraph.
+        expect(caption!.height, label).toBeLessThanOrEqual(40);
       }
-      expect(uses[1]!.left).toBeGreaterThan(uses[0]!.right);
-      // Fewer words than pictures' worth: the rows have seven lines between them, where there were nine.
-      expect(await dialog.locator('section li, section p').count()).toBe(7);
+      // Three frames to a row on a computer, two on a phone.
+      const tops = await Promise.all(USES.map(async use => (await place(use[1])).top));
+      expect(new Set(tops).size).toBe(width === 1280 ? 2 : 3);
+      // The cut-out stands on the squares that mean "no background"; the others have a ground of their own.
+      expect(await picture('hair-cutout').evaluate(image => getComputedStyle(image).backgroundImage)).toContain('conic-gradient');
+      expect(await picture('dress-white').evaluate(image => getComputedStyle(image).backgroundImage)).toBe('none');
+      await dialog.getByText('精准编辑图片文字', { exact: true }).scrollIntoViewIfNeeded();
+      if (shots) await page.screenshot({ path: `${shots}/pictures-uses-${width}.png` });
       for (const line of await words(page)) expect(line.contrast, `"${line.text}" cannot be read`).toBeGreaterThanOrEqual(4.5);
       expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0);
       expect(await dialog.locator('header + div').evaluate(element => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(0);
+      expect(errors).toEqual([]);
+    } finally { await page.close(); }
+  }, 60000);
+}
+
+for (const width of [390, 360]) {
+  it(`${width}px: opening the sheet fetches only the pictures at hand; the rest are fetched as they are scrolled to, each once`, async () => {
+    const { page, asked, errors } = await open('connected', width, 700);
+    try {
+      const middle = page.getByRole('dialog').locator('header + div');
+      /** The sample pictures within `ahead` pixels of what the sheet shows of its middle. */
+      const within = async (ahead: number) => {
+        const alts = await middle.evaluate((scroller, margin) => {
+          const frame = scroller.getBoundingClientRect();
+          return [...scroller.querySelectorAll<HTMLImageElement>('figure img')].filter(image => {
+            const rect = image.getBoundingClientRect();
+            return rect.bottom > frame.top - margin && rect.top < frame.bottom + margin;
+          }).map(image => image.alt);
+        }, ahead);
+        return SAMPLES.filter(name => alts.includes(ALTS[name]!));
+      };
+      await page.waitForTimeout(300);
+      // On opening: what is shown and at most a row ahead of it; the kinds of use further down are not fetched.
+      const first = [...asked];
+      const [shown, ahead] = [await within(0), await within(161)];
+      expect(first.length, `fetched on opening: ${first.join(', ')}`).toBeLessThanOrEqual(4);
+      expect(shown.filter(name => !first.includes(name)), 'shown but not fetched').toEqual([]);
+      expect(first.filter(name => !ahead.includes(name)), 'fetched but nowhere near').toEqual([]);
+      for (const far of ['room-staged', 'dress-white', 'hair-cutout', 'poster-after']) expect(first).not.toContain(far);
+      // Scrolling down brings in each of the others as it is reached, and none twice.
+      const height = await middle.evaluate(scroller => scroller.scrollHeight);
+      for (let top = 0; top <= height; top += 240) {
+        await middle.evaluate((scroller, value) => { scroller.scrollTop = value; }, top);
+        await page.waitForTimeout(60);
+        for (const name of await within(0)) expect(asked, `in view at ${top}px`).toContain(name);
+      }
+      await page.waitForFunction(() => [...document.querySelectorAll<HTMLImageElement>('[role=dialog] figure img')]
+        .every(image => image.complete && image.naturalWidth > 1));
+      expect([...asked].sort()).toEqual([...SAMPLES].sort());
       expect(errors).toEqual([]);
     } finally { await page.close(); }
   }, 30000);
@@ -308,11 +384,11 @@ for (const width of [390, 360]) {
   }, 30000);
 }
 
-it('1280px on a short screen: a centred dialog no wider than 600px; the close button, the head and the foot stay while it scrolls', async () => {
+it('1280px on a short screen: a centred dialog no wider than 680px; the close button, the head and the foot stay while it scrolls', async () => {
   const { page, errors } = await open('ready', 1280, 620);
   try {
     const dialog = await box(page, '[role=dialog]');
-    expect(dialog.right - dialog.left).toBe(600);
+    expect(dialog.right - dialog.left).toBe(680);
     expect(Math.abs((dialog.left + dialog.right) / 2 - 640)).toBeLessThanOrEqual(1);
     expect([dialog.top >= 16, dialog.bottom <= 604]).toEqual([true, true]);
     expect(await page.getByRole('dialog').evaluate(element => getComputedStyle(element).borderTopLeftRadius)).toBe('18px');
@@ -323,10 +399,10 @@ it('1280px on a short screen: a centred dialog no wider than 600px; the close bu
     const before = await places();
     await middle.evaluate(element => { element.scrollTop = element.scrollHeight; });
     expect(await places()).toEqual(before);
-    // On a computer a row is its name on the left and its lines on the right.
+    // A row is its name, then what it shows and says under it.
     const row = page.getByRole('dialog').locator('section').last();
     const [name, lines] = [await row.locator('h3').boundingBox(), await row.locator('ul').boundingBox()];
-    expect(lines!.x).toBeGreaterThan(name!.x + name!.width);
+    expect(lines!.y).toBeGreaterThanOrEqual(name!.y + name!.height);
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 30000);

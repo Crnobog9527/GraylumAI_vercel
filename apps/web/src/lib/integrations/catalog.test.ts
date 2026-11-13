@@ -1,8 +1,12 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { statSync } from 'node:fs';
+import { readdirSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { connectMessage, INTEGRATIONS, trackedLink } from './catalog';
+import { connectMessage, INTEGRATIONS, trackedLink, type IntegrationModule } from './catalog';
+
+/** Every sample picture of a module: the two of 能做什么, then the photo and the result of each kind of use. */
+const pictures = (module: IntegrationModule) => (module.showcase
+  ? [module.showcase.before, module.showcase.after, ...module.showcase.uses.flatMap(use => [use.before, use.after])] : []);
 
 describe('integration modules', () => {
   it('each module has its introduction, when to use it, and an https link to its own page; no link to buy', () => {
@@ -22,9 +26,10 @@ describe('integration modules', () => {
 
   it('the copy carries no amounts of our own (no digits, prices or quotas; the Owner confirmed the wording 2026-11-13)', () => {
     for (const module of INTEGRATIONS) {
-      const samples = module.showcase ? [module.showcase.before, module.showcase.after, ...module.showcase.uses] : [];
+      // What a poster inside a sample picture says (a date, a discount) is not repeated in the words beside or behind it.
       for (const line of [module.tagline, module.philosophy ?? '', ...module.features, ...module.whenToUse, ...(module.inGraylum ?? []),
-        ...samples.flatMap(sample => [sample.label, sample.note ?? '', sample.alt])]) {
+        module.showcase?.before.label ?? '', module.showcase?.after.label ?? '', ...pictures(module).map(picture => picture.alt),
+        ...(module.showcase?.uses ?? []).flatMap(use => [use.label, use.note])]) {
         expect(line, line).not.toMatch(/[¥$￥]|元|美元|积分\s*[0-9一二三四五六七八九十百千万]|[0-9一二三四五六七八九十百千万]+\s*(?:元|积分|张免费)/);
         expect(line, line).not.toMatch(/[0-9０-９]/);
       }
@@ -55,21 +60,49 @@ describe('integration modules', () => {
     expect(shotviva.inGraylum).toEqual(['连接后，在 Graylum 的对话里配图，直接用你的 Shotviva 积分生成，Graylum 不另外收费。',
       'Graylum 只保存你的 Shotviva 账号 ID；在对话里配图时，会把你的出图要求发给 Shotviva 生成。Graylum 拿不到你的 Shotviva 密码。',
       '随时可以在这里断开，也可以在 Shotviva 的账号页里断开。']);
-    // "选一个就能出图": a phone photo and what a template made of it. "开店、做餐饮、做民宿…商品图、菜品图或房源图": one picture each.
+    // "选一个就能出图": a phone photo and what a template made of it.
     expect([shotviva.showcase?.before.label, shotviva.showcase?.after.label]).toEqual(['手机拍的照片', '选一个模板后']);
-    expect(shotviva.showcase?.uses.map(use => [use.note, use.label])).toEqual([['开店', '商品图'], ['做餐饮', '菜品图'], ['做民宿', '房源图']]);
   });
 
-  it('each sample picture is a webp in the public folder, described in words, and no heavier than 80KB', () => {
+  it('the kinds of use are the Owner\'s six (2026-11-13), each a photo and what came of it, with one short line', () => {
+    const { showcase } = INTEGRATIONS[0]!;
+    expect(showcase?.uses.map(use => use.label)).toEqual(['菜品图', '商品图', '房源图', '一键白底图', '一键抠图', '精准编辑图片文字']);
+    const file = (src: string) => src.split('/').pop();
+    expect([file(showcase!.before.src), file(showcase!.after.src)]).toEqual(['coffee-phone.webp', 'coffee-noir-bar.webp']);
+    expect(showcase?.uses.map(use => [file(use.before.src), file(use.after.src)])).toEqual([['salad-phone.webp', 'salad-forest-moss.webp'],
+      ['tote-phone.webp', 'tote-promo.webp'], ['room-phone.webp', 'room-staged.webp'], ['dress-phone.webp', 'dress-white.webp'],
+      ['hair-phone.webp', 'hair-cutout.webp'], ['poster-before.webp', 'poster-after.webp']]);
+    // The sneaker is gone ("案例照片不要用鞋子这一张").
+    expect(JSON.stringify(showcase)).not.toMatch(/sneaker|鞋/);
+    // Only the cut-out has no background of its own.
+    expect(showcase?.uses.filter(use => use.cutout).map(use => use.label)).toEqual(['一键抠图']);
+    for (const use of showcase!.uses) {
+      expect(use.note.length, use.label).toBeGreaterThan(6);
+      expect(use.note.length, use.label).toBeLessThanOrEqual(22);
+    }
+  });
+
+  it('each sample picture is a webp in the public folder, described in words, and no heavier than 40KB; all of them under 200KB', () => {
     for (const module of INTEGRATIONS) {
-      const samples = module.showcase ? [module.showcase.before, module.showcase.after, ...module.showcase.uses] : [];
-      for (const sample of samples) {
+      let total = 0;
+      expect(new Set(pictures(module).map(picture => picture.src)).size).toBe(pictures(module).length);
+      for (const sample of pictures(module)) {
         expect(sample.src).toMatch(new RegExp(`^/integrations/${module.id}/[a-z-]+\\.webp$`));
         expect(sample.alt.length, sample.src).toBeGreaterThan(8);
         const size = statSync(fileURLToPath(new URL(`../../../public${sample.src}`, import.meta.url))).size;
         expect(size, sample.src).toBeGreaterThan(1000);
-        expect(size, sample.src).toBeLessThanOrEqual(80 * 1024);
+        // Owner 2026-11-13: "这些图片注意做好压缩，要保证手机版的性能".
+        expect(size, sample.src).toBeLessThanOrEqual(40 * 1024);
+        total += size;
       }
+      expect(total, module.id).toBeLessThanOrEqual(200 * 1024);
+    }
+  });
+
+  it('the public folder holds no sample picture that the page does not show', () => {
+    for (const module of INTEGRATIONS.filter(item => item.showcase)) {
+      const folder = fileURLToPath(new URL(`../../../public/integrations/${module.id}`, import.meta.url));
+      expect(readdirSync(folder).sort()).toEqual(pictures(module).map(picture => picture.src.split('/').pop()).sort());
     }
   });
 

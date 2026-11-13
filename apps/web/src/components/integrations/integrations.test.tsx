@@ -51,15 +51,22 @@ describe('the integrations page', () => {
     expect(html).toContain('连接 Shotviva');
   });
 
-  it('the introduction is said by Shotviva\'s sample pictures first: a phone photo and a template\'s result, then one picture per use', () => {
+  it('the introduction is said by Shotviva\'s sample pictures first: a phone photo and a template\'s result, then the same two per use', () => {
     const html = body(state({ available: true, eligible: true, connected: false, balance: null }));
-    const pictures = [...html.matchAll(/<img src="(\/integrations\/shotviva\/[a-z-]+\.webp)" alt="([^"]+)"/g)].map(match => match[1]);
-    expect(pictures).toEqual(['sneaker-phone', 'sneaker-lifestyle', 'sneaker-listing', 'menu-fish-dark', 'room-staged']
-      .map(name => `/integrations/shotviva/${name}.webp`));
-    for (const words of ['手机拍的照片', '选一个模板后', '商品图', '菜品图', '房源图', '开店', '做餐饮', '做民宿']) expect(html).toContain(`>${words}<`);
+    const pictures = [...html.matchAll(/<img src="\/integrations\/shotviva\/([a-z-]+)\.webp" alt="([^"]+)" width="(\d+)" height="(\d+)"/g)];
+    expect(pictures.map(match => match[1])).toEqual(['coffee-phone', 'coffee-noir-bar', 'salad-phone', 'salad-forest-moss', 'tote-phone', 'tote-promo',
+      'room-phone', 'room-staged', 'dress-phone', 'dress-white', 'hair-phone', 'hair-cutout', 'poster-before', 'poster-after']);
+    // Every picture keeps its box (4:5) before it arrives. (When each is fetched is measured in the browser test.)
+    expect(html.match(/<img src="\/integrations\/shotviva\//g)?.length).toBe(pictures.length);
+    for (const match of pictures) expect(Number(match[3]) / Number(match[4]), match[1]).toBe(0.8);
+    for (const words of ['手机拍的照片', '选一个模板后', '菜品图', '商品图', '房源图', '一键白底图', '一键抠图', '精准编辑图片文字']) {
+      expect(html).toContain(`>${words}<`);
+    }
     // The pictures of 能做什么 come before its words, and those of 什么时候适合用 before its two lines.
-    expect(html.indexOf('sneaker-lifestyle')).toBeLessThan(html.indexOf('每个模板都保留你拍的主体'));
-    expect(html.indexOf('room-staged')).toBeLessThan(html.indexOf('一次上新很多商品'));
+    expect(html.indexOf('coffee-noir-bar')).toBeLessThan(html.indexOf('每个模板都保留你拍的主体'));
+    expect(html.indexOf('poster-after')).toBeLessThan(html.indexOf('一次上新很多商品'));
+    // What the poster in the last picture says is the picture's: no date or discount in words.
+    expect(html.replace(/<[^>]+>/g, '')).not.toMatch(/折|月\s*\d|\d\s*日/);
   });
 
   it('not a member: no connect button, the membership page instead; connector off: no connect button either', () => {
@@ -70,17 +77,25 @@ describe('the integrations page', () => {
     expect(body(state({ available: false, eligible: true, connected: false, balance: null }))).not.toContain('>连接 Shotviva<');
   });
 
-  it('connected: the balance, Shotviva\'s own top-up page and 断开', () => {
+  it('connected: both kinds of credits by name (a zero too), Shotviva\'s own top-up page and 断开', () => {
+    const words = (html: string) => html.replace(/<[^>]+>/g, '');
     const html = body(state({ available: true, eligible: true, connected: true,
       balance: { credits: 12, freeCredits: 3, paidUntil: null, topUpUrl: 'https://shotviva.com/pricing?from=graylum' } }));
-    expect(html).toContain('已连接');
-    expect(html).toContain('剩余 12 积分，另有 3 免费积分');
+    // Owner 2026-11-13: "现在显示了'3 积分'，这其实是付费积分，但是你没写'付费积分'，用户会迷惑的。"
+    expect(words(html)).toContain('已连接：付费积分 12 · 免费积分 3');
+    expect(words(html)).not.toMatch(/剩余 \d+ 积分|另有/);
     expect(html).toContain('href="https://shotviva.com/pricing?from=graylum"');
     expect(html).toContain('>断开<');
     expect(html).not.toContain('>连接 Shotviva<');
+    const balance = (credits: number, freeCredits: number) => words(body(state({ available: true, eligible: true, connected: true,
+      balance: { credits, freeCredits, paidUntil: null, topUpUrl: null } })));
+    expect(balance(3, 0)).toContain('已连接：付费积分 3 · 免费积分 0');
+    expect(balance(0, 5)).toContain('已连接：付费积分 0 · 免费积分 5');
+    expect(balance(0, 0)).toContain('已连接：付费积分 0 · 免费积分 0');
+    // A number of credits never stands without its name.
+    for (const text of [balance(3, 0), balance(0, 5)]) expect(text).not.toMatch(/(?<!付费|免费)积分 \d/);
     expect(body(state({ available: true, eligible: true, connected: true, balance: null }))).toContain('剩余积分暂时读取不了');
-    expect(body(state({ available: true, eligible: true, connected: true,
-      balance: { credits: 1, freeCredits: 0, paidUntil: null, topUpUrl: null } }))).not.toContain('去 Shotviva 充值');
+    expect(balance(1, 0)).not.toContain('去 Shotviva 充值');
   });
 
   it('a failed connect start says why in words', () => {
