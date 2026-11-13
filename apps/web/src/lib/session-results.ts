@@ -14,6 +14,29 @@ export type SessionResultItem = {
   sourceExecutionId: string | null; sourceTurnId?: number | null; sourceAvailable: boolean; createdAt: string;
 };
 
+/**
+ * The type a save starts with (staging validation #1269: a 口播稿 reply defaulted to 正文). From the Skill the reply loaded (its step
+ * label: the display title, or an older reply's package name), else from the reply's own opening line; 正文 only when neither says.
+ * The user can still pick another type in the form.
+ */
+const TYPE_WORDS: ReadonlyArray<readonly [ResultType, RegExp, RegExp]> = [
+  // [type, words in a Skill's name, words in the reply's opening]; 分镜 first, so 分镜脚本 is a storyboard.
+  ['storyboard', /分镜|storyboard/i, /分镜/], ['script', /口播|script/i, /口播/], ['editing', /剪辑|editing/i, /剪辑建议|剪辑方案/],
+  ['topic_list', /选题|topic/i, /选题清单|选题列表/],
+];
+export function guessResultType(input: { skills?: readonly string[]; reply: string }): ResultType {
+  for (const skill of input.skills ?? []) for (const [type, words] of TYPE_WORDS) if (words.test(skill)) return type;
+  const opening = input.reply.trim().split('\n').find(line => line.trim())?.slice(0, 80) ?? '';
+  for (const [type, , words] of TYPE_WORDS) if (words.test(opening)) return type;
+  return 'body';
+}
+
+/** A result's title as plain words: Markdown marks (bold, heading, quote, list, code) are not shown as stars and hashes. */
+export function plainTitle(title: string): string {
+  return title.replace(/^\s*(?:#{1,6}\s+|>\s?|[-*+]\s+|\d+[.、]\s*)/, '').replace(/\*\*|__|`|~~/g, '')
+    .replace(/(^|[^*])\*([^*\n]+)\*/g, '$1$2').trim() || title.trim();
+}
+
 /** Fixed type order; only non-empty groups, items in saved order. */
 export function groupResults(items: readonly SessionResultItem[]) {
   return RESULT_TYPES.map(type => ({ type, label: RESULT_TYPE_LABEL[type], items: items.filter(item => item.resultType === type) }))
@@ -48,7 +71,7 @@ export function saveProblem(reply: string, text: string, items: readonly Session
   const problem = excerptProblem(reply, text);
   if (problem) return problem;
   const already = savedFromReply(items, source, text);
-  return already ? `这段内容已经保存在成果夹里（${RESULT_TYPE_LABEL[already.resultType]}「${already.title}」），不会重复保存。` : '';
+  return already ? `这段内容已经保存在成果夹里（${RESULT_TYPE_LABEL[already.resultType]}「${plainTitle(already.title)}」），不会重复保存。` : '';
 }
 
 /** A reply at most this long, with an image that was not made and none that was, is the failure report and nothing else. */

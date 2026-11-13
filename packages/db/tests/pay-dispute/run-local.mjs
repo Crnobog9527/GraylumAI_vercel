@@ -375,7 +375,7 @@ try {
  assert.equal(await v('SELECT dispute_frozen_credits v FROM credit_package_sources WHERE order_id=$1',[deliveredOutside.order]),100);
  report.checks.push('late match after external resolution reopens, freezes already delivered credits and applies stop state');
  report.checks.push('off-site resolution is admin-only, idempotently audited and denied for known payment references; later actual fulfillment reopens and freezes the matching source');
- await membershipCases({c,v,profile,receive,withdraw,ops,report});
+ await membershipCases({c,v,profile,pack,receive,withdraw,ops,report});
  // Optional PAY-EVIDENCE integration: model its documented table locally; no personal evidence is created.
  await c.query(`CREATE TABLE payment_order_evidence(order_id uuid PRIMARY KEY,hold_reason text,
   pending_delete_at timestamptz,expires_at timestamptz)`);
