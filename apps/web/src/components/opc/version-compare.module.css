@@ -6,3 +6,7 @@
 .footer{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 28px;border-top:1px solid #eee;color:#6b6b6b;font-size:12px}.footer button{border:0;border-radius:8px;background:#242424;color:#fff;padding:8px 14px}
 @media(max-width:650px){.backdrop{padding:6px}.dialog{height:calc(100dvh - 12px)}.heading{padding:16px}.columns{grid-template-columns:1fr;grid-template-rows:repeat(2,minmax(0,1fr));gap:8px;padding:0 12px 10px}.picker{padding:0 12px 10px}.footer{padding:10px 12px}.row{gap:5px}.row button{padding:5px}}
 .row button:disabled{background:#fafafa;border-color:#ededed;color:#b5b5b5;cursor:not-allowed}
+/* A phone (under 640px): the version history is a sheet from the foot of the screen (bottom-sheet.module.css, Owner 2026-11-12, phone
+   plan A). Its close button, the buttons that place a version and the one that finishes are a thumb's height, and its lines are readable.
+   The history opens inside the editor, whose rule for a footer's buttons is the more specific one, hence `.dialog` before `.footer button`. */
+@media(max-width:639px){.dialog{position:relative}.heading{padding:26px 16px 12px}.heading button{display:grid;place-items:center;flex:none;width:44px;height:44px;margin:-10px -10px 0 0}.row{min-height:52px;font-size:13.5px}.row button{min-height:40px;padding:0 10px}.dialog .footer button{flex:none;width:auto;min-height:48px;padding:0 20px;border-radius:99px;font-size:15px}}
