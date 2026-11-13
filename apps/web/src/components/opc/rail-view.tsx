@@ -5,6 +5,7 @@ import { ArrowRight, ChevronDown, Columns3, Ellipsis, Grid2X2, Pencil, Pin, Scal
 import { ANNOUNCEMENT } from '@/lib/announcement';
 import { HoverPrefetchLink } from './hover-prefetch-link';
 import styles from './workspace-frame.module.css';
+import { AccountAvatar } from '../profile/AccountAvatar';
 
 /**
  * Display-only parts of the workspace shell: the top bar, the announcement, and the left rail with its
@@ -220,8 +221,9 @@ export function RailNotices({ items }: { items: Array<{ text: string; role: 'ale
 }
 
 /** Feedback, credits and the account button at the bottom of the rail. */
-export function RailBottom({ creditsLabel, creditsOpen, profileOpen, avatar, name, membership, onFeedback, onCredits, onProfile }: {
-  creditsLabel: string | number | null; creditsOpen: boolean; profileOpen: boolean; avatar: string; name: string; membership: string;
+export function RailBottom({ creditsLabel, creditsOpen, profileOpen, avatar, avatarUrl, name, membership, onFeedback, onCredits, onProfile }: {
+  creditsLabel: string | number | null; creditsOpen: boolean; profileOpen: boolean; avatar: string; avatarUrl?: string | null;
+  name: string; membership: string;
   onFeedback?: Click; onCredits?: Click; onProfile?: Click;
 }) {
   return <div className={styles.railBottom}><div className={styles.creditWidget}>
@@ -230,5 +232,6 @@ export function RailBottom({ creditsLabel, creditsOpen, profileOpen, avatar, nam
     <button type="button" aria-expanded={creditsOpen} onClick={onCredits}>
       <img className={styles.navIcon} src="/opc-reference/wallet-color.svg" alt=""/>积分 <small>{creditsLabel}</small></button></div>
     <button type="button" className={styles.profile} aria-expanded={profileOpen} onClick={onProfile}>
-      <span className={styles.avatar}>{avatar}</span><span>{name}<small>{membership}</small></span><ChevronDown size={14}/></button></div>;
+      <AccountAvatar className={styles.avatar} url={avatarUrl} initial={avatar}/>
+      <span>{name}<small>{membership}</small></span><ChevronDown size={14}/></button></div>;
 }
