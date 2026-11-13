@@ -311,6 +311,34 @@ it('Esc closes the ⋯ menu and puts focus back on the ⋯ button', () => open(1
   await ui(more(page)).toHaveAttribute('aria-expanded', 'false');
 }));
 
+for (const width of [1280, 390]) it(`MOBILE-UX: a press on blank space outside the ⋯ menu closes it (${width}px); its own ⋯ still toggles it`, () =>
+  open(width, async page => {
+    // The ⋯ shows when the row is pointed at (hover) or focused.
+    const press = async () => { await page.getByText('周末选题讨论').hover(); await more(page).click(); };
+    await press();
+    await ui(page.getByRole('menu')).toBeVisible();
+    // A press inside the menu keeps it open (its items work as before).
+    await page.getByRole('menu').click({ position: { x: 4, y: 4 } });
+    await ui(page.getByRole('menu')).toBeVisible();
+    // Blank space: a point on nothing that can be pressed (no link, button, field, tab or the menu itself).
+    const blank = await page.evaluate(() => {
+      for (let y = 790; y > 10; y -= 20) for (let x = 10; x < window.innerWidth; x += 20) {
+        const hit = document.elementFromPoint(x, y);
+        if (hit && !hit.closest('a,button,input,textarea,select,label,nav,[role="menu"],[role="dialog"],[tabindex]')) return { x, y };
+      }
+      return null;
+    });
+    expect(blank).not.toBeNull();
+    await page.mouse.click(blank!.x, blank!.y);
+    await ui(page.getByRole('menu')).toHaveCount(0, { timeout: 1000 });
+    await ui(more(page)).toHaveAttribute('aria-expanded', 'false');
+    // The ⋯ button opens and closes it, not opens-then-closes on the same press.
+    await press();
+    await ui(page.getByRole('menu')).toBeVisible();
+    await press();
+    await ui(page.getByRole('menu')).toHaveCount(0, { timeout: 1000 });
+  }));
+
 it('Esc on the strategy menu returns focus to its own button, not an earlier row', () => open(1280, async page => {
   await openMenu(page);
   await page.keyboard.press('Escape');
