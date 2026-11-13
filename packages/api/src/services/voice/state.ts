@@ -1,12 +1,15 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { voiceProfile, type VoiceProfile } from './profile';
+import { voiceProfile, type VoiceDocumentLabel, type VoiceProfile } from './profile';
+import type { VoiceStats } from './stats';
 
 export type VoiceVersion = { id: string; version: number;
   status: 'generating' | 'draft' | 'confirmed' | 'superseded' | 'stale' | 'failed';
   profile: VoiceProfile | null; failure: string | null; createdAt: string; confirmedAt: string | null;
-  sources: Array<{ documentId: string; filename: string | null }> };
+  sources: Array<{ documentId: string; filename: string | null }>;
+  /** VOICE-2 PR-1 (0543): null/empty for versions made before. The page shows them from PR-4. */
+  stats?: VoiceStats | null; documents?: Array<VoiceDocumentLabel & { edited?: boolean }> };
 export type VoiceState = { enabled: boolean; revision: number; needsUpdate: boolean;
   confirmed: VoiceVersion | null; latest: VoiceVersion | null;
   documents: Array<{ id: string; filename: string | null; textBytes: number; contentVersion: number; createdAt: string; preferred: boolean }> };

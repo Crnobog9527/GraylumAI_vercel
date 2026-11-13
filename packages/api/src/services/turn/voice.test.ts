@@ -72,7 +72,17 @@ describe('kind=voice on the turn core (CORE-PATH-V2 V2-12 B7)', () => {
       use: { phase: 'attached_organizer', purpose: 'organize', outputCap: 8192 } });
     expect(t.names()).toEqual(['turn_open', 'turn_close']);
     expect(t.args('turn_close')).toMatchObject({ p_close_kind: 'completed', p_delivered: true, p_messages: [], p_refund_all: false,
-      p_kind_result: { versionId: input.versionId, profile: expect.objectContaining({ tone: '口语', samples: material[0]!.text.split('\n') }) } });
+      p_kind_result: { versionId: input.versionId, profile: expect.objectContaining({ tone: '口语', samples: material[0]!.text.split('\n') }),
+        // VOICE-2 PR-1: every read document labelled (unlabelled -> other), stats computed by code.
+        documents: [{ documentId: uuid(30), type: 'other', topics: [] }],
+        stats: expect.objectContaining({ documents: 1, sentences: 2 }) } });
+  });
+
+  it('saves the labels the same answer gave (VOICE-2 PR-1)', async () => {
+    const t = harness(); runs(JSON.stringify({ ...JSON.parse(GOOD), documents: [{ file: 1, type: 'post', topics: ['下班做饭'] }] }));
+    await runVoiceTurn(t.deps, input);
+    expect((t.args('turn_close').p_kind_result as { documents: unknown }).documents)
+      .toEqual([{ documentId: uuid(30), type: 'post', topics: ['下班做饭'] }]);
   });
 
   it('sends the instructions and the corpus, no tools, no history', async () => {

@@ -9,15 +9,24 @@ CREATE OR REPLACE FUNCTION public.turn_voice_apply(t turns, p_kind text, p_resul
  SET search_path TO 'public', 'pg_temp'
 AS $function$
 BEGIN
-  -- {versionId, profile}: the profile the caller parsed and checked against the corpus (voice.ts); nothing else is accepted.
+  -- {versionId, profile[, stats, documents]}: the profile the caller parsed and checked against the corpus (voice.ts); VOICE-2
+  -- (0543) adds the code-computed writing stats and each read document's type and topics. Nothing else is accepted; a caller
+  -- built before 0543 sends only the first two keys.
   IF jsonb_typeof(p_result) IS DISTINCT FROM 'object' OR jsonb_typeof(p_result->'profile') IS DISTINCT FROM 'object'
-    OR jsonb_typeof(p_result->'versionId') IS DISTINCT FROM 'string' OR (SELECT count(*) FROM jsonb_object_keys(p_result)) <> 2
+    OR jsonb_typeof(p_result->'versionId') IS DISTINCT FROM 'string'
+    OR EXISTS (SELECT 1 FROM jsonb_object_keys(p_result) k WHERE k NOT IN ('versionId','profile','stats','documents'))
+    OR (p_result ? 'stats' AND jsonb_typeof(p_result->'stats') IS DISTINCT FROM 'object')
+    OR (p_result ? 'documents' AND NOT public.voice_documents_valid(p_result->'documents'))
     OR p_result->>'versionId' IS DISTINCT FROM t.policy->'voice'->>'versionId' THEN
     RAISE EXCEPTION 'TURN_KIND_RESULT_INVALID' USING ERRCODE='22023';
   END IF;
   -- Only a completed close saves the profile; an erased one (the version was deleted, the account is leaving) saves nothing.
   IF p_kind <> 'completed' THEN RETURN; END IF;
+  -- Labels are kept only for documents the version read (its sources); any other entry is dropped, not saved.
   UPDATE voice_profile_versions SET profile = p_result->'profile', failure = NULL, billing_settled = true,
+      stats = p_result->'stats',
+      documents = (SELECT jsonb_agg(e ORDER BY o) FROM jsonb_array_elements(p_result->'documents') WITH ORDINALITY x(e,o)
+        WHERE sources @> jsonb_build_array(jsonb_build_object('documentId', e->>'documentId'))),
       status = CASE WHEN corpus = voice_current_corpus(t.actor_id) THEN 'draft' ELSE 'stale' END, updated_at = clock_timestamp()
     WHERE id = (p_result->>'versionId')::uuid AND actor_id = t.actor_id AND status = 'generating';
 END $function$;

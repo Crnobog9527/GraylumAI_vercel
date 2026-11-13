@@ -760,7 +760,7 @@ try{
  await topicCases({c,one,open,begin,identity,record,close,balance,account,policy,refusal,peer,report});
  await planCases({c,one,open,begin,identity,record,close,balance,account,reportSource,policy,refusal,peer,report});
  // V2-12 B7: kind=voice (voice-cases.mjs).
- await voiceCases({c,one,open,begin,identity,record,balance,account,policy,refusal,report});
+ await voiceCases({c,one,open,begin,identity,record,balance,account,policy,refusal,report,peer});
  // 10. Static rules and budget: service role only; transaction-level locks; turn_open holds <= 40 relation locks; indexes used.
  {
   for(const fn of ['turn_open(uuid,uuid,uuid,text,jsonb,bigint)','turn_call_begin(uuid,bigint,integer,text,uuid,text,boolean,text,numeric,numeric)',
