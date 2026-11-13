@@ -5,7 +5,7 @@ vi.mock('./agent/runner', async original => ({ ...await original<object>(), runR
 vi.mock('./call', async original => ({ ...await original<object>(), modelCall: h.call }));
 vi.mock('./provider/providerRequest', async original => ({ ...await original<object>(), openRouterRequestBody: h.request }));
 import { TurnStop } from './call';
-import { reviseVoiceDraft, voiceRewriteCalls } from './voiceRevise';
+import { reviseShown as reviseVoiceDraft, reviseVoiceDraft as fromChat, voiceRewriteCalls } from './voiceRevise';
 import { turnPolicy } from './policy';
 import { resumeLimits } from './resume';
 
@@ -20,7 +20,9 @@ describe('rewriting the copied sentences (VOICE-2 PR-3)', () => {
   beforeEach(() => { h.runtime.mockReset(); h.call.mockReset(); gate.mockClear(); h.request.mockClear(); });
 
   it('no overlap: no call at all', async () => {
-    expect(await reviseVoiceDraft({ ...args, draft: '周末去爬山。' })).toEqual({ text: '周末去爬山。', revised: 0 });
+    expect(await reviseVoiceDraft({ ...args, draft: '周末去爬山。' })).toEqual({ text: '周末去爬山。', revised: 0, event: {} });
+    // chat.ts's form: a reply built without voice passages (or no tools at all) is saved as drafted.
+    expect(await fromChat(draft, null, args)).toEqual({ text: draft, revised: 0, event: {} });
     expect(h.runtime).not.toHaveBeenCalled();
   });
   it('one call of this turn, through the call gate, for the copied sentences only; the draft gets the rewrite', async () => {
@@ -28,7 +30,7 @@ describe('rewriting the copied sentences (VOICE-2 PR-3)', () => {
     h.runtime.mockImplementation(async (o: Run) => { await o.exchange(1, '{}'); expect(o.tools).toEqual([]); expect(o.maxOutputTokens).toBe(4096);
       expect(o.input).toContain('1. 哎下班到家都七点了，咋整呢，真累！'); expect(o.input).not.toContain('周末去爬山');
       return JSON.stringify({ 1: '回到家都七点多了，累得不想动！' }); });
-    expect(await reviseVoiceDraft(args)).toEqual({ text: '周末去爬山。回到家都七点多了，累得不想动！', revised: 1 });
+    expect(await reviseVoiceDraft(args)).toEqual({ text: '周末去爬山。回到家都七点多了，累得不想动！', revised: 1, event: { voiceRevised: 1 } });
     expect(gate).toHaveBeenCalledWith(1);
     expect(h.call).toHaveBeenCalledTimes(1);
   });
@@ -38,9 +40,9 @@ describe('rewriting the copied sentences (VOICE-2 PR-3)', () => {
       await expect(reviseVoiceDraft(args)).rejects.toMatchObject({ code });
     }
     h.runtime.mockRejectedValueOnce(new TurnStop('TURN_PROVIDER_BUSY'));
-    expect(await reviseVoiceDraft(args)).toEqual({ text: draft, revised: 0 });
+    expect(await reviseVoiceDraft(args)).toEqual({ text: draft, revised: 0, event: {} });
     h.runtime.mockRejectedValueOnce(new Error('down'));
-    expect(await reviseVoiceDraft(args)).toEqual({ text: draft, revised: 0 });
+    expect(await reviseVoiceDraft(args)).toEqual({ text: draft, revised: 0, event: {} });
   });
 });
 

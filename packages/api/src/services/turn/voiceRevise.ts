@@ -16,16 +16,26 @@ import { FREE_CHAT_REQUEST_FORMAT, openRouterRequestBody, PLAIN_TEXT_STREAM, typ
 const REWRITE_OUTPUT_TOKENS = 4096;
 
 /** The rewrite call as turnPolicy's "another model call": the same model under its own bound (its output cap is smaller), so the
- * freeze and the stop-loss count it and limits.model = 1 + tools + other calls holds. None when the reply cannot be shown passages. */
+ * freeze and the stop-loss count it and limits.model = 1 + tools + other calls holds, at the open and on a resume (chat.ts adds
+ * one model call and passes one to resumeLimits when tools.voiceRewrite). None when the reply cannot be shown passages. */
 export function voiceRewriteCalls(on: boolean, quote: { upperUsd: string; multiplier: string }) {
   return on ? [{ upperUsd: quote.upperUsd, multiplier: quote.multiplier }] : [];
 }
-type Args = { draft: string; shown: readonly string[]; quote: Parameters<typeof modelCall>[1] & { model: string; reasoning: unknown; outputLimit: number };
+type Deps = { quote: Parameters<typeof modelCall>[1] & { model: string; reasoning: unknown; outputLimit: number };
   callDeps: Parameters<typeof modelCall>[0]; callPolicy: unknown; callGate: (count: number) => Promise<void> };
+type Args = Deps & { draft: string; shown: readonly string[] };
 
-export async function reviseVoiceDraft(args: Args): Promise<{ text: string; revised: number }> {
+/** The draft to save, how many sentences were rewritten, and what the result event says of it (nothing when none was). */
+type Revised = { text: string; revised: number; event: { voiceRevised?: number } };
+const outcome = (text: string, revised: number): Revised => ({ text, revised, event: revised ? { voiceRevised: revised } : {} });
+
+/** chat.ts's call: the draft, the tools this reply was built with (the passages it was shown), the turn's model call parts. */
+export function reviseVoiceDraft(draft: string, built: { voiceShown?: () => string[] } | null, deps: Deps): Promise<Revised> {
+  return reviseShown({ ...deps, draft, shown: built?.voiceShown?.() ?? [] });
+}
+export async function reviseShown(args: Args): Promise<Revised> {
   const overlaps = findOverlaps(args.draft, args.shown);
-  if (!overlaps.length) return { text: args.draft, revised: 0 };
+  if (!overlaps.length) return outcome(args.draft, 0);
   const context: RequestContext = { providerRequestFormat: FREE_CHAT_REQUEST_FORMAT, textStream: PLAIN_TEXT_STREAM, tools: [],
     network: 'deny', reasoning: args.quote.reasoning as RequestContext['reasoning'] };
   let streamed = '';
@@ -43,10 +53,10 @@ export async function reviseVoiceDraft(args: Args): Promise<{ text: string; revi
     });
     const result = applyRewrites(args.draft, overlaps, output || streamed, args.shown);
     logger.info('ai', 'voice_draft_revised', { found: overlaps.length, revised: result.revised });
-    return result;
+    return outcome(result.text, result.revised);
   } catch (error) {
     if (error instanceof TurnStop && (error.code === 'TURN_TOMBSTONED' || error.code === 'TURN_PAUSED_FOR_CREDITS')) throw error;
     logger.warn('ai', 'voice_draft_revise_failed', { found: overlaps.length, code: error instanceof TurnStop ? error.code : 'unknown' });
-    return { text: args.draft, revised: 0 };
+    return outcome(args.draft, 0);
   }
 }
