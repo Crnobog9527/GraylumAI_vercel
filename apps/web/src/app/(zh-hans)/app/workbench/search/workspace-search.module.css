@@ -4,3 +4,21 @@
 .search{display:block;margin:9px 0 5px;color:#6b6b6b;font-size:12px}.searchInput{display:block;width:100%;padding:9px 11px;border:1px solid #e5e5e5;border-radius:8px;background:#fff;color:#262626;font-size:14px}.searchInput:focus{outline:1px solid #999}
 .results{margin-top:22px}.results section{margin-top:24px}.results h2{margin:0;padding-bottom:8px;border-bottom:1px solid #e8e8e8;font-size:16px;font-weight:500}.row{display:block;flex:1;min-width:0;padding:14px 4px;border-bottom:1px solid #eee;color:#262626;text-decoration:none}.row:hover{background:#fafafa}.row strong,.row small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.row strong{font-size:14px;font-weight:500}.row small{margin-top:3px;color:#6b6b6b;font-size:12px}.workRow{display:flex;align-items:center;gap:8px;border-bottom:1px solid #eee}.workRow .row{border:0}.workRow button{padding:7px 10px;border:1px solid #e5e5e5;border-radius:8px;background:white;color:#444;font-size:12px;cursor:pointer}.workRow button:disabled{opacity:.5}.empty{color:#6b6b6b;font-size:13px}.error{color:#b73535;font-size:13px}.more{display:inline-block;margin-top:14px}
 @media(max-width:700px){.page{padding:28px 18px 55px}.heading h1{font-size:22px}}
+/*
+ * Phones (639px and below; Owner 2026-11-12, mobile plan A, MOBILE-UX): the search box stays at the top while the results
+ * scroll, at 16px so a phone does not zoom into it; each result is a full-width row a thumb can hit, and 恢复 is a real button.
+ */
+@media(max-width:639px){
+ .page{padding:16px 16px 40px;scrollbar-gutter:auto}
+ .heading h1{font-size:20px}.heading a{display:inline-flex;align-items:center;min-height:36px;padding:0 12px;border-radius:999px;font-size:13px}
+ .intro{margin:6px 0 10px;font-size:13px}
+ .search{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+ .searchInput{position:sticky;top:-16px;z-index:2;height:46px;padding:0 14px;border-radius:12px;background:#f4f4f5;border-color:transparent;font-size:16px;
+  box-shadow:0 0 0 8px #fff}
+ .searchInput:focus{outline:2px solid #262626;outline-offset:0;background:#fff}
+ .results{margin-top:10px}.results section{margin-top:18px}.results h2{font-size:15px}
+ .row{display:flex;flex-direction:column;justify-content:center;min-height:60px;padding:10px 2px}
+ .row strong{font-size:15px}.row small{font-size:13px}
+ .workRow button{min-height:40px;padding:0 16px;border-radius:999px;font-size:14px}
+ .more{display:inline-flex;align-items:center;min-height:44px;font-size:14px}
+}

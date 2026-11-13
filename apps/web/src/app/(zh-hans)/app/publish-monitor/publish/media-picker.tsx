@@ -67,7 +67,11 @@ export function MediaPicker({ items, onChange, disabled, lockCover = false }: { 
         onDragOver={event => { if (!closed) { event.preventDefault(); setOver(true); } }}
         onDragLeave={() => setOver(false)}
         onDrop={event => { event.preventDefault(); setOver(false); if (!closed) add(event.dataTransfer.files); }}>
-        {full ? `已选满 ${MAX_MEDIA_FILES} 个文件` : <>把文件拖到这里，或<strong>选择文件</strong></>}
+        {/* A phone has nothing to drag: it says what a tap opens (the photo library or files). */}
+        {full ? `已选满 ${MAX_MEDIA_FILES} 个文件` : <>
+          <span className={styles.dropDesk}>把文件拖到这里，或<strong>选择文件</strong></span>
+          <span className={styles.dropPhone}><strong>从相册或文件里选择</strong></span>
+        </>}
         <small>文件只在你的浏览器里预览，点"确认发布"之前不会上传到任何地方。</small>
         <input type="file" accept="image/*,video/*" multiple disabled={closed}
           aria-label="选择要发布的图片或视频" onChange={event => { add(event.target.files); event.target.value = ''; }} />

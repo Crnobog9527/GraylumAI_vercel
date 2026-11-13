@@ -1,0 +1,43 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/*
+ * The 在线反馈 / 工单 pages on a phone (639px and below; Owner 2026-11-12, mobile plan A, MOBILE-UX): the ticket list, one
+ * ticket and the new-ticket form read like an app. Lighter cards, the two lists as one segmented switch, rows and buttons a
+ * thumb can hit (44px and up), and every field at 16px so a phone does not zoom into it. Nothing applies above 639px.
+ * `!important` is only where an inline style of the components has to give way (their card shadow).
+ */
+@media (max-width: 639px) {
+  .card { padding: 16px; border-radius: 16px; box-shadow: none !important; }
+  .head { gap: 12px; margin-bottom: 16px; }
+  .head h3, .title { font-size: 18px; }
+  .createButton { min-height: 40px; padding: 0 16px; border-radius: 999px; font-size: 14px; }
+
+  /* 现有工单 / 已关闭: one switch the width of the card. */
+  .tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-bottom: 16px; padding: 4px; border-radius: 12px;
+    background: var(--bg-tertiary, #f1f1f2); }
+  .tab { justify-content: center; min-height: 44px; padding: 0 8px; font-size: 15px; }
+
+  .item { min-height: 76px; padding: 14px; }
+  /* No sideways nudge under a finger (Tailwind 4's translate utilities use `translate`). */
+  .item:hover { translate: none; }
+  .item h4 { font-size: 15px; }
+
+  .back { min-height: 44px; margin-bottom: 8px; padding-left: 4px; font-size: 15px; }
+
+  /* The form: 16px fields, 48px tall where they are one line. */
+  .form input:not([type='file']), .form textarea, .form button[role='combobox'] { font-size: 16px; }
+  .form input:not([type='file']), .form button[role='combobox'] { height: 48px; border-radius: 12px; }
+  .form textarea { border-radius: 12px; }
+  .form label { font-size: 15px; }
+  .option { min-height: 44px; font-size: 16px; }
+  .remove { width: 44px; height: 44px; }
+  /* 取消 and 提交工单 side by side across the width, the main one wider, both thumb-sized. */
+  .actions { display: grid; grid-template-columns: 1fr 2fr; gap: 10px; }
+  .actions > * { min-height: 48px; border-radius: 999px; font-size: 15px; }
+
+  /* One ticket: the 关闭工单 button under the title, as wide as the card. */
+  .detailHead { flex-direction: column; align-items: stretch; }
+  .detailHead h2 { font-size: 18px; }
+  .closeTicket { width: 100%; min-height: 44px; border-radius: 999px; font-size: 15px; }
+  .reply textarea { font-size: 16px; border-radius: 12px; }
+  .send { width: 100%; min-height: 48px; border-radius: 999px; font-size: 15px; }
+}

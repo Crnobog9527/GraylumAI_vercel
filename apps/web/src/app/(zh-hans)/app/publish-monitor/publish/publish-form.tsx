@@ -15,6 +15,7 @@ import { clearAttempt, loadAttempt, saveAttempt, sameFiles, type StoredAttempt }
 import { mediaDigest, MediaUploadError, uploadPublishFiles } from '@/lib/publish-monitor/upload-media';
 import { dateTimeLabel, fromLocalInput, timeProblem, toLocalInput, zoneLabel } from '@/lib/publish-schedule/schedule-view';
 import { defaultLaterValue, ScheduleChoice } from '@/components/publish-schedule/ScheduleChoice';
+import sheet from '@/components/design/bottom-sheet.module.css';
 import { trpc } from '@/trpc/client';
 import { MediaPicker, type PickedMedia } from './media-picker';
 import styles from './publish.module.css';
@@ -244,8 +245,9 @@ export function PublishForm({ businessId, workItemId, contextKey, targets, initi
             : recovered ? '再试一次（同一次发布，不会重复发）' : scheduledAt ? '定时发布' : '发布'}</Button>
       </aside>
 
+      {/* On a phone the confirmation rises from the bottom edge, its two buttons in thumb reach (bottom-sheet.module.css). */}
       <Dialog open={confirming} onOpenChange={setConfirming}>
-        <DialogContent>
+        <DialogContent className={`${sheet.panel} ${sheet.anchored}`}>
           <DialogHeader>
             <DialogTitle>{scheduledAt ? '确认定时发布' : '确认发布'}</DialogTitle>
             <DialogDescription>
@@ -263,11 +265,11 @@ export function PublishForm({ businessId, workItemId, contextKey, targets, initi
               <li>发布成功后对方会删除素材；发布失败或没用上的素材，对方约一天内自动清理，我们无法提前删除。</li>
             </>}
           </ul>
-          <label className="flex items-center gap-2 text-sm">
+          <label className={`flex items-center gap-2 text-sm ${styles.accept}`}>
             <Checkbox checked={accepted} onCheckedChange={value => setAccepted(value === true)} />
             我已了解，确认发布
           </label>
-          <DialogFooter>
+          <DialogFooter className={sheet.bar}>
             <Button variant="outline" onClick={() => setConfirming(false)}>取消</Button>
             <Button disabled={!accepted} onClick={publish}>{scheduledAt ? '确认定时发布' : '确认发布'}</Button>
           </DialogFooter>

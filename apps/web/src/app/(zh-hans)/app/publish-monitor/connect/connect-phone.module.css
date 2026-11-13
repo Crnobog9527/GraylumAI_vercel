@@ -1,0 +1,19 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/*
+ * The account confirmation page on a phone (under 640px; Owner 2026-11-12, phone plan A). The page borrows the publish
+ * page's look (../publish/publish.module.css), and that file's phone layer already gives it the grey canvas, the white
+ * head and the round card. This file adds only what this page alone has: the account choices, the daily-update line and
+ * the two buttons, each at a thumb's size. Above 639px nothing here applies.
+ * Every rule names `.page` first, so it wins over the borrowed rule whichever of the two files loads later.
+ */
+@media (max-width: 639px) {
+  .page .choices legend { margin-bottom: 10px; font-size: 14px; }
+  .page .choice { min-height: 52px; padding: 10px 14px; border-radius: 12px; font-size: 15px; }
+  .page .choice input { flex: none; width: 20px; height: 20px; margin: 0; }
+  .page .choice small { font-size: 12.5px; }
+  .page .check { align-items: flex-start; min-height: 44px; padding: 8px 0; font-size: 14px; line-height: 1.55; }
+  .page .check > button { flex: none; margin-top: 3px; }
+  /* The main button first and wider, the way the sheets' button rows are (bottom-sheet.module.css). */
+  .page .actions { display: grid; grid-template-columns: 2fr 1fr; gap: 10px; margin-top: 4px; }
+  .page .actions > button { height: 48px; border-radius: 999px; font-size: 15px; }
+}

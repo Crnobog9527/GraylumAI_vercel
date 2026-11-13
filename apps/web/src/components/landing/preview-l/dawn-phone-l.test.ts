@@ -71,6 +71,14 @@ describe('the home page on a phone, laid out the way an app is', () => {
     // The menu: the header's drawer is its direct child with an id, hidden until opened; its places are links in groups.
     const header = between('<header', '</header>');
     expect(header).toMatch(/<div id="[^"]+" class="[^"]*drawer[^"]*" hidden=""><nav [^>]*>(?:<div[^>]*>(?:<p>[^<]*<\/p>)?(?:<a [^>]*>[^<]*<\/a>)+<\/div>)+/);
+    // Staging review of #1932: the menu was sized as the screen less 64px while the bar stood 52px tall, and the page showed
+    // under it. No number is written now: the open header is as tall as the screen and the menu takes what the bar leaves.
+    expect(rules).toContain('.phone.phone header:has(> [id]:not([hidden]) > nav) { display: flex; flex-direction: column; height: 100dvh; padding-bottom: 0; }');
+    expect(rules).toMatch(/\.phone\.phone header > \[id\]:not\(\[hidden\]\) \{ flex: 1 1 0; min-height: 0; max-height: none;/);
+    expect(rules).not.toMatch(/100dvh - \d+px/);
+    // The header that holds the menu is the only header with a direct child that has an id and holds a nav.
+    const headers = html.split('<header').slice(1).map(part => part.slice(0, part.indexOf('</header>')));
+    expect(headers.filter(part => /<div id="[^"]+"[^>]*><nav /.test(part))).toHaveLength(1);
     // The voices: one list, each voice a row.
     expect(html).toMatch(/<ol id="j-voice-wall"[^>]*><li data-row=""/);
     expect(layer).toContain('[id=\'j-voice-wall\']');

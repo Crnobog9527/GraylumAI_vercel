@@ -52,3 +52,13 @@ it('lets the kept-mounted documents pane fill and scroll, and hides it with [hid
  expect(css).toMatch(/\.documentsPane\{display:flex;flex-direction:column;flex:1;min-height:0\}/);
  expect(css).toContain('.documentsPane[hidden]{display:none}');
 });
+// Controller 2026-11-13: a platform is stored by its code; the library showed the code. It shows the name, as the rail and the start page do (#1917, #1918).
+it('names a platform (小红书, 抖音), not its stored code, and leaves a platform it does not know as it is',()=>{
+ const account=(platform:string,name:string)=>({projectId:name,platform,account:name,stage:'starting',items:[{workItemId:'item-'+name,title:'选题 '+name,content:[]}]});
+ state.library={...state.library,data:{businesses:[{businessId:'business',accounts:[account('xiaohongshu','甲账号'),account('douyin','乙账号'),account('测试平台','丙账号')]}]}};
+ const {html,text}=render();
+ expect(text).toContain('小红书');expect(text).toContain('抖音');expect(text).toContain('测试平台');
+ expect(html).not.toContain('xiaohongshu');expect(html).not.toContain('douyin');
+ // The group's heading in the list of accounts, and each topic's line.
+ expect(html).toMatch(/<strong>小红书</);expect(text).toContain('小红书 · 甲账号');expect(text).toContain('抖音 · 乙账号');
+});

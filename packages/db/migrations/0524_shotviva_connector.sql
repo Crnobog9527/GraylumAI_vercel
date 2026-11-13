@@ -16,6 +16,7 @@
 -- Recovery: to withdraw, re-apply the six whole definitions from packages/db/functions at the staging commit before this
 --   migration and restore the previous CHECK; the column can stay (nothing reads it) or be dropped once empty.
 BEGIN;
+SET LOCAL lock_timeout='5s';
 
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS shotviva_account_id uuid;
 -- Clients never write it; the server sets and clears it.

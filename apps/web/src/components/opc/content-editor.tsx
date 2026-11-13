@@ -7,6 +7,8 @@ import { VersionCompare } from './version-compare';
 import { ContentErasureDialog } from './content-erasure-dialog';
 import { ContentDraftView } from './content-draft-view';
 import styles from './content-editor.module.css';
+// A phone shows the full editor as a sheet from the foot of the screen (bottom-sheet.module.css; nothing changes above 639px).
+import sheet from '@/components/design/bottom-sheet.module.css';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 
 export type ContentVersion={id:string;kind:string;version:number;status:string;title?:string|null;body:string|null;contentAvailable?:boolean;sourceContentId:string|null;executionId:string|null;requestId:string};
@@ -138,7 +140,7 @@ export const ContentEditor=forwardRef<ContentEditorHandle,{item:EditableItem;onS
   onErase={latest?()=>setErasing({id:latest.id,name:(latest.title||item.title)+' · 全部版本',ids:versions.map(v=>v.id)}):undefined}
   finalizeDisabled={pending||saveMutation.isPending||!item.sourceAvailable} onFinalize={()=>save('final')}
   overlay={<>
-  {expanded&&expandedDraft&&<Dialog.Root open onOpenChange={setExpanded}><Dialog.Overlay className={styles.backdrop}><Dialog.Content aria-label="编辑标题与正文" aria-describedby={undefined} className={styles.modal} onCloseAutoFocus={event=>{event.preventDefault();expandedTrigger.current?.focus();}}><header><Dialog.Title asChild><h2>编辑标题与正文</h2></Dialog.Title><button aria-label="关闭编辑" onClick={()=>setExpanded(false)}>×</button></header><div className={styles.modalFields}><label>稿件标题<input aria-label="展开编辑标题" value={expandedDraft.title} maxLength={160} onChange={event=>setExpandedDraft({...expandedDraft,title:event.target.value})}/></label><label>{contentLabel+'正文'}<textarea aria-label="展开编辑正文" value={expandedDraft.body} maxLength={20000} onChange={event=>setExpandedDraft({...expandedDraft,body:event.target.value})}/></label></div><footer><p>确认修改后会自动同步为草稿。</p><div><button onClick={()=>setExpanded(false)}>取消</button><button className={styles.primary} onClick={()=>{change(expandedDraft);setExpanded(false);}}>确认修改</button></div></footer></Dialog.Content></Dialog.Overlay></Dialog.Root>}
+  {expanded&&expandedDraft&&<Dialog.Root open onOpenChange={setExpanded}><Dialog.Overlay className={`${styles.backdrop} ${sheet.host}`}><Dialog.Content aria-label="编辑标题与正文" aria-describedby={undefined} className={`${styles.modal} ${sheet.panel}`} onCloseAutoFocus={event=>{event.preventDefault();expandedTrigger.current?.focus();}}><header><Dialog.Title asChild><h2>编辑标题与正文</h2></Dialog.Title><button aria-label="关闭编辑" onClick={()=>setExpanded(false)}>×</button></header><div className={styles.modalFields}><label>稿件标题<input aria-label="展开编辑标题" value={expandedDraft.title} maxLength={160} onChange={event=>setExpandedDraft({...expandedDraft,title:event.target.value})}/></label><label>{contentLabel+'正文'}<textarea aria-label="展开编辑正文" value={expandedDraft.body} maxLength={20000} onChange={event=>setExpandedDraft({...expandedDraft,body:event.target.value})}/></label></div><footer><p>确认修改后会自动同步为草稿。</p><div><button onClick={()=>setExpanded(false)}>取消</button><button className={styles.primary} onClick={()=>{change(expandedDraft);setExpanded(false);}}>确认修改</button></div></footer></Dialog.Content></Dialog.Overlay></Dialog.Root>}
   {erasing&&<ContentErasureDialog target={{kind:'content',id:erasing.id}} name={erasing.name}
    relatedIds={erasing.ids}
    onClose={finished=>{setErasing(null);if(!finished)return;

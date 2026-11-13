@@ -12,6 +12,7 @@ import { WorkspaceFrame } from "@/components/opc/workspace-frame";
 import styles from './start-work.module.css';
 import { WorkComposer, useFreeConversation } from '@/components/opc/work-composer';
 import { CompareHost } from '@/components/fusion-compare/ComparePicker';
+import { ComparePhoneEntry } from '@/components/fusion-compare/ComparePhoneEntry';
 import { askCompare, COMPARE_ENTRY_PARAM } from '@/components/fusion-compare/compare-entry';
 import { readStartEntry, retainedMatches, START_TEXT, type StartMode } from './start-entry';
 import { grantOpeningIntent } from './[draftId]/opening-intent';
@@ -153,7 +154,7 @@ export default function PositioningHome() {
           // The compare belongs to the new conversation now: carry the chosen Skill there and open it (the question stays in its history).
           try{sessionStorage.removeItem('opc-new-task-input');if(skillId)localStorage.setItem('opc-runtime-skill:'+session,skillId);}catch{}
           location.assign('/app/runtime?session='+session);}}/>
-      <WorkComposer value={startInput} onChange={value=>{setStartInput(value);sessionStorage.setItem('opc-new-task-input',value);}} onSend={()=>void free.send(startInput,skillId)} disabled={free.busy} referenceList={free.references} onReferencesChange={free.setReferences} label="新任务内容" placeholder="问一个问题，或描述你想做的事…" skillId={skillId} onSkillChange={setSkillId} note="直接发送即可开始对话，也可以添加资料或选择技能。"/>
+      <WorkComposer value={startInput} onChange={value=>{setStartInput(value);sessionStorage.setItem('opc-new-task-input',value);}} onSend={()=>void free.send(startInput,skillId)} disabled={free.busy} referenceList={free.references} onReferencesChange={free.setReferences} label="新任务内容" placeholder="问一个问题，或描述你想做的事…" skillId={skillId} onSkillChange={setSkillId} note="直接发送即可开始对话，也可以添加资料或选择技能。" tools={<ComparePhoneEntry/>}/>
       {free.error&&<p role="alert">{free.error}</p>}
       {/* UI-B: topic and positioning work cannot read referenced documents; the text carries over without them. */}
       {intent&&free.references.length>0&&<p role="note">

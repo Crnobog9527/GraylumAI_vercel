@@ -3,8 +3,10 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-const state = vi.hoisted(() => ({ library: {} as Record<string, unknown>, profile: {} as Record<string, unknown> }));
-vi.mock('@/trpc/client', () => ({trpc:{user:{getUserProfile:{useQuery:()=>state.profile}},opc:{library:{useQuery:()=>state.library}}}}));
+const state = vi.hoisted(() => ({ library: {} as Record<string, unknown>, profile: {} as Record<string, unknown>,
+  drafts: {} as Record<string, unknown> }));
+vi.mock('@/trpc/client', () => ({trpc:{user:{getUserProfile:{useQuery:()=>state.profile}},opc:{library:{useQuery:()=>state.library},
+  list:{useQuery:()=>state.drafts}}}}));
 vi.mock('@/hooks/use-credits',()=>({useCreditsBalance:()=>({status:'ready',credits:100})}));
 vi.mock('@/components/layout/LanguageSwitch',()=>({LanguageSwitch:()=><button data-language-switch=""/>}));
 import HomePage from './page';
@@ -13,6 +15,7 @@ import { HOME_VISUAL_WORDS } from './home-visuals';
 beforeEach(()=>{
  state.profile={data:{nickname:'Fixture',membership_level:'free'},isError:false};
  state.library={isSuccess:true,isPending:false,data:{businesses:[]},error:null,refetch:vi.fn()};
+ state.drafts={isSuccess:true,isPending:false,data:{drafts:[]},error:null};
 });
 it('shows loading without claiming an empty directory or a new user',()=>{
  state.library={...state.library,isSuccess:false,isPending:true,data:undefined};
@@ -155,4 +158,30 @@ it('on a phone the two buttons sit under the title, before the six steps; the do
  // In the document: greeting, title, the six steps, the buttons, the four items.
  const at=(text:string)=>main.indexOf(text);
  expect([at('你好，Fixture'),at('拥有清楚的内容方向'),at('我们怎样帮你做定位'),at('开始新手引导'),at('从策略，继续走向实际创作')].every((place,index,all)=>place>0&&(index===0||place>all[index-1]))).toBe(true);
+});
+// Staging validation 2026-11-13: a positioning that is confirmed but on no account yet (the rail's 待归类 · 已确认) left the home
+// page offering 开始新手引导, which starts a second one. The home page asks the drafts too, by the shared rule.
+it.each([['published',{draftId:'d-1',state:'published'}],['under revision',{draftId:'d-1',state:'draft',currentVersion:2}]])(
+ 'does not lead a user whose positioning is confirmed (%s) but on no account to start another',(_name,draft)=>{
+ state.drafts={...state.drafts,data:{drafts:[{draftId:'d-0',state:'draft'},draft]}};
+ const html=renderToStaticMarkup(<HomePage/>);
+ expect(html).toContain('进入对话');expect(html).not.toContain('开始新手引导');expect(html).not.toContain('我已有定位');
+ // The second button opens that positioning, not the library, which has no account to show it under.
+ expect(html).toMatch(/<a href="\/app\/positioning\/d-1">查看正式定位<\/a>/);
+ expect(html).toContain('已有定位和工作会保留');
+});
+it('still offers onboarding when the drafts hold nothing confirmed, and an account\'s positioning still opens the library',()=>{
+ state.drafts={...state.drafts,data:{drafts:[{draftId:'d-0',state:'draft'}]}};
+ expect(renderToStaticMarkup(<HomePage/>)).toContain('开始新手引导');
+ state.library={...state.library,data:{businesses:[{accounts:[{strategyDraftId:'d-9'}]}]}};
+ const html=renderToStaticMarkup(<HomePage/>);
+ expect(html).toMatch(/<a href="\/app\/library">查看正式定位<\/a>/);expect(html).not.toContain('开始新手引导');
+});
+it.each([['being read',{isSuccess:false,isPending:true,data:undefined,error:null}],
+ ['unreadable',{isSuccess:false,isPending:false,data:undefined,error:{message:'x'}}]])(
+ 'treats the user as an existing one while the drafts are %s: no onboarding, and no claim either way',(_name,drafts)=>{
+ state.drafts=drafts;
+ const html=renderToStaticMarkup(<HomePage/>);
+ expect(html).toContain('进入对话');expect(html).toContain('查看资料库');
+ expect(html).not.toContain('开始新手引导');expect(html).not.toContain('已有定位和工作会保留');expect(html).not.toContain('先一起确认定位');
 });

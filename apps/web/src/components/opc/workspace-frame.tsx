@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { BookOpen, Grid2X2, LogOut, Menu, PanelRightClose, Sparkles, UserRound, X } from 'lucide-react';
+import { ChevronLeft, Grid2X2, LogOut, PanelRightClose, Sparkles, UserRound, X } from 'lucide-react';
 import { trpc } from '@/trpc/client';
 import { sidebarCreditsLabel } from './credits-label';
 import { useCreditsBalance } from '@/hooks/use-credits';
@@ -27,12 +27,15 @@ import {
  RailWorkThread, type RailArea,
 } from './rail-view';
 import { PhoneTabs, type PhoneTab } from './phone-tabs';
+import { useAnnouncementOpen } from './use-announcement';
+import { useKeyboardInset } from './use-keyboard-inset';
 import { useAccountDiscussion } from './use-account-discussion';
 import { LanguageSwitch } from '@/components/layout/LanguageSwitch';
 import styles from './workspace-frame.module.css';
 import { READ_RETRY } from '@/trpc/read-retry';
 // The data review's name table (小红书, 抖音, TikTok …): a platform is stored by its code and shown by its name.
 import { platformName } from '@/components/publish-monitor/labels';
+import { AccountAvatar } from '@/components/profile/AccountAvatar';
 
 type Item = {workItemId:string;sessionId:string;title:string;chatName?:string;uiRevision?:number;pinned?:boolean;archived?:boolean;deleted?:boolean;brief:string|null;day:string;revision:number;contentType?:string;lastActivityAt?:string};
 type Account = {projectId:string;platform:string;account:string;displayName?:string;uiRevision?:number;strategyDraftId?:string|null;pendingStrategyDraftId?:string|null;sourceVersionId?:string|null;sourceVersion?:number|null;profile?:Record<string,{label?:string;value?:string;status?:string}>|null;items:Item[]};
@@ -51,6 +54,8 @@ export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,acti
  // A phone's bottom bar (Owner 2026-11-12, phone plan A). The conversation and topics pages do not show it: there the message box
  // sits at the foot of the screen. Everywhere else it replaces the drawer, so the button that opened the drawer goes (CSS, data-tabs).
  const phoneTab:PhoneTab|null=area==='chat'||area==='topics'?null:area==='start'||area==='history'?'chats':'tools';
+ // The conversation pages fill a phone's screen and keep the message box above the on-screen keyboard (use-keyboard-inset.ts).
+ useKeyboardInset(!phoneTab);
  const [mobileNav,setMobileNav]=useState(false),[mobileRight,setMobileRight]=useState(false);
  // Reveal before the next animation frame, when the checklist requests field focus.
  useLayoutEffect(()=>{if(revealRight)setMobileRight(true);},[revealRight]);
@@ -59,7 +64,8 @@ export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,acti
  const [renameAccountId,setRenameAccountId]=useState(''),[renameAccountValue,setRenameAccountValue]=useState('');
  const [expanded,setExpanded]=useState<string[]>([]);
  const [strategyAccount,setStrategyAccount]=useState<Account|null>(null);
- const [noticeOpen,setNoticeOpen]=useState(true);
+ // The announcement under the top bar: closing it is remembered in the browser (use-announcement.ts), not for this visit only.
+ const [noticeOpen,closeNotice]=useAnnouncementOpen();
  const [bottomPanel,setBottomPanel]=useState<'credits'|'profile'|'feedback'|null>(null);
  const [popoverPosition,setPopoverPosition]=useState({left:264,bottom:16,maxHeight:600});
  const [feedbackDraft,setFeedbackDraft]=useState({title:'',description:'',category:'technical_support'});
@@ -220,7 +226,7 @@ export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,acti
 
  return <div className={styles.workspace} data-area={area} data-tabs={phoneTab?'':undefined}>
   <GlobalHeader area={area} onOpenNav={()=>setMobileNav(true)} end={<LanguageSwitch/>}/>
-  {noticeOpen&&<AnnouncementBar notice={notice} returnParam={returnParam} onClose={()=>setNoticeOpen(false)}/>}
+  {noticeOpen&&<AnnouncementBar notice={notice} returnParam={returnParam} onClose={closeNotice}/>}
   <div className={[styles.shell,right&&rightOpen?styles.withRight:'',mobileNav?styles.navOpen:'',mobileRight?styles.mobileRightOpen:'',!noticeOpen?styles.noNotice:''].join(' ')}>
    <RailView area={area} returnParam={returnParam} dataReview={publishMonitor.data?.ownData===true} onCloseMobile={()=>setMobileNav(false)}
     onCompare={goldTools.onCompare} onJury={goldTools.onJury}>
@@ -274,19 +280,21 @@ export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,acti
      conversationRename.error&&{text:conversationRename.error,role:'alert' as const},
      conversationErasure.notice&&{text:conversationErasure.notice.text,role:conversationErasure.notice.tone==='error'?'alert' as const:'status' as const}].filter(Boolean) as Array<{text:string;role:'alert'|'status'}>}/>
     <RailBottom creditsLabel={shown.label} creditsOpen={bottomPanel==='credits'} profileOpen={bottomPanel==='profile'}
-     avatar={(shownName??profile.data?.email??'我').slice(0,1)} name={shownName??profile.data?.email??'个人中心'}
+     avatar={(shownName??profile.data?.email??'我').slice(0,1)} avatarUrl={profile.data?.avatar_url} name={shownName??profile.data?.email??'个人中心'}
      membership={membershipText(profile,undefined,'查看账户')}
      onFeedback={event=>{setFeedbackSent(false);openBottomPanel('feedback',event.currentTarget);}} onCredits={event=>openBottomPanel('credits',event.currentTarget)}
      onProfile={event=>openBottomPanel('profile',event.currentTarget)}/>
    </RailView>
    <section className={styles.center}>
    {right&&<button type="button" className={styles.mobileRightToggle} aria-label="展开右边栏" onClick={()=>{if(!rightOpen)onToggleRight?.();setMobileRight(true);}}><PanelRightClose size={18}/></button>}
-   <div className={styles.mobileBar}><button aria-label="打开导航" onClick={()=>setMobileNav(true)}><Menu size={19}/></button><span>Graylum · 工作区</span>{right&&<button onClick={()=>{if(!rightOpen)onToggleRight?.();setMobileRight(true);}} aria-label="打开成果"><BookOpen size={18}/></button>}</div>
+   {/* A phone's conversation page fills the screen (Owner 2026-11-12, phone plan A, screen A3): its top row is the way back to the
+       list of conversations. The button that opens the right panel stands at this row's right end (mobileRightToggle above). */}
+   {!phoneTab&&<div className={styles.mobileBar}><Link prefetch={false} href="/app/chats"><ChevronLeft size={24} aria-hidden="true"/>对话</Link></div>}
     {children}
    </section>
    {right&&rightOpen&&<aside className={styles.right} aria-label="当前成果"><div className={styles.rightToggle}><button aria-label="收起成果面板" onClick={()=>{if(window.matchMedia('(max-width:639px)').matches)setMobileRight(false);else onToggleRight?.();}}><PanelRightClose size={18}/></button></div>{right}</aside>}
   </div>
-  {(bottomPanel==='credits'||bottomPanel==='profile')&&<><button type="button" className={styles.popoverDismiss} aria-label="关闭侧栏弹出层" onClick={()=>setBottomPanel(null)}/><section role="dialog" aria-label={bottomPanel==='credits'?'积分详情':'个人资料与账户'} className={styles.bottomPopover} style={{left:popoverPosition.left,bottom:popoverPosition.bottom,maxHeight:popoverPosition.maxHeight}}>{bottomPanel==='credits'?<><div className={styles.creditSummary}><span className={styles.planBadge}><Sparkles size={14} aria-hidden="true"/>{membershipText(profile,'基础套餐','会员账户')}</span><div className={styles.creditBalance}><div><p>剩余积分</p><strong>{credits.status==='ready'?credits.credits:credits.status==='loading'?<span className="skeleton" role="status" aria-busy="true" aria-label="积分读取中" style={{display:'inline-block',width:48,height:18,verticalAlign:'middle'}}/>:'暂不可用'}{credits.status==='ready'&&<span className={styles.creditUnit}>积分</span>}</strong></div><span className={styles.balanceIcon} aria-hidden="true"><img src="/opc-reference/wallet-color.svg" alt=""/></span></div><small>积分明细与套餐信息可在账户查看。</small></div><div className={styles.popoverFoot}><p>需要更多积分？</p><Link href="/app/profile?tab=subscription" onClick={()=>setBottomPanel(null)}>查看套餐 →</Link></div></>:<><div className={styles.profileHead}><span className={styles.avatar}>{(shownName??profile.data?.email??'我').slice(0,1)}</span><span><strong>{shownName??profile.data?.email??'个人中心'}</strong><small>{profile.data?.email??''}</small></span></div><div className={styles.membership}><Link href="/app/profile" onClick={()=>setBottomPanel(null)}><span>{membershipText(profile)}</span><span className={styles.membershipLink}><span>账户与积分</span><span aria-hidden="true">→</span></span></Link></div><Link href="/app/profile" onClick={()=>setBottomPanel(null)}><UserRound size={17}/>个人中心</Link><Link href="/app" onClick={()=>setBottomPanel(null)}><Grid2X2 size={17}/>返回首页</Link><button type="button" disabled={loggingOut} onClick={signOut}><LogOut size={17}/>{loggingOut?'退出中…':'退出登录'}</button></>}</section></>}
+  {(bottomPanel==='credits'||bottomPanel==='profile')&&<><button type="button" className={styles.popoverDismiss} aria-label="关闭侧栏弹出层" onClick={()=>setBottomPanel(null)}/><section role="dialog" aria-label={bottomPanel==='credits'?'积分详情':'个人资料与账户'} className={styles.bottomPopover} style={{left:popoverPosition.left,bottom:popoverPosition.bottom,maxHeight:popoverPosition.maxHeight}}>{bottomPanel==='credits'?<><div className={styles.creditSummary}><span className={styles.planBadge}><Sparkles size={14} aria-hidden="true"/>{membershipText(profile,'基础套餐','会员账户')}</span><div className={styles.creditBalance}><div><p>剩余积分</p><strong>{credits.status==='ready'?credits.credits:credits.status==='loading'?<span className="skeleton" role="status" aria-busy="true" aria-label="积分读取中" style={{display:'inline-block',width:48,height:18,verticalAlign:'middle'}}/>:'暂不可用'}{credits.status==='ready'&&<span className={styles.creditUnit}>积分</span>}</strong></div><span className={styles.balanceIcon} aria-hidden="true"><img src="/opc-reference/wallet-color.svg" alt=""/></span></div><small>积分明细与套餐信息可在账户查看。</small></div><div className={styles.popoverFoot}><p>需要更多积分？</p><Link href="/app/profile?tab=subscription" onClick={()=>setBottomPanel(null)}>查看套餐 →</Link></div></>:<><div className={styles.profileHead}><AccountAvatar className={styles.avatar} url={profile.data?.avatar_url} initial={(shownName??profile.data?.email??'我').slice(0,1)}/><span><strong>{shownName??profile.data?.email??'个人中心'}</strong><small>{profile.data?.email??''}</small></span></div><div className={styles.membership}><Link href="/app/profile" onClick={()=>setBottomPanel(null)}><span>{membershipText(profile)}</span><span className={styles.membershipLink}><span>账户与积分</span><span aria-hidden="true">→</span></span></Link></div><Link href="/app/profile" onClick={()=>setBottomPanel(null)}><UserRound size={17}/>个人中心</Link><Link href="/app" onClick={()=>setBottomPanel(null)}><Grid2X2 size={17}/>返回首页</Link><button type="button" disabled={loggingOut} onClick={signOut}><LogOut size={17}/>{loggingOut?'退出中…':'退出登录'}</button></>}</section></>}
   {bottomPanel==='feedback'&&<div className={styles.feedbackBackdrop} onMouseDown={event=>{if(event.target===event.currentTarget&&!createTicket.isPending)setBottomPanel(null);}}><section role="dialog" aria-modal="true" aria-label="在线反馈" className={styles.feedbackDialog}><header><h2>在线反馈</h2><button type="button" aria-label="关闭在线反馈" onClick={()=>setBottomPanel(null)}><X size={18}/></button></header>{feedbackSent?<div className={styles.feedbackBody}><p role="status">反馈已提交。你可以在我的工单查看后续进度。</p><Link href="/app/profile?tab=tickets">查看我的工单 →</Link></div>:<div className={styles.feedbackBody}><p>提交问题或建议，后续可在我的工单查看。</p><label>问题类型<select aria-label="问题类型" value={feedbackDraft.category} onChange={event=>updateFeedback({category:event.target.value})}><option value="technical_support">技术支持</option><option value="feature_request">功能建议</option><option value="bug_report">Bug 反馈</option><option value="account_issue">账户问题</option><option value="other">其他</option></select></label><label>工单标题<input aria-label="工单标题" maxLength={80} value={feedbackDraft.title} onChange={event=>updateFeedback({title:event.target.value})}/></label><label>问题描述<textarea aria-label="问题描述" maxLength={2000} value={feedbackDraft.description} onChange={event=>updateFeedback({description:event.target.value})}/></label>{feedbackError&&<p role="alert" className={styles.feedbackError}>{feedbackError}</p>}<footer><Link href="/app/profile?tab=tickets">我的工单</Link><button type="button" disabled={createTicket.isPending} onClick={submitFeedback}>{createTicket.isPending?'提交中…':'提交反馈'}</button></footer></div>}</section></div>}
   {strategyAccount?.strategyDraftId&&strategyAccount.sourceVersionId&&<StrategyOverviewDialog account={{projectId:strategyAccount.projectId,platform:strategyAccount.platform,account:strategyAccount.displayName??strategyAccount.account,strategyDraftId:strategyAccount.strategyDraftId,pendingStrategyDraftId:strategyAccount.pendingStrategyDraftId,sourceVersionId:strategyAccount.sourceVersionId,currentVersion:strategyAccount.sourceVersion??undefined,profile:strategyAccount.profile}} onSaved={async()=>{const fresh=await library.refetch();const updated=((fresh.data?.businesses??[]) as Business[]).flatMap(business=>business.accounts).find(account=>account.projectId===strategyAccount.projectId);if(updated)setStrategyAccount(updated);}} onClose={()=>setStrategyAccount(null)}/>}
  {deletingConversation&&<ConversationDeleteDialog name={deletingConversation.name}

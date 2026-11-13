@@ -18,6 +18,7 @@ import GlobalBanner from '@/components/layout/GlobalBanner';
 import ProfileSidebar from '@/components/profile/ProfileSidebar';
 import { ProfileMobileBack, ProfileMobileHub, profileMobileStyles } from '@/components/profile/ProfileMobileHub';
 import { accountDisplayName, membershipText } from '@/lib/account-presentation';
+import { PhoneTabs, phoneTabsRoom } from '@/components/opc/phone-tabs';
 import {
   UserProfileHeader,
   CreditsAndSubscriptionCards,
@@ -152,11 +153,13 @@ function ProfilePageContent() {
   }
 
   return (
-    <ProfileShell onOpenNav={() => setMenuOpen(true)}>
+    // A phone's bottom bar (phone plan A): "我的" is this page's list. A section opened from it is a page of its own with a way back,
+    // so the bar shows on the list only. It draws nothing above 639px.
+    <ProfileShell onOpenNav={() => setMenuOpen(true)} foot={onHub ? <PhoneTabs on="me" /> : null}>
       {/* 全站横幅公告 */}
       <GlobalBanner banners={banners} />
 
-      <div className="container mx-auto px-4 py-6 md:py-8 max-w-7xl">
+      <div className={`container mx-auto px-4 py-6 md:py-8 max-w-7xl ${onHub ? phoneTabsRoom : ''}`}>
         {creditsStatus === 'unavailable' && (
           <div
             className="mb-6 flex flex-col gap-3 rounded-xl p-4 sm:flex-row sm:items-center sm:justify-between"
