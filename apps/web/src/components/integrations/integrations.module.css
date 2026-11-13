@@ -83,9 +83,17 @@ i.mark svg { width: 22px; height: 22px; stroke-width: 1.8; }
 .split { position: relative; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px; overflow: hidden;
   border-radius: var(--gl-radius-card); background: var(--gl-surface); outline: 1px solid rgba(0, 0, 0, .08); outline-offset: -1px; }
 /* A result without a background stands on the squares that mean "nothing here". */
-.split[data-cutout] img:last-of-type { background: repeating-conic-gradient(#e6e6e6 0% 25%, #fff 0% 50%) 0 0 / 12px 12px; }
+.split[data-cutout] button:last-of-type img { background: repeating-conic-gradient(#e6e6e6 0% 25%, #fff 0% 50%) 0 0 / 12px 12px; }
 .seam { position: absolute; top: 50%; left: 50%; width: 22px; height: 22px; padding: 4px; border-radius: 50%; background: #fff;
   color: var(--gl-text); box-shadow: 0 1px 3px rgba(0, 0, 0, .18); translate: -50% -50%; }
+/* A sample picture is a button that opens it large: the cursor says so, a small mark in its corner says so to a finger. */
+.zoom { display: block; width: 100%; padding: 0; border: 0; border-radius: inherit; background: none; cursor: zoom-in; }
+.zoom:focus-visible { outline: 2px solid var(--gl-text); outline-offset: -2px; }
+.zoom:hover img { filter: brightness(.94); }
+.frame { position: relative; display: block; border-radius: var(--gl-radius-card); }
+.zoomMark { position: absolute; right: 6px; bottom: 6px; width: 20px; height: 20px; padding: 5px; border-radius: 50%;
+  background: rgba(20, 19, 18, .56); color: #fff; pointer-events: none; }
+.seam { pointer-events: none; }
 .use figcaption { display: grid; gap: 1px; color: var(--gl-text-secondary-aa); font-size: 13px; line-height: 19px; }
 .use b { color: var(--gl-text); font-weight: 600; line-height: 20px; }
 

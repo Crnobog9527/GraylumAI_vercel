@@ -1,0 +1,71 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/*
+ * A sample picture opened large, over a product's introduction (IntegrationViewer.tsx). A white dialog of DESIGN.md "Light
+ * foundation" (18px, the dialog shadow) on a darker ground than the introduction's, so the pictures are what is looked at. The
+ * panel carries `.light`, so the --gl-* values are the light foundation's. On a computer: the two pictures side by side, as
+ * large as the window's height allows. On a phone (639px and below): a sheet from the bottom edge with one picture across it.
+ */
+.overlay { position: fixed; inset: 0; z-index: 60; background: rgba(20, 19, 18, .62); }
+.panel {
+  /* The pictures are 4:5. Two of them, the gap between and the panel's padding, no taller than the window leaves room for. */
+  --room: calc(100dvh - 248px);
+  position: fixed; z-index: 61; top: 50%; left: 50%; display: grid; gap: 14px; box-sizing: border-box;
+  width: min(calc(100vw - 48px), 1040px, calc(var(--room) * 1.6 + 16px + 48px)); min-width: 320px;
+  padding: 18px 24px 16px; border: 0; translate: -50% -50%;
+}
+.panel:focus { outline: none; }
+.head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; min-height: 44px; }
+.title { margin: 0; color: var(--gl-text); font-size: 17px; font-weight: 600; line-height: 24px; }
+.note { margin: 2px 0 0; color: var(--gl-text-secondary-aa); font-size: 13px; line-height: 20px; }
+.close { display: grid; flex: none; place-items: center; width: 44px; height: 44px; margin: -8px -12px 0 0; padding: 0; border: 0;
+  border-radius: 8px; background: none; color: var(--gl-text); cursor: pointer; }
+.close svg { width: 18px; height: 18px; }
+.close:hover, .steps button:hover:not(:disabled) { background: var(--gl-surface-muted); }
+.close:focus-visible, .steps button:focus-visible, .sides button:focus-visible { outline: 2px solid var(--gl-text); outline-offset: 2px; }
+.sides { display: none; }
+.strip { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.side { display: grid; gap: 8px; min-width: 0; margin: 0; }
+/* The box is the picture's size before the picture is there: first the small one stretched over it, then the large one. */
+.side img { display: block; width: 100%; height: auto; aspect-ratio: 4 / 5; border-radius: var(--gl-radius-card);
+  background: var(--small) center / cover no-repeat var(--gl-surface-muted); object-fit: cover; outline: 1px solid rgba(0, 0, 0, .07); outline-offset: -1px; }
+.side img[data-arrived='true'] { background-image: none; }
+/* A result without a background stands on the squares that mean "nothing here". */
+.side img[data-cutout][data-arrived='true'] { background: repeating-conic-gradient(#e6e6e6 0% 25%, #fff 0% 50%) 0 0 / 24px 24px; }
+.side figcaption { color: var(--gl-text); font-size: 14px; font-weight: 500; line-height: 20px; text-align: center; }
+.side:first-child figcaption { color: var(--gl-text-secondary-aa); font-weight: 400; }
+.steps { display: flex; align-items: center; justify-content: center; gap: 12px; color: var(--gl-text-secondary-aa); font-size: 13px;
+  line-height: 20px; font-variant-numeric: tabular-nums; }
+.steps span:not([class]) { min-width: 44px; text-align: center; }
+.steps button { display: grid; place-items: center; width: 40px; height: 40px; padding: 0; border: 0; border-radius: 50%; background: none;
+  color: var(--gl-text); cursor: pointer; }
+.steps button:disabled { color: var(--gl-border-strong); cursor: default; }
+.steps svg { width: 20px; height: 20px; }
+
+@media (max-width: 639px) {
+  .panel {
+    --room: calc(100dvh - 316px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+    top: auto; bottom: 0; left: 0; width: 100%; min-width: 0; max-height: calc(100dvh - 28px - env(safe-area-inset-top, 0px));
+    padding: 26px 16px calc(12px + env(safe-area-inset-bottom, 0px)); gap: 12px; border-radius: 24px 24px 0 0 !important;
+    translate: 0 var(--pulled, 0px);
+  }
+  .panel::before { content: ''; position: absolute; top: 8px; left: 50%; width: 36px; height: 5px; margin-left: -18px; border-radius: 999px; background: #d9d9d9; }
+  .close { margin: -6px -8px 0 0; }
+  /* The two names, as the way from one picture to the other. */
+  .sides { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; border-radius: 12px; background: var(--gl-surface-muted); }
+  .sides button { min-height: 44px; padding: 0 8px; border: 0; border-radius: 8px; background: none; color: var(--gl-text-secondary-aa);
+    font: inherit; font-size: 14px; line-height: 20px; }
+  .sides button[aria-pressed='true'] { background: var(--gl-surface); color: var(--gl-text); font-weight: 600; box-shadow: var(--gl-shadow-raised); }
+  /* One picture across the sheet; a swipe sideways brings the other. Up and down belongs to the drag that closes the sheet. */
+  .strip { display: flex; gap: 0; margin: 0 -16px; overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x mandatory;
+    scrollbar-width: none; touch-action: pan-x; }
+  .strip::-webkit-scrollbar { display: none; }
+  .side { flex: 0 0 100%; justify-items: center; padding: 0 16px; box-sizing: border-box; scroll-snap-align: center; scroll-snap-stop: always; }
+  .side img { width: min(100%, calc(var(--room) * .8)); }
+  .side figcaption { display: none; }
+  .steps button { width: 44px; height: 44px; }
+}
+@media (max-width: 639px) and (prefers-reduced-motion: no-preference) {
+  .panel { animation: viewerRise .24s cubic-bezier(.32, .72, 0, 1); }
+  .panel[data-pulled='false'] { transition: translate .18s ease-out; }
+}
+@keyframes viewerRise { from { transform: translateY(100%); } to { transform: translateY(0); } }
