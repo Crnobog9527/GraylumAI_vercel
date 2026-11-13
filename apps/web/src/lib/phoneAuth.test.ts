@@ -11,6 +11,20 @@ describe('phone sign-in helpers (PHONE-OTP)', () => {
     expect(phoneSignInAllowed('en')).toBe(false);
   });
 
+  // Owner 2026-11-13: one box for the terms and the privacy policy; nothing about sending personal information abroad.
+  it('the page sends its one box as the two documents it names, and says which two when the box is not ticked', async () => {
+    expect(PHONE_SEND_MESSAGES.CONSENT_REQUIRED).toBe('请先勾选同意服务条款和隐私政策，才能获取验证码。');
+    for (const line of Object.values(PHONE_SEND_MESSAGES)) expect(line).not.toMatch(/出境|境外/);
+    const sent = vi.fn(async () => Response.json({ ok: true }));
+    await requestPhoneCode({ phone: '+8613800005678', createUser: true, privacyConsent: true, termsConsent: true }, sent);
+    expect(JSON.parse((sent.mock.calls[0] as unknown as [string, { body: string }])[1].body))
+      .toEqual({ phone: '+8613800005678', createUser: true, privacyConsent: true, termsConsent: true });
+    const { readFileSync } = await import('node:fs');
+    const hook = readFileSync(new URL('../hooks/use-phone-sign-in.ts', import.meta.url), 'utf8');
+    expect(hook).toContain('privacyConsent: agreed, termsConsent: agreed');
+    expect(hook).not.toContain('transferConsent');
+  });
+
   it('posts JSON to the send route and maps every answer to one plain line', async () => {
     const ok = vi.fn(async () => Response.json({ ok: true }));
     expect(await requestPhoneCode({ phone: '+8613800005678', createUser: true }, ok)).toBeNull();

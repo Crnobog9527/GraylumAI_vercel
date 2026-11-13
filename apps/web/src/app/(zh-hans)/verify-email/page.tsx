@@ -25,12 +25,6 @@ import {
 
 type VerifyTone = 'info' | 'success' | 'error';
 
-const REDIRECT_DISPLAY_LIMIT = 48;
-
-function displayRedirect(target: string) {
-  return target.length > REDIRECT_DISPLAY_LIMIT ? `${target.slice(0, REDIRECT_DISPLAY_LIMIT - 1)}…` : target;
-}
-
 export default function VerifyEmailPage() {
   return (
     <Suspense fallback={<VerifyEmailFallback />}>
@@ -264,12 +258,9 @@ function VerifyEmailPageContent() {
         </div>
 
         <AuthPanel className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="min-w-0">
-            验证成功后将进入{' '}
-            <span className="break-all font-mono text-[var(--pub-ink)]" title={redirectTarget}>
-              {displayRedirect(redirectTarget)}
-            </span>
-          </div>
+          {/* Where it goes is the page's own business, not shown (Owner 2026-11-13: "删掉目录 /app/profile 的展示。直接就说验证成功后
+              将进入应用"); it still goes to the page asked for. */}
+          <div className="min-w-0">验证成功后将进入应用。</div>
           <div className="flex shrink-0 flex-wrap items-center gap-3 whitespace-nowrap">
             <Link
               href={buildAuthHref('/login')}

@@ -33,8 +33,10 @@ export function AuthMethodTabs({ value, onChange }: { value: AuthMethod; onChang
 }
 
 /**
- * Mainland phone sign-in (PHONE-OTP, Owner 2026-11-07): +86 number and the two separate PIPL boxes →
- * six-digit code (5 minutes) → signed in; a new number becomes an account. No password. `submitLabel`: 登录 or 创建账户.
+ * Mainland phone sign-in (PHONE-OTP, Owner 2026-11-07): +86 number and one box → six-digit code (5 minutes) → signed in; a
+ * new number becomes an account. No password. `submitLabel`: 登录 or 创建账户.
+ * The box (Owner 2026-11-13): "我已阅读并同意《服务条款》和《隐私政策》", each a link to its page. There is no box for
+ * sending personal information out of mainland China any more ("同意的这个选项和显示给删了，不要展示").
  */
 export function PhoneSignIn({ redirectTarget, submitLabel, ready }: { redirectTarget: string; submitLabel: string; ready: boolean }) {
   const flow = usePhoneSignIn(redirectTarget);
@@ -84,12 +86,9 @@ export function PhoneSignIn({ redirectTarget, submitLabel, ready }: { redirectTa
         <p id={`${id}-phone-hint`} className={styles.fine}>仅支持中国大陆（+86）手机号；未注册的号码验证后会自动创建账户，不用设密码。</p>
       </div>
       <label className={styles.check}>
-        <input type="checkbox" name="privacyConsent" checked={flow.privacy} onChange={(event) => flow.setPrivacy(event.target.checked)} />
-        <span>我已阅读并同意 <Link href="/privacy" target="_blank" rel="noopener" className={AUTH_LINK_CLASS}>隐私政策</Link></span>
-      </label>
-      <label className={styles.check}>
-        <input type="checkbox" name="transferConsent" checked={flow.transfer} onChange={(event) => flow.setTransfer(event.target.checked)} />
-        <span>我同意将手机号等个人信息传输到中国大陆境外（美国）存储和处理（个人信息出境）</span>
+        <input type="checkbox" name="termsPrivacyConsent" checked={flow.agreed} onChange={(event) => flow.setAgreed(event.target.checked)} />
+        <span>我已阅读并同意<Link href="/terms" target="_blank" rel="noopener" className={AUTH_LINK_CLASS}>《服务条款》</Link>和<Link
+          href="/privacy" target="_blank" rel="noopener" className={AUTH_LINK_CLASS}>《隐私政策》</Link></span>
       </label>
       {status}
       <Button type="submit" disabled={busy} className={AUTH_PRIMARY_BUTTON_CLASS}>

@@ -29,7 +29,7 @@
   "apps/web/src/components/opc/use-scroll-position.ts": {"longLines":1},
   "apps/web/src/components/opc/version-compare.tsx": {"longLines":6},
   "apps/web/src/components/opc/work-composer.tsx": {"longLines":5},
-  "apps/web/src/components/opc/workspace-frame.tsx": {"longLines":32},
+  "apps/web/src/components/opc/workspace-frame.tsx": {"longLines":31},
   "apps/web/src/components/profile/ProfileSidebar.tsx": {"longLines":2},
   "apps/web/src/components/ui/alert-dialog.tsx": {"longLines":1},
   "apps/web/src/components/ui/badge.tsx": {"longLines":1},

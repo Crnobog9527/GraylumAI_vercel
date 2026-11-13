@@ -23,8 +23,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { logClientDevError } from '@/lib/client-log';
-import { createClient } from '@/lib/supabase';
-import { buildAppHref, resolveSiteName } from '@/lib/site-config';
+import { signOutToHome } from '@/lib/sign-out';
+import { resolveSiteName } from '@/lib/site-config';
 import { profileTabHref } from '@/lib/profile-tabs';
 import { useCreditsBalance, CREDIT_THRESHOLDS } from '@/hooks/use-credits';
 import { trpc } from '@/trpc/client';
@@ -83,11 +83,8 @@ export function AppHeader() {
   const handleLogout = async () => {
     setIsLoggingOut(true);
     try {
-      const supabase = createClient();
-      await supabase.auth.signOut();
-
-      // 根据环境跳转到不同的着陆页
-      window.location.href = buildAppHref('/');
+      // To the home page, as every 退出 on a signed-in page (lib/sign-out.ts).
+      await signOutToHome();
     } catch {
       logClientDevError('Logout failed');
     } finally {

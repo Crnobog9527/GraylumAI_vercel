@@ -10,6 +10,7 @@ import {
   recordAutoRedirect,
   type UnauthorizedNoticeReason,
 } from '@/lib/auth-recovery';
+import { isSigningOut } from '@/lib/sign-out';
 
 // Handles API calls rejected as unauthenticated (see decideUnauthorizedAction). Only one recovery
 // runs at a time; after a redirect or a notice it stays locked for the rest of the page load.
@@ -35,6 +36,8 @@ export function useUnauthorizedRecovery(
       sessionRefreshUsed: sessionRefreshUsedRef.current,
       lastRedirectAt: readLastAutoRedirect(),
       now,
+      // Read after the session was looked up: a sign-out started in the meantime counts.
+      signingOut: isSigningOut(),
     });
 
     switch (action.kind) {

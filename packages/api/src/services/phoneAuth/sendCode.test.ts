@@ -10,7 +10,8 @@ import { sendPhoneCode, type PhoneSendDeps } from './sendCode';
 import { fakeSmsSender } from './sms/fake';
 
 const SECRET = `v1,whsec_${Buffer.from('0123456789abcdef0123456789abcdef').toString('base64')}`;
-const SIGNUP = { phone: '138 0000 5678', createUser: true, privacyConsent: true, transferConsent: true };
+const SIGNUP = { phone: '138 0000 5678', createUser: true, privacyConsent: true, termsConsent: true };
+const CONSENT_AT = '2026-11-08T01:02:03.000Z';
 
 function setup(rpcAnswers: Record<string, unknown> = {}, authError: { code?: string; status?: number } | null = null) {
   const rpc = vi.fn(async (fn: string) => ({ data: rpcAnswers[fn] ?? (fn === 'sms_release_send' ? null : 'ok'), error: null }));
@@ -27,20 +28,39 @@ function setup(rpcAnswers: Record<string, unknown> = {}, authError: { code?: str
 describe('sendPhoneCode (POST /api/auth/phone/send)', () => {
   beforeEach(() => { logs.length = 0; });
 
-  it('records the request with the IP, then asks Supabase with both consent times (no captcha, BOT-GUARD)', async () => {
+  it('records the request with the IP, then asks Supabase with the times of what the box agreed to: the terms and the privacy policy', async () => {
     const { deps, rpc, signInWithOtp } = setup();
     expect(await sendPhoneCode(SIGNUP, deps)).toEqual({ ok: true });
     expect(rpc).toHaveBeenCalledWith('sms_request_send', { p_phone_key: expect.stringMatching(/^[0-9a-f]{64}$/), p_ip: '203.0.113.7' });
     expect(signInWithOtp).toHaveBeenCalledWith({ phone: '+8613800005678', options: {
       channel: 'sms', shouldCreateUser: true,
-      data: { phone_privacy_consent_at: '2026-11-08T01:02:03.000Z', phone_transfer_consent_at: '2026-11-08T01:02:03.000Z' },
+      data: { phone_privacy_consent_at: CONSENT_AT, phone_terms_consent_at: CONSENT_AT },
     } });
   });
 
-  it('requires both PIPL boxes for a sign-up, and neither for re-verifying an existing account', async () => {
+  // Owner 2026-11-13: the box for sending personal information abroad is gone from the form; one box, two documents.
+  it('does not ask for, depend on or record the consent to send personal information abroad', async () => {
     const { deps, signInWithOtp } = setup();
-    expect(await sendPhoneCode({ ...SIGNUP, transferConsent: false }, deps)).toEqual({ ok: false, code: 'CONSENT_REQUIRED', status: 400 });
+    // The page as it is now never sends it.
+    expect(await sendPhoneCode(SIGNUP, deps)).toEqual({ ok: true });
+    // Sent as refused, it changes nothing either.
+    expect(await sendPhoneCode({ ...SIGNUP, transferConsent: false }, deps)).toEqual({ ok: true });
+    for (const call of signInWithOtp.mock.calls as unknown as [{ options: { data?: Record<string, unknown> } }][]) {
+      expect(Object.keys(call[0].options.data ?? {}).sort()).toEqual(['phone_privacy_consent_at', 'phone_terms_consent_at']);
+    }
+    // A page loaded before the change ticked its two old boxes: let through, and only the privacy policy is recorded for it.
+    expect(await sendPhoneCode({ phone: '13800005678', createUser: true, privacyConsent: true, transferConsent: true }, deps)).toEqual({ ok: true });
+    expect(signInWithOtp).toHaveBeenLastCalledWith({ phone: '+8613800005678', options: {
+      channel: 'sms', shouldCreateUser: true, data: { phone_privacy_consent_at: CONSENT_AT } } });
+  });
+
+  it('requires the box (the terms and the privacy policy) for a sign-up, and nothing for re-verifying an existing account', async () => {
+    const { deps, signInWithOtp } = setup();
+    expect(await sendPhoneCode({ ...SIGNUP, termsConsent: false }, deps)).toEqual({ ok: false, code: 'CONSENT_REQUIRED', status: 400 });
     expect(await sendPhoneCode({ ...SIGNUP, privacyConsent: false }, deps)).toMatchObject({ code: 'CONSENT_REQUIRED' });
+    expect(await sendPhoneCode({ phone: '13800005678', createUser: true }, deps)).toMatchObject({ code: 'CONSENT_REQUIRED' });
+    // The old box alone, without the privacy policy, was never enough and is not now.
+    expect(await sendPhoneCode({ phone: '13800005678', createUser: true, transferConsent: true }, deps)).toMatchObject({ code: 'CONSENT_REQUIRED' });
     expect(signInWithOtp).not.toHaveBeenCalled();
     expect(await sendPhoneCode({ phone: '13800005678', createUser: false }, deps)).toEqual({ ok: true });
     expect(signInWithOtp).toHaveBeenLastCalledWith({ phone: '+8613800005678', options: { channel: 'sms', shouldCreateUser: false } });

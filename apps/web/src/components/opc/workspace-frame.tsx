@@ -7,8 +7,7 @@ import { ChevronLeft, Grid2X2, LogOut, PanelRightClose, Sparkles, UserRound, X }
 import { trpc } from '@/trpc/client';
 import { sidebarCreditsLabel } from './credits-label';
 import { useCreditsBalance } from '@/hooks/use-credits';
-import { createClient } from '@/lib/supabase';
-import { buildAppHref } from '@/lib/site-config';
+import { signOutToHome } from '@/lib/sign-out';
 import { accountDisplayName, membershipText } from '@/lib/account-presentation';
 import { StrategyOverviewDialog } from './strategy-overview-dialog';
 import { ContentErasureDialog } from './content-erasure-dialog';
@@ -180,7 +179,8 @@ export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,acti
  }
  function updateFeedback(patch:Partial<typeof feedbackDraft>){setFeedbackDraft(current=>{const next={...current,...patch};sessionStorage.setItem('opc-feedback-draft',JSON.stringify(next));return next;});}
  async function submitFeedback(){if(createTicket.isPending)return;const title=feedbackDraft.title.trim(),description=feedbackDraft.description.trim();if(!title||!description){setFeedbackError('请填写工单标题和问题描述。');return;}setFeedbackError('');try{await createTicket.mutateAsync({title,description,category:feedbackDraft.category,attachments:[]});sessionStorage.removeItem('opc-feedback-draft');setFeedbackDraft({title:'',description:'',category:'technical_support'});setFeedbackSent(true);}catch{setFeedbackError('提交结果未确认，请在“我的工单”核对后再尝试，避免重复提交。');}}
- async function signOut(){if(loggingOut)return;setLoggingOut(true);try{await createClient().auth.signOut();window.location.href=buildAppHref('/');}catch{setLoggingOut(false);}}
+ // To the home page, as every 退出 on a signed-in page (lib/sign-out.ts); a sign-out that failed leaves the button usable.
+ async function signOut(){if(loggingOut)return;setLoggingOut(true);if(!await signOutToHome())setLoggingOut(false);}
  const businesses=(library.data?.businesses??[]) as Business[];
  const platforms=new Map<string,Account[]>();
  for(const business of businesses)for(const account of business.accounts){

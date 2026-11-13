@@ -39,8 +39,10 @@ export function decideUnauthorizedAction(input: {
   sessionRefreshUsed: boolean;
   lastRedirectAt: number | null;
   now: number;
+  /** This page pressed 退出 and is on its way to the home page (lib/sign-out.ts): its reads are refused because of that. */
+  signingOut?: boolean;
 }): UnauthorizedAction {
-  if (isPublicPathname(input.pathname)) {
+  if (isPublicPathname(input.pathname) || input.signingOut) {
     return { kind: 'ignore' };
   }
   if (input.hasSession) {

@@ -13,7 +13,7 @@ export const PHONE_SEND_PATH = '/api/auth/phone/send';
 
 export const PHONE_SEND_MESSAGES: Record<PhoneSendCode, string> = {
   PHONE_INVALID: '目前只支持中国大陆（+86）手机号，请检查号码。',
-  CONSENT_REQUIRED: '请先勾选同意隐私政策和个人信息出境，才能获取验证码。',
+  CONSENT_REQUIRED: '请先勾选同意服务条款和隐私政策，才能获取验证码。',
   SMS_COOLDOWN: '验证码刚发过，请 60 秒后再获取。',
   SMS_DAILY_LIMIT: '这个号码今天获取验证码的次数已用完，请明天再试，或改用邮箱。',
   RATE_LIMITED: '操作太频繁，请稍后再试。',
@@ -27,8 +27,9 @@ export const PHONE_VERIFY_FAILED_MESSAGE = '登录没有完成，请稍后重试
 export type PhoneSendRequest = {
   phone: string;
   createUser: boolean;
+  /** The form's one box, "我已阅读并同意《服务条款》和《隐私政策》" (Owner 2026-11-13), sent as the two documents it names. */
   privacyConsent?: boolean;
-  transferConsent?: boolean;
+  termsConsent?: boolean;
 };
 
 /** Asks the server for a code; resolves to null when sent, or the line to show. */
