@@ -6,7 +6,7 @@ const mocks = vi.hoisted(() => ({ status: vi.fn(), disconnect: vi.fn() }));
 vi.mock('@/trpc/client', () => ({ trpc: { useUtils: () => ({ connectors: { shotvivaStatus: { invalidate: vi.fn() } } }),
   connectors: { shotvivaStatus: { useQuery: mocks.status }, shotvivaDisconnect: { useMutation: mocks.disconnect } } } }));
 import { INTEGRATIONS } from '@/lib/integrations/catalog';
-import { IntegrationDetailBody, IntegrationLinks } from './IntegrationDetail';
+import { IntegrationDetailBody, IntegrationViewLink } from './IntegrationDetail';
 import { IntegrationsView } from './IntegrationsView';
 import type { ShotvivaState } from './use-shotviva';
 
@@ -15,7 +15,7 @@ const state = (data: unknown, over: Partial<ShotvivaState> = {}) => ({ status: {
   connecting: false, error: null, disconnect: { mutate: vi.fn(), isPending: false, isError: false }, ...over }) as unknown as ShotvivaState;
 // What the dialog shows under the product's own two paragraphs, and its foot.
 const body = (s: ShotvivaState) => renderToStaticMarkup(<><IntegrationDetailBody module={shotviva} shotviva={s}/>
-  <IntegrationLinks module={shotviva} shotviva={s}/></>);
+  <IntegrationViewLink module={shotviva} shotviva={s}/></>);
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -39,14 +39,27 @@ describe('the integrations page', () => {
     expect(failed).not.toContain('未连接');
   });
 
-  it('the detail: what it does, when to use it, and 去查看 / 去购买 with the tracking, opening Shotviva in a new tab', () => {
+  it('the detail: what it does, when to use it, and 去查看 with the tracking, opening Shotviva in a new tab; no 去购买', () => {
     const html = body(state({ available: true, eligible: true, connected: false, balance: null }));
     for (const title of ['能做什么', '什么时候适合用', '连接到 Graylum 以后']) expect(html).toContain(title);
     expect(html).toContain('href="https://shotviva.com/zh?from=graylum&amp;utm_source=graylum&amp;utm_medium=integration&amp;utm_campaign=shotviva&amp;utm_content=view"');
-    expect(html).toContain('href="https://shotviva.com/zh/pricing?from=graylum&amp;utm_source=graylum&amp;utm_medium=integration&amp;utm_campaign=shotviva&amp;utm_content=buy"');
-    expect(html.match(/target="_blank" rel="noopener noreferrer"/g)?.length).toBeGreaterThanOrEqual(2);
-    expect(html).toContain('>去查看<'); expect(html).toContain('>去购买<');
+    // The one link out: 去查看 (Owner 2026-11-13: "只保留'去查看'").
+    expect(html.match(/target="_blank" rel="noopener noreferrer"/g)?.length).toBe(1);
+    expect(html).toContain('>去查看<');
+    expect(html).not.toContain('去购买');
+    expect(html).not.toMatch(/utm_content=buy|shotviva\.com\/zh\/pricing/);
     expect(html).toContain('连接 Shotviva');
+  });
+
+  it('the introduction is said by Shotviva\'s sample pictures first: a phone photo and a template\'s result, then one picture per use', () => {
+    const html = body(state({ available: true, eligible: true, connected: false, balance: null }));
+    const pictures = [...html.matchAll(/<img src="(\/integrations\/shotviva\/[a-z-]+\.webp)" alt="([^"]+)"/g)].map(match => match[1]);
+    expect(pictures).toEqual(['sneaker-phone', 'sneaker-lifestyle', 'sneaker-listing', 'menu-fish-dark', 'room-staged']
+      .map(name => `/integrations/shotviva/${name}.webp`));
+    for (const words of ['手机拍的照片', '选一个模板后', '商品图', '菜品图', '房源图', '开店', '做餐饮', '做民宿']) expect(html).toContain(`>${words}<`);
+    // The pictures of 能做什么 come before its words, and those of 什么时候适合用 before its two lines.
+    expect(html.indexOf('sneaker-lifestyle')).toBeLessThan(html.indexOf('每个模板都保留你拍的主体'));
+    expect(html.indexOf('room-staged')).toBeLessThan(html.indexOf('一次上新很多商品'));
   });
 
   it('not a member: no connect button, the membership page instead; connector off: no connect button either', () => {

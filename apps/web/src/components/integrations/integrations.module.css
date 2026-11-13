@@ -52,14 +52,31 @@ i.mark svg { width: 22px; height: 22px; stroke-width: 1.8; }
 .pair[data-linked='true'] .wire::before { right: 0; left: 0; border-top: 2px solid var(--gl-success); }
 .wire svg { position: relative; width: 18px; height: 18px; padding: 4px; border-radius: 50%; background: var(--gl-success); color: #fff; }
 
-/* The introduction, row by row: what the row is about on the left, its lines on the right. */
+/* The introduction, row by row: what the row is about on the left; on the right the product's own pictures, then few words. */
 .rows { margin-top: 20px; }
 .row { display: grid; grid-template-columns: 136px minmax(0, 1fr); gap: 16px; padding: 16px 0; border-top: 1px solid var(--gl-border); }
 .row:last-child { padding-bottom: 0; }
 .row h3 { margin: 0; color: var(--gl-text); font-size: 13px; font-weight: 600; line-height: 22px; }
+.rowBody { display: grid; gap: 12px; min-width: 0; }
 .row ul { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; color: var(--gl-text-body); font-size: 14px; line-height: 22px; }
 .row li { position: relative; padding-left: 14px; }
 .row li::before { content: ''; position: absolute; top: 9px; left: 1px; width: 4px; height: 4px; border-radius: 50%; background: #bdbdbd; }
+.lead { margin: 0; color: var(--gl-text-body); font-size: 14px; line-height: 22px; }
+.fine { margin: -4px 0 0; color: var(--gl-text-secondary-aa); font-size: 13px; line-height: 20px; }
+/* A sample picture (4:5 as the product publishes them) with its words under it. */
+.shot { display: grid; gap: 6px; min-width: 0; margin: 0; }
+.shot img { display: block; width: 100%; height: auto; aspect-ratio: 4 / 5; border-radius: var(--gl-radius-card); background: var(--gl-surface-muted);
+  object-fit: cover; outline: 1px solid rgba(0, 0, 0, .07); outline-offset: -1px; }
+.shot figcaption { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 6px; color: var(--gl-text-secondary-aa); font-size: 13px; line-height: 20px; }
+.shot b { color: var(--gl-text); font-weight: 600; }
+/* The photo as taken, an arrow, and what a template made of it. */
+.turn { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 10px; }
+/* The arrow sits at the middle of the two pictures, not of the pictures and their captions. */
+.turnArrow { align-self: center; width: 18px; height: 18px; margin-bottom: 26px; color: var(--gl-text-secondary-aa); }
+.turn .shot:first-child b { color: var(--gl-text-secondary-aa); font-weight: 500; }
+/* One picture for each kind of use: a row of three squares, cut from the middle of each picture. */
+.uses { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.uses .shot img { aspect-ratio: 1; }
 
 .links { display: flex; flex: none; justify-content: flex-end; gap: 8px; }
 .primary, .secondary, .danger, .quiet { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 36px;
@@ -81,7 +98,7 @@ i.mark svg { width: 22px; height: 22px; stroke-width: 1.8; }
   .head { padding: 20px 56px 16px 24px; }
   .scroll { padding: 20px 24px 24px; }
   .links { padding: 14px 24px; }
-  .links .primary, .links .secondary { min-width: 112px; min-height: 40px; font-size: 14px; }
+  .links .primary, .links .secondary { min-width: 128px; min-height: 40px; font-size: 14px; }
 }
 @media (max-width: 639px) {
   .page { padding: 18px 16px 28px; }
@@ -90,11 +107,13 @@ i.mark svg { width: 22px; height: 22px; stroke-width: 1.8; }
   .scroll { margin: 0 -16px; padding: 16px 16px 20px; }
   .connection { grid-template-columns: minmax(0, 1fr); }
   .connectionBody { padding-top: 0; }
-  .row { grid-template-columns: minmax(0, 1fr); gap: 6px; padding: 14px 0; }
-  /* Thumb-sized: 44px for what is pressed inside the sheet (its foot's two links are the sheet's own 48px). */
+  .row { grid-template-columns: minmax(0, 1fr); gap: 10px; padding: 16px 0; }
+  /* Thumb-sized: 44px for what is pressed inside the sheet (its foot's link is the sheet's own 48px). */
   .primary, .secondary, .danger, .quiet { min-height: 44px; padding: 0 16px; font-size: 15px; }
   .connection[data-connection='ready'] .primary { flex: 1; }
   /* The foot is the sheet's own row of buttons (bottom-sheet.module.css `.bar`): 48px and round, as on the other sheets. */
   .links .primary, .links .secondary { min-height: 48px; border-radius: 999px; }
+  /* One link, as wide as the sheet (the sheet's row is laid out for two buttons). */
+  .detail .links { grid-template-columns: minmax(0, 1fr); }
 }
 @media (prefers-reduced-motion: reduce) { .primary, .secondary, .danger, .quiet { transition: none; } }
