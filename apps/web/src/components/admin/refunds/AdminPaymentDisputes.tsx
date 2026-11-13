@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { trpc } from '@/trpc/client';
 import { Button } from '@/components/ui/button';
+import { DisputeEvidencePanel } from './DisputeEvidencePanel';
 
 const statusLabel: Record<string, string> = { pending: '等待处理', frozen: '冻结中', withdrawn: '已撤回',
   superseded: '已被退款取代', review: '待核对', external: '已确认站外付款', confirmed: '已确认停止', manual: '请人工处理',
@@ -71,6 +72,7 @@ export function AdminPaymentDisputes() {
     onError: () => setMessage('未能结案，请核实是否已有对应订单。'),
   });
   const [lostSelected, setLostSelected] = useState<string | null>(null);
+  const [evidenceOpen, setEvidenceOpen] = useState<string | null>(null);
   const confirmLost = trpc.paymentDisputes.confirmLost.useMutation({
     onSuccess: () => {
       setMessage('已判输结案：冻结的积分作为最终收回，这份会员已结束。'); setLostSelected(null);
@@ -127,6 +129,8 @@ export function AdminPaymentDisputes() {
               </div> : <Button variant="outline"
                 onClick={() => { setExternalSelected(row.id); setSelected(null); }}>已核实站外付款</Button>
             ) : null}
+            {row.order_id ? (evidenceOpen === row.id ? <DisputeEvidencePanel disputeId={row.id} onClose={() => setEvidenceOpen(null)} />
+              : <Button variant="outline" onClick={() => setEvidenceOpen(row.id)}>申诉材料</Button>) : null}
             {row.lost_confirmed_at ? <p className="font-bold">已判输结案（{new Date(row.lost_confirmed_at).toLocaleString('zh-CN')}）</p> : null}
             {row.freeze_state === 'withdrawn' && row.status === 'lost' ? <p role="alert">
               这笔拒付在撤回冻结后被判输，系统不会自动再扣，请人工核对处理。</p> : null}

@@ -20,6 +20,9 @@ const loggerState = vi.hoisted(() => ({
   warn: vi.fn(),
 }));
 
+// CHARGEBACK G4 is covered by disputePurchaseBlock.test.ts; these cases are about other purchase rules.
+const disputeBlock = vi.hoisted(() => ({ assert: vi.fn(async () => {}) }));
+vi.mock('../services/payments/disputePurchaseBlock', async original => ({ ...(await original<object>()), assertNoDisputePurchaseBlock: disputeBlock.assert }));
 vi.mock('../services/stripe', () => ({
   assertStripeCheckoutConfigured: stripeState.assertStripeCheckoutConfigured,
   assertCheckoutRateLimit: stripeState.assertCheckoutRateLimit,
