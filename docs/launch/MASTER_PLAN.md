@@ -110,6 +110,23 @@ Owner 在总控列出的"上线后任务"表上的标注（截图，总控整理
 - 其余挪到上线前的任务各自先出方案；它们对上线日期的影响，方案出来后由总控汇总报 Owner 决定（同日 Owner 已把上线日改为 11-30，见上一条）。
 - 对话里出图继续由 INTEGRATION-SHOTVIVA 提供，IMAGE-GEN 关闭。
 
+**2026-11-14：拒付处理（CHARGEBACK）上线前四块全做：判输由 Owner 在后台点按钮结案；判赢撤回冻结时补发暂停的按月积分并自动发"请重新订阅"邮件；申诉材料只汇总、由 Owner 复制到 Stripe 后台提交；未结或判输拒付的账号不能再买；账单商户名定"GRAYLUM AI"（取代第 51 项 B 部分把判输处理、申诉材料、反复拒付限制放"上线后"的写法，以及 PAY-DISPUTE-GUARD 方案 D5"自动撤回放到 CHARGEBACK"的推荐）**
+
+Owner 2026-11-14 对 CHARGEBACK 方案的答复（总控-15 窗口转达，方案见共享笔记 `chargeback-plan-1114.md`，不是 Owner 原话逐字）：
+
+- 四块全做，上线前完成：G1 判输结案、G2 判赢补发加"请重新订阅"邮件、G3 申诉材料汇总页、G4 反复拒付拦截。
+- 判输由 Owner 在后台点"确认判输结案"按钮结案，不在收到 Stripe 判输时自动结案；判赢仍由管理员手动"撤回冻结"，不做自动撤回。
+- 反复拒付：同一账号只要有一笔还没结案或已判输的拒付，就不能再买任何付费商品（订阅、积分包、微信/支付宝单笔）；判赢的不受影响；上线前不做"解除限制"按钮；暂不拦"同一张卡换账号"。
+- 申诉材料页只汇总、由 Owner 复制到 Stripe 后台提交，不做自动提交；材料不含 IP 和设备信息（2026-10-19 PAY-EVIDENCE 不做的决定不变）。
+- 撤回冻结（判赢）时自动给用户发"请重新订阅"邮件（PAY-NOTIFY 已备好的 `dispute_won_resubscribe`）。
+- 信用卡账单商户名定"GRAYLUM AI"，上线前由 Owner 在 Stripe 正式后台亲手设置，写进上线清单；AI 不改 Stripe 设置。
+
+落实方式（实施窗口定，不是 Owner 原话）：
+- 判输结案不新增扣款：拒付发起时冻结扣出的没用完积分转为最终收回，已经用掉的积分不追（记录 Z、AC 不变）；同时结束这份会员、终止以后的按月发放，是创始会员的结束创始身份（名额不放回）。Stripe 和 Waffo 旧订单都适用。
+- 管理员在判决前已撤回冻结、后来又判输的，不自动重新扣，告警给 Owner 人工处理。
+- 判赢补发按原发放日逐期补发、每期防重，不改原会员期限，不延到原到期日之后（记录 AD 不变）。
+- 拆 PR：本条决定一个文档 PR；G1（迁移 1 个）；G2（迁移 1 个，在 G1 之后）；G3+G4（不加迁移）。全部只用 Stripe 沙盒测试卡验收。
+
 **2026-11-13：同一网络（IP）24 小时内最多送 5 个新账号开户积分（BOT-GUARD 第 3 部分，取代同日 BOT-GUARD"同一 IP 24 小时内只送 1 个"）**
 
 起因，Owner 原话（2026-11-13，总控-15 窗口转达，节选）：
@@ -4498,7 +4515,7 @@ node scripts/plan-progress.mjs --ref origin/staging
 | | INTEGRATION-SHOTVIVA | Shotviva 生图连接器和"集成"展示页：连接/断开（只存 shotviva_account_id）、对话里出图（Shotviva 计费，Graylum 不结算，免费会员不能用）、集成页每个自家产品一个展示模块、跳转带追踪；打通后才上线（第 2.1 节 2026-11-05、2026-11-12） | Shotviva 伙伴接口（Shotviva 侧已有）；staging 伙伴密钥由 Owner 填 | 高 | 中 / 5 | — |
 | **5 上线后** | INTEGRATION-BASE → V3-FEISHU、SOCIAL-SYNC | **2026-11-14 Owner 把 INTEGRATION-BASE、V3-FEISHU 改为上线前**（第 2.1 节 2026-11-14），先出方案。沿用 v11 §8（C1 套餐式自动追踪已确认）。2026-10-13：SOCIAL-SYNC 并入 PUBLISH-MONITOR 上线前完成（第 2.1 节），本行只剩 INTEGRATION-BASE、V3-FEISHU | — | 高 | 大 | SOCIAL-SYNC：关闭：2026-10-13 并入 PUBLISH-MONITOR 上线前完成 |
 | | ANALYTICS-POSTHOG | **2026-11-14 Owner 改为上线前**（第 2.1 节 2026-11-14）。参照 Shotviva 埋点方案实施，方案到之前不开工。用户归因（第 2.1 节 2026-10-21 决定）：接入 PostHog 云（美国区），跟随现有 Termly 同意状态，用于用户级来源、路径、漏斗和 AI 推荐流量归因；注销时同步删除该用户在 PostHog 的数据。拒绝同意后的匿名计数、注册时加问题、服务器事件、GA4 去留、录像范围等具体范围都只是总控建议，以开工前方案经 Owner 确认的为准 | 10-31 上线后第一周开工，冻结前不做；开工前先出方案；PostHog 账号和项目编号由 Owner 提供 | 中（含注销对接） | 中 / 待方案 | 阻塞：等 Owner 提供 Shotviva 埋点方案（第 2.1 节 2026-11-14） |
-| | CHARGEBACK | **2026-11-14 Owner 改为上线前**（第 2.1 节 2026-11-14）。方向（Owner 2026-10-04，第 2.1 节第 51 项，[记录 W](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981381009)、[记录 X](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981808905)；**上线后任务，不阻塞上线**）：拒付最终判定输了，按商品分别处理：订阅按退款规则处理这一期（扣掉还没用完的积分、终止这份订阅以后的积分发放，是创始会员的立即结束创始身份，名额不放回）；微信一次性会员结束这一期，1 年期的终止以后按月发放的积分、扣掉这一期还没用完的积分（是创始会员的同样结束创始身份）；订阅和微信一次性会员被冻结的已发积分判输扣回、判赢解冻，不动其他来源（[记录 AC](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982525998)）；积分包扣回这个包里没用完的积分、判赢解冻，不动其他来源的积分（[记录 Z](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982115736)）；所有拒付都不自动接受，由 Owner 人工处理（[记录 Y](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982111397)）；赢了就解除 PAY-DISPUTE-GUARD 的冻结、恢复，按幂等处理（拒付期间被暂停的按月积分，判赢后按原发放日逐期补发，幂等，不改变原会员期限和发放日期，不延到原到期日之后）；订阅判赢后不自动恢复扣费，提醒用户自己重新订阅；判输时订阅终止（[记录 AD](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982615688)），具体由 CHARGEBACK 方案提出、Owner 批准；一键导出申诉材料（用收款核心的同意记录和订单、付款、Stripe 记录；PAY-EVIDENCE 已于 2026-10-19 决定不做，不采集付款 IP/设备证据）；限制同一人反复拒付；信用卡账单商户名（由 Waffo 控制）。续费和到期提醒归 PAY-NOTIFY，拒付事件接收和可撤回冻结归 PAY-DISPUTE-GUARD，上线前完成（2026-10-09 拆分）。拒付通知方式、举证截止日和手续费（每笔 $25）已由 [Waffo 2026-10-10 答复](https://github.com/Crnobog9527/GraylumAI_vercel/pull/752#issuecomment-6095292601)；开工前仍须向 Waffo 核实要交的材料和账单商户名。2026-10-12 补充：新订单改走 Stripe（MP 订单由 Stripe 作为记录商户处理拒付，大陆通道和钱包单笔由我们处理），上文 Waffo 的通知方式、手续费、材料和账单商户名只适用于旧 Waffo 订单；按 Stripe 的做法实施时由方案细化 | PAY-STRIPE-MP、PAY-NOTIFY、PAY-DISPUTE-GUARD；拒付材料和账单商户名核实（旧 Waffo 订单仍向 Waffo 核实） | 高 | 待实施方案细化 | — |
+| | CHARGEBACK | **2026-11-14 Owner 改为上线前**（第 2.1 节 2026-11-14）；**范围以第 2.1 节 2026-11-14"拒付处理上线前四块全做"为准**：G1 判输结案（Owner 点按钮）、G2 判赢补发加重订邮件、G3 申诉材料汇总页（不自动提交）、G4 未结或判输拒付不能再买；账单商户名"GRAYLUM AI"由 Owner 在 Stripe 正式后台设置。以下旧写法里与之冲突的（"上线后""限制反复拒付"未定规则、账单商户名由 Waffo 控制）以该条为准。方向（Owner 2026-10-04，第 2.1 节第 51 项，[记录 W](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981381009)、[记录 X](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981808905)；**上线后任务，不阻塞上线**）：拒付最终判定输了，按商品分别处理：订阅按退款规则处理这一期（扣掉还没用完的积分、终止这份订阅以后的积分发放，是创始会员的立即结束创始身份，名额不放回）；微信一次性会员结束这一期，1 年期的终止以后按月发放的积分、扣掉这一期还没用完的积分（是创始会员的同样结束创始身份）；订阅和微信一次性会员被冻结的已发积分判输扣回、判赢解冻，不动其他来源（[记录 AC](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982525998)）；积分包扣回这个包里没用完的积分、判赢解冻，不动其他来源的积分（[记录 Z](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982115736)）；所有拒付都不自动接受，由 Owner 人工处理（[记录 Y](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982111397)）；赢了就解除 PAY-DISPUTE-GUARD 的冻结、恢复，按幂等处理（拒付期间被暂停的按月积分，判赢后按原发放日逐期补发，幂等，不改变原会员期限和发放日期，不延到原到期日之后）；订阅判赢后不自动恢复扣费，提醒用户自己重新订阅；判输时订阅终止（[记录 AD](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982615688)），具体由 CHARGEBACK 方案提出、Owner 批准；一键导出申诉材料（用收款核心的同意记录和订单、付款、Stripe 记录；PAY-EVIDENCE 已于 2026-10-19 决定不做，不采集付款 IP/设备证据）；限制同一人反复拒付；信用卡账单商户名（由 Waffo 控制）。续费和到期提醒归 PAY-NOTIFY，拒付事件接收和可撤回冻结归 PAY-DISPUTE-GUARD，上线前完成（2026-10-09 拆分）。拒付通知方式、举证截止日和手续费（每笔 $25）已由 [Waffo 2026-10-10 答复](https://github.com/Crnobog9527/GraylumAI_vercel/pull/752#issuecomment-6095292601)；开工前仍须向 Waffo 核实要交的材料和账单商户名。2026-10-12 补充：新订单改走 Stripe（MP 订单由 Stripe 作为记录商户处理拒付，大陆通道和钱包单笔由我们处理），上文 Waffo 的通知方式、手续费、材料和账单商户名只适用于旧 Waffo 订单；按 Stripe 的做法实施时由方案细化 | PAY-STRIPE-MP、PAY-NOTIFY、PAY-DISPUTE-GUARD；拒付材料和账单商户名核实（旧 Waffo 订单仍向 Waffo 核实） | 高 | 待实施方案细化 | — |
 | | LEARN-1 | 第 6.3 节：读取用户数据、依赖数据使用同意（2026-10-12：同意开关上线先隐藏，LEARN-1 做问题案例分析时再定开关方案，第 2.1 节） | 有真实用户 | 高 | 中 | — |
 | | LEARN-2 | 第 6.3 节：读取用户数据和社媒作品数据、依赖数据使用同意（同上） | 有真实用户 / PUBLISH-MONITOR（2026-10-13 起取代 SOCIAL-SYNC） | 高 | 中 | — |
 | | LIB-EXT（资料库扩展） | 全文检索或 pgvector（2026-10-17：自由对话自动检索的基础检索提前到上线前，由 CHAT-AUTO-CONTEXT 负责；向量检索仍在这里）、音频和视频、Agent 看图、Google Drive / Notion 导入（PDF 和图片已于 2026-10-10 移入 LIB-DOCS，第 2.1 节，[#770 决定记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/770#issuecomment-6095169943)） | LIB-DOCS | 高 | 大 | 阻塞：上线后再做（第 2.1 节 2026-10-10、10-17） |
