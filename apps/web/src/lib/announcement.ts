@@ -23,5 +23,7 @@ export const ANNOUNCEMENT_CLOSED_MARK = 'data-announcement-closed';
  * colour: the server cannot know what a browser closed, so its HTML always has the bar, and without this a closed bar
  * would show until the page's scripts had taken over and then drop out, moving the page. It runs before the first paint.
  */
-export const ANNOUNCEMENT_FIRST_PAINT_SCRIPT = `(function(){try{if(localStorage.getItem(${JSON.stringify(ANNOUNCEMENT_CLOSED_KEY)})===${JSON.stringify(ANNOUNCEMENT.id)})`
-  + `document.documentElement.setAttribute(${JSON.stringify(ANNOUNCEMENT_CLOSED_MARK)},'')}catch(e){}})()`;
+export const ANNOUNCEMENT_FIRST_PAINT_SCRIPT = '(function(){try{'
+  + `if(localStorage.getItem(${JSON.stringify(ANNOUNCEMENT_CLOSED_KEY)})===${JSON.stringify(ANNOUNCEMENT.id)})`
+  + `document.documentElement.setAttribute(${JSON.stringify(ANNOUNCEMENT_CLOSED_MARK)},'')`
+  + '}catch(e){}})()';

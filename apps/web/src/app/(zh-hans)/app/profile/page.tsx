@@ -1,7 +1,7 @@
 'use client';
 
 import { PaymentDisputeNotice } from '@/components/profile/PaymentDisputeNotice';
-import { useState, Suspense, useMemo, useEffect, useCallback } from 'react';
+import { useState, Suspense, useMemo, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { AlertTriangle, Menu, RefreshCw } from 'lucide-react';
 import { logClientDevError } from '@/lib/client-log';
@@ -16,6 +16,8 @@ import {
 import { ProfileShell } from '@/components/profile/ProfileShell';
 import GlobalBanner from '@/components/layout/GlobalBanner';
 import ProfileSidebar from '@/components/profile/ProfileSidebar';
+import { ProfileMobileBack, ProfileMobileHub, profileMobileStyles } from '@/components/profile/ProfileMobileHub';
+import { accountDisplayName, membershipText } from '@/lib/account-presentation';
 import {
   UserProfileHeader,
   CreditsAndSubscriptionCards,
@@ -51,6 +53,27 @@ function ProfilePageContent() {
   const setActiveTab = useCallback((tab: ProfileTab) => {
     // state 传 null：Next 只在非内部调用时同步 useSearchParams，传回它自己的 state 会跳过同步
     window.history.replaceState(null, '', withProfileTab(window.location.href, tab));
+  }, []);
+  // On a phone (639px and below) the address without a tab is the "我的" list, and a tab in the address is that section as a
+  // page of its own (Owner 2026-11-12, mobile plan A). Which of the two shows is CSS (profile-mobile.module.css), so the first
+  // frame is right without knowing the screen; above 639px the list never shows and no tab still means 个人资料.
+  const onHub = !isProfileTab(requestedTab);
+  const cameFromHub = useRef(false);
+  const openFromHub = useCallback((tab: ProfileTab) => {
+    // Pushed, not replaced: the phone's own back gesture then returns to the list.
+    cameFromHub.current = true;
+    const url = new URL(window.location.href);
+    url.searchParams.set('tab', tab);
+    window.history.pushState(null, '', `${url.pathname}${url.search}${url.hash}`);
+    window.scrollTo(0, 0);
+  }, []);
+  const backToHub = useCallback(() => {
+    // Opened from the list: step back to it. Opened by a link straight to a section: there is no list behind, so show it in place.
+    if (cameFromHub.current) { cameFromHub.current = false; window.history.back(); return; }
+    const url = new URL(window.location.href);
+    url.searchParams.delete('tab');
+    window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+    window.scrollTo(0, 0);
   }, []);
   const [menuOpen, setMenuOpen] = useState(false);
   const [ticketInitialView, setTicketInitialView] = useState<'list' | 'create'>('list');
@@ -158,8 +181,14 @@ function ProfilePageContent() {
           </div>
         )}
         <div className="flex flex-col md:flex-row gap-4 md:gap-8">
-          {/* Mobile Sidebar Trigger */}
-          <div className="md:hidden mb-4">
+          {userProfile && onHub && <ProfileMobileHub
+            name={accountDisplayName({ data: userProfile }) ?? '用户'} avatarUrl={effectiveUser.avatar_url}
+            initial={effectiveUser.full_name?.[0] || effectiveUser.email?.[0]?.toUpperCase() || 'U'}
+            membership={membershipText({ data: userProfile })} credits={effectiveUser.credits}
+            onOpen={openFromHub} onFeedback={() => { setTicketInitialView('create'); openFromHub('tickets'); }} />}
+
+          {/* The section drawer: between the phone and the desktop widths (640–767px). On a phone the list above replaces it. */}
+          <div className={`md:hidden mb-4 ${profileMobileStyles.drawerTrigger}`}>
             <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
               <SheetTrigger asChild>
                 <Button
@@ -199,7 +228,8 @@ function ProfilePageContent() {
           />
 
           {/* Main Content */}
-          <div className="flex-1 min-w-0">
+          <div className={`flex-1 min-w-0 ${onHub && userProfile ? profileMobileStyles.behindHub : ''}`}>
+            {!onHub && <ProfileMobileBack tab={activeTab} onBack={backToHub} />}
             {!userProfile && (
               <ProfileLoadError
                 hasError={Boolean(profileError)}

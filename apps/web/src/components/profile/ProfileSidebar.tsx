@@ -1,14 +1,10 @@
 'use client';
 
-import { memo, useState } from 'react';
-import {
-  User, Crown, Wallet, Shield, Headphones, LogOut
-} from 'lucide-react';
-import { logClientDevError } from '@/lib/client-log';
-import { createClient } from '@/lib/supabase';
-import { buildAppHref } from '@/lib/site-config';
+import { memo } from 'react';
+import { LogOut } from 'lucide-react';
 import { FounderBadge } from '@/components/founder/FounderBadge';
 import type { ProfileTab } from '@/lib/profile-tabs';
+import { PROFILE_MENU_ITEMS as menuItems, useProfileLogout } from './profile-menu';
 
 export type { ProfileTab };
 
@@ -18,35 +14,12 @@ interface ProfileSidebarProps {
   mobile?: boolean;
 }
 
-const menuItems: { id: ProfileTab; label: string; icon: typeof User }[] = [
-  { id: 'profile', label: '个人资料', icon: User },
-  { id: 'subscription', label: '订阅管理', icon: Crown },
-  { id: 'credits', label: '积分记录', icon: Wallet },
-  { id: 'security', label: '账户安全', icon: Shield },
-  { id: 'tickets', label: '工单记录', icon: Headphones },
-];
-
 const ProfileSidebar = memo(function ProfileSidebar({
   activeTab,
   onTabChange,
   mobile = false,
 }: ProfileSidebarProps) {
-  const [isLoggingOut, setIsLoggingOut] = useState(false);
-
-  const handleLogout = async () => {
-    setIsLoggingOut(true);
-    try {
-      const supabase = createClient();
-      await supabase.auth.signOut();
-
-      // 根据环境跳转到不同的着陆页
-      window.location.href = buildAppHref('/');
-    } catch {
-      logClientDevError('Logout failed');
-    } finally {
-      setIsLoggingOut(false);
-    }
-  };
+  const { pending: isLoggingOut, run: handleLogout } = useProfileLogout();
 
   return (
     <div

@@ -41,6 +41,14 @@ describe('tRPC batch size (ARCH-FIX A1)', () => {
     expect(checkRateLimit).toHaveBeenCalledWith('203.0.113.9', 'ip');
   });
 
+  it('puts avatar uploads under the same per-IP limit (PROFILE-AVATAR)', async () => {
+    checkRateLimit.mockResolvedValueOnce({ success: false, limit: 60, remaining: 0, reset: 0, retryAfter: 30 } as never);
+    const response = await proxy(new NextRequest('https://auth-staging.graylum.com/api/profile/avatar',
+      { method: 'POST', headers: { 'x-forwarded-for': '203.0.113.9' } }));
+    expect(response.status).toBe(429);
+    expect(checkRateLimit).toHaveBeenCalledWith('203.0.113.9', 'ip');
+  });
+
   it.each(['GET', 'POST'])('%s: one call more is refused before any limiter or database work', async method => {
     const response = await proxy(batch(TRPC_MAX_BATCH_CALLS + 1, method));
     expect(response.status).toBe(400);

@@ -22,6 +22,7 @@ const trpcMock = `
   const record = (id, reason) => ({ id, type: 'spend', ledger_type: 'spend', counts_as_spend: true, amount: -36, balance_after: 22563, reason,
     created_at: '2026-11-10T08:12:00Z' });
   export const trpc = {
+    useUtils: () => ({ user: { getUserProfile: { invalidate() {} } } }),
     user: { updateUserProfile: { useMutation: () => ({ mutateAsync: async input => input }) } },
     credits: {
       getCreditsSummary: { useQuery: () => ok({ totalSpent: 1284 }) },

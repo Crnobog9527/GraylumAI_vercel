@@ -19,6 +19,7 @@ import { COACH_SCENE_DELIVERABLES, coachSceneCopy } from './coachScenePaywallCop
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 import { cn } from '@/lib/utils';
 import { lightDialogStyle, lightOverlayClass, lightPortalClass } from '@/components/design/light-portal';
+import sheet from '@/components/design/bottom-sheet.module.css';
 
 /**
  * Scene 1 of the paywall design v25: a free user who confirmed every step asks for the report.
@@ -86,10 +87,11 @@ export function ReportPaywallView({ checkout: fullCheckout, onClose, scene = 're
   return (
     // The light signed-in dialog (DESIGN.md "Dialog", the same tone as the checkout dialog): it carries its own tokens, so it is light
     // wherever it is opened. Touch widths get 44px targets.
-    <div className={cn('fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4', lightOverlayClass)}>
+    // On a phone it rises from the bottom edge (bottom-sheet.module.css); the content is the same.
+    <div className={cn('fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4', lightOverlayClass, sheet.host)}>
       <div ref={dialog} role="dialog" aria-modal="true" aria-labelledby="report-paywall-title" tabIndex={-1}
         data-testid="report-paywall" onKeyDown={event => { if (event.key === 'Escape') onClose(); }}
-        className={cn('relative grid max-h-[94dvh] w-full max-w-5xl overflow-y-auto border md:grid-cols-[1fr_1.15fr]', lightPortalClass)}
+        className={cn('relative grid max-h-[94dvh] w-full max-w-5xl overflow-y-auto border md:grid-cols-[1fr_1.15fr]', lightPortalClass, sheet.panel)}
         style={lightDialogStyle}>
         <Button variant="ghost" size="icon" aria-label="关闭" className="absolute right-1 top-1 z-10 h-11 w-11 sm:right-2 sm:top-2 sm:h-9 sm:w-9"
           onClick={onClose}>
