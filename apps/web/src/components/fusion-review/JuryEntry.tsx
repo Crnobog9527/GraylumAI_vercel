@@ -19,7 +19,17 @@ import { QueryNotice } from '@/components/opc/query-notice';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 
 const codeOf = (error: unknown) => (error instanceof Error ? error.message : '');
-type Estimate = { estimateCredits?: number; requiredCredits?: number };
+type Estimate = { estimateCredits?: number; requiredCredits?: number; maxRounds?: number };
+
+/**
+ * What the review does, in the order it happens. A debate round is said only when the administrator's setting allows one
+ * (maxRounds 2, from the estimate); with one round the reviewers' opinions go straight to the summary seat.
+ */
+export function juryProcessText(input: { reviewers: string[]; summary: string; maxRounds?: number }): string {
+  const debate = (input.maxRounds ?? 1) >= 2 ? '意见不一的地方再辩论一轮，' : '';
+  return `${input.reviewers.length} 位评审（${input.reviewers.join('、')}）会各自读完你的定位报告、提出修改意见，`
+    + `${debate}最后由${input.summary}逐条裁决、写出修订稿。用不用修订稿，由你逐章决定。`;
+}
 
 /** The price (POST /api/turn/estimate), read when the card opens. */
 function useTurnEstimate(on: boolean, draftId: string, sourceVersionId: string) {
@@ -135,10 +145,7 @@ function ReportJury({ draftId, sourceVersionId, busy }: { draftId: string; sourc
         {latest.awaitingChoice ? '评审完成，去逐章选择 →' : '查看上次评审 →'}</Link> : null}
       {open ? (
         <section ref={card} className={styles.card} aria-label="评审团">
-          <p>
-            {seats.length} 位评审（{seats.map(seat => names[seat]).join('、')}）会各自读完你的定位报告、提出修改意见，
-            意见不一的地方再辩论一轮，最后由{names.S}逐条裁决、写出修订稿。用不用修订稿，由你逐章决定。
-          </p>
+          <p>{juryProcessText({ reviewers: seats.map(seat => names[seat]), summary: names.S, maxRounds: estimate.data?.maxRounds })}</p>
           <p>大约需要 3–4 分钟，开始后可以离开页面。</p>
           {cap ? <>
             <p className={styles.cap}>本次评审 <b>{cap.toLocaleString('zh-CN')}</b> 积分。生成修订稿才扣，没有生成修订稿全额退回。</p>

@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { trpc } from '@/trpc/client';
 import { CompareCard } from './CompareCard';
 
-export type CompareCardRow = { compareId: string; state: string; createdAt: string; adoption?: { executionId?: string } | null };
+export type CompareCardRow = { compareId: string; state: string; createdAt: string; turnId?: number; adoption?: { executionId?: string } | null };
 type Card = CompareCardRow;
 
 /** The listed cards plus the compares this tab started that the list does not (yet) have: a failed list read must not hide a
@@ -15,14 +15,18 @@ export function withStarted(listed: readonly Card[], started: readonly Card[]): 
   return [...listed, ...started.filter(card => !known.has(card.compareId))];
 }
 
-/** Where each card goes in the transcript: after the last turn that started before it (-1: before every turn), so a compare
- * sits where it was asked and later turns follow it. */
-export function placeCompareCards(cards: readonly Card[], turns: ReadonlyArray<{ createdAt?: string }> | undefined): Map<number, Card[]> {
+/**
+ * Where each card goes in the transcript (FUSION-COMPARE): before the first reply of its own turn or a later one, so a compare sits
+ * where it was asked, the answer adopted from it (saved under the compare's own turn, fusion_compare_turn_adopt) and the follow-ups
+ * come after it, and the order is the same before and after a refresh. The key is the index of the reply the card goes before;
+ * `replies.length` is after every reply (a compare just started, whose turn the list does not have yet, or the newest one).
+ */
+export function placeCompareCards(cards: readonly Card[], replies: ReadonlyArray<{ turnId: number | null }>): Map<number, Card[]> {
   const placed = new Map<number, Card[]>();
   for (const card of cards) {
-    let at = -1;
-    const asked = Date.parse(card.createdAt);
-    (turns ?? []).forEach((turn, index) => { if (turn.createdAt && Date.parse(turn.createdAt) <= asked) at = index; });
+    const own = card.turnId;
+    const found = own === undefined ? -1 : replies.findIndex(reply => reply.turnId !== null && reply.turnId >= own);
+    const at = found === -1 ? replies.length : found;
     placed.set(at, [...(placed.get(at) ?? []), card]);
   }
   return placed;
