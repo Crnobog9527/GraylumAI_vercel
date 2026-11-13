@@ -1,11 +1,11 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 'use client';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { ArrowRight, ArrowUpRight, Check, Image as ImageIcon } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import sheet from '@/components/design/bottom-sheet.module.css';
-import { trackedLink, type IntegrationModule, type IntegrationSample } from '@/lib/integrations/catalog';
+import { trackedLink, type IntegrationModule, type IntegrationPicture, type IntegrationSample, type IntegrationUse } from '@/lib/integrations/catalog';
 import type { ShotvivaState } from './use-shotviva';
 import styles from './integrations.module.css';
 
@@ -32,7 +32,7 @@ export function IntegrationDetail({ module, open, onOpenChange, shotviva }: {
           <IntegrationIcon module={module}/>
           <DialogTitle className={styles.detailTitle}>{module.name}</DialogTitle>
         </header>
-        <div className={styles.scroll}>
+        <div className={styles.scroll} data-scrolls="">
           <DialogDescription id={`${module.id}-tagline`} className={styles.tagline}>{module.tagline}</DialogDescription>
           {module.philosophy && <p className={styles.philosophy}>{module.philosophy}</p>}
           <IntegrationDetailBody module={module} {...(shotviva ? { shotviva } : {})}/>
@@ -51,35 +51,66 @@ export function IntegrationDetailBody({ module, shotviva }: { module: Integratio
     <div className={styles.rows}>
       <section className={styles.row}>
         <h3>能做什么</h3>
-        <div className={styles.rowBody}>
+        <div className={styles.what}>
           {/* The same thing twice: as the phone took it, and as a template gave it back. */}
           {showcase && <div className={styles.turn}>
             <Shot sample={showcase.before}/><ArrowRight className={styles.turnArrow} aria-hidden="true"/><Shot sample={showcase.after}/>
           </div>}
-          <Lines lines={module.features} lead={!!showcase}/>
+          <div className={styles.rowBody}><Lines lines={module.features} lead={!!showcase}/></div>
         </div>
       </section>
       <section className={styles.row}>
         <h3>什么时候适合用</h3>
-        <div className={styles.rowBody}>
-          {showcase && <div className={styles.uses}>{showcase.uses.map(sample => <Shot key={sample.src} sample={sample}/>)}</div>}
-          <Lines lines={module.whenToUse}/>
-        </div>
+        {showcase && <ul role="list" className={styles.uses}>{showcase.uses.map(use => <li key={use.label}><Use use={use}/></li>)}</ul>}
+        <Lines lines={module.whenToUse}/>
       </section>
       {module.inGraylum && <section className={styles.row}>
         <h3>连接到 Graylum 以后</h3>
-        <div className={styles.rowBody}><Lines lines={module.inGraylum}/></div>
+        <Lines lines={module.inGraylum}/>
       </section>}
     </div>
   </>;
 }
 
+/**
+ * A sample picture. Each file is twice the size it is shown at and no more, and its box is kept by width and height before it
+ * arrives. It is asked for only when it comes within a short scroll of what the dialog shows (Owner 2026-11-13: "要保证手机版的
+ * 性能"): the browser's own loading="lazy" reaches thousands of pixels ahead, which in this dialog is every picture at once
+ * (measured: all fourteen on opening a 390px sheet). Where the browser cannot watch for that, the picture is simply asked for.
+ */
+function Picture({ picture, size }: { picture: IntegrationPicture; size: readonly [number, number] }) {
+  const image = useRef<HTMLImageElement>(null);
+  const [near, setNear] = useState(() => typeof IntersectionObserver === 'undefined');
+  useEffect(() => {
+    if (near || !image.current) return;
+    const watch = new IntersectionObserver(entries => { if (entries.some(entry => entry.isIntersecting)) setNear(true); },
+      { root: image.current.closest('[data-scrolls]'), rootMargin: `${AHEAD}px 0px` });
+    watch.observe(image.current);
+    return () => watch.disconnect();
+  }, [near]);
+  return <img ref={image} src={near ? picture.src : BLANK} alt={picture.alt} width={size[0]} height={size[1]} decoding="async"/>;
+}
+/** How far ahead of what is shown a picture is fetched: about one row of them. */
+const AHEAD = 160;
+/** Nothing, one pixel of it: what a picture's box holds until the picture is asked for. */
+const BLANK = 'data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==';
+const LARGE = [336, 420] as const;
+const SMALL = [200, 250] as const;
+
 /** One sample picture with its few words under it. */
 function Shot({ sample }: { sample: IntegrationSample }) {
+  return <figure className={styles.shot}><Picture picture={sample} size={LARGE}/><figcaption>{sample.label}</figcaption></figure>;
+}
+
+/** One kind of use: the photo and what came of it in one frame, left to right, then its name and one line. */
+function Use({ use }: { use: IntegrationUse }) {
   return (
-    <figure className={styles.shot}>
-      <img src={sample.src} alt={sample.alt} width={480} height={600} loading="lazy" decoding="async"/>
-      <figcaption><b>{sample.label}</b>{sample.note && <span>{sample.note}</span>}</figcaption>
+    <figure className={styles.use}>
+      <div className={styles.split} data-cutout={use.cutout ? 'true' : undefined}>
+        <Picture picture={use.before} size={SMALL}/><Picture picture={use.after} size={SMALL}/>
+        <ArrowRight className={styles.seam} aria-hidden="true"/>
+      </div>
+      <figcaption><b>{use.label}</b><span>{use.note}</span></figcaption>
     </figure>
   );
 }
@@ -134,7 +165,9 @@ function ShotvivaConnection({ shotviva, icon }: { shotviva: ShotvivaState; icon?
       <div className={styles.connection} data-connection="connected">
         {pair}
         <div className={styles.connectionBody}>
-          <p><b>已连接</b>{data.balance ? `：剩余 ${data.balance.credits} 积分${data.balance.freeCredits ? `，另有 ${data.balance.freeCredits} 免费积分` : ''}`
+          {/* Both kinds by name, a zero as well (Owner 2026-11-13: a bare "3 积分" did not say they were the paid ones). */}
+          <p><b>已连接</b>{data.balance
+            ? <>：付费积分 <strong>{data.balance.credits}</strong> · 免费积分 <strong>{data.balance.freeCredits}</strong></>
             : '：剩余积分暂时读取不了'}</p>
           <div className={styles.connectionActions}>
             {data.balance?.topUpUrl && <a className={styles.secondary} href={data.balance.topUpUrl} target="_blank" rel="noopener noreferrer">

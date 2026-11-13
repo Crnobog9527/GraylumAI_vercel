@@ -8,8 +8,12 @@
  *
  * Wording: Shotviva's confirmed by the Owner on 2026-11-13; no amounts, prices or quotas of our own.
  */
-/** One of a product's own sample pictures (public/integrations/<id>/), with the few words under it. */
-export type IntegrationSample = { src: string; alt: string; label: string; note?: string };
+/** One of a product's own sample pictures (public/integrations/<id>/, 4:5, encoded at twice the size it is shown at). */
+export type IntegrationPicture = { src: string; alt: string };
+/** A sample picture with the few words under it. */
+export type IntegrationSample = IntegrationPicture & { label: string };
+/** One kind of use: a photo as it was taken and what came of it, its name and one short line. `cutout`: the result has no background. */
+export type IntegrationUse = { label: string; note: string; before: IntegrationPicture; after: IntegrationPicture; cutout?: boolean };
 
 export type IntegrationModule = {
   id: string;
@@ -26,9 +30,9 @@ export type IntegrationModule = {
   whenToUse: readonly string[];
   /**
    * The product's own sample pictures, which say most of the introduction (Owner 2026-11-13: "文字太多了…最好能配点样例图之类
-   * 的，这样最直观"): a photo as it was taken and what a template made of it, and one picture for each kind of use.
+   * 的，这样最直观"): a photo as it was taken and what a template made of it, and the same two for each kind of use.
    */
-  showcase?: { before: IntegrationSample; after: IntegrationSample; uses: readonly IntegrationSample[] };
+  showcase?: { before: IntegrationSample; after: IntegrationSample; uses: readonly IntegrationUse[] };
   /** What connecting it changes inside Graylum (absent: a link only, nothing to connect). */
   inGraylum?: readonly string[];
   /** The product's own page (Chinese). Tracking is added by trackedLink, never written here. */
@@ -48,7 +52,7 @@ export const INTEGRATIONS: readonly IntegrationModule[] = [
     philosophy: '我们相信，好看的照片不该只属于会写提示词、会用专业软件的人。Shotviva 保留你拍下的真实主体，只帮你换光线、场景和风格；不用写任何提示词，先看到效果再动手。',
     // Owner 2026-11-13 (second look): pictures first, fewer words. Two of the earlier lines are now said by the pictures and the
     // words under them: "商品图、美食图、宠物照等模板，选一个就能出图。" (the two pictures of 能做什么) and "开店、做餐饮、做民宿或做内容，
-    // 需要商品图、菜品图或房源图的时候。" (the three pictures of 什么时候适合用). The other lines are as they were.
+    // 需要商品图、菜品图或房源图的时候。" (the pictures of 什么时候适合用). The other lines are as they were.
     features: [
       '每个模板都保留你拍的主体，只换光线、场景或画风。',
       '用付费积分生成的图是私密的，没有水印；用免费积分做的图会公开展示，并带水印。',
@@ -57,20 +61,38 @@ export const INTEGRATIONS: readonly IntegrationModule[] = [
       '一次上新很多商品，想用同一个模板整批出图的时候。',
       '想在 Graylum 写内容的同时，直接把配图也做出来的时候。',
     ],
-    // Shotviva's own published examples (its repository's public/cases, the pictures of its /zh pages), at 480×600; the
-    // descriptions are the ones Shotviva's pages give them.
+    // Shotviva's own examples, each a photo as taken and what Shotviva made of it (Owner 2026-11-13, third look: "案例照片不要用
+    // 鞋子这一张，差异化不太大", and which cases to show). From its repository: public/cases and public/home (the pictures of its
+    // /zh pages), and for the two templates 咖啡夜色吧台 and 西餐苔藓森林 the photo and the result its template cards show. The
+    // short lines are cut from the sentences Shotviva's pages say about each; what a poster in a picture says (a date, a
+    // discount) is the picture's, and is not repeated in words here.
     showcase: {
-      before: { src: '/integrations/shotviva/sneaker-phone.webp', label: '手机拍的照片',
-        alt: '真实手机照：玄关木地板上的一只米白色皮面运动鞋，后跟是灰绿色麂皮，早晨阳光很硬，钥匙和打开的鞋盒都入镜了' },
-      after: { src: '/integrations/shotviva/sneaker-lifestyle.webp', label: '选一个模板后',
-        alt: '真实案例：同一只鞋放在阳光下咖啡馆门口的水泥台阶上，身后是虚化的亚麻外套' },
+      before: { src: '/integrations/shotviva/coffee-phone.webp', label: '手机拍的照片',
+        alt: '真实手机照：咖啡店石纹台面上的一杯橙片冰咖啡，身后是咖啡机、磨豆机和杯架' },
+      after: { src: '/integrations/shotviva/coffee-noir-bar.webp', label: '选一个模板后',
+        alt: '真实案例：同一杯咖啡放在深色吧台上，一束暖光打在冰块和杯壁上，旁边是橙子和咖啡豆' },
       uses: [
-        { src: '/integrations/shotviva/sneaker-listing.webp', label: '商品图', note: '开店',
-          alt: '真实案例：同一只鞋的纯白底商品主图，柔和影棚光' },
-        { src: '/integrations/shotviva/menu-fish-dark.webp', label: '菜品图', note: '做餐饮',
-          alt: '真实案例：同一份酸菜鱼重新装进白瓷碗，放在深色原木上，暖色侧光，热气升起' },
-        { src: '/integrations/shotviva/room-staged.webp', label: '房源图', note: '做民宿',
-          alt: '真实案例：同一个大平层客厅、同一个角度，杂物都收掉了，傍晚的金色光线，茶几上一瓶白色枝条' },
+        { label: '菜品图', note: '出菜口用手机拍一张，光线和造型交给模板',
+          before: { src: '/integrations/shotviva/salad-phone.webp', alt: '真实手机照：后厨不锈钢台面上的一盘鸡肉凯撒沙拉' },
+          after: { src: '/integrations/shotviva/salad-forest-moss.webp', alt: '真实案例：同一盘凯撒沙拉，四周是青苔、蕨叶、火山石和树皮' } },
+        { label: '商品图', note: '随手拍的包做成促销海报，还是同一只包',
+          before: { src: '/integrations/shotviva/tote-phone.webp', alt: '手机随手拍：厨房台面上的一只编织皮托特包，窗边自然光（真实案例）' },
+          after: { src: '/integrations/shotviva/tote-promo.webp', alt: '同一只包做成新品促销海报，明亮影棚光（真实案例）' } },
+        { label: '房源图', note: '同一个客厅、同一个角度，杂物都收掉了',
+          before: { src: '/integrations/shotviva/room-phone.webp',
+            alt: '真实手机照：傍晚的大平层客厅，布艺沙发、洞石茶几和整面城市落地窗，地上有购物袋、快递箱和扫地机器人' },
+          after: { src: '/integrations/shotviva/room-staged.webp',
+            alt: '真实案例：同一个大平层客厅、同一个角度，杂物都收掉了，傍晚的金色光线，茶几上一瓶白色枝条' } },
+        { label: '一键白底图', note: '去掉衣架和门，放到纯白底上',
+          before: { src: '/integrations/shotviva/dress-phone.webp', alt: '真实手机照：一条象牙白民族风绣花分层长裙挂在卧室门上，旁边是床和脏衣篮' },
+          after: { src: '/integrations/shotviva/dress-white.webp', alt: '真实案例：同一条绣花长裙，纯白背景' } },
+        { label: '一键抠图', note: '街景和行人都去掉，发丝一根根保留', cutout: true,
+          before: { src: '/integrations/shotviva/hair-phone.webp',
+            alt: '真实手机照：穿驼色大衣的模特站在黄昏的街头，逆光下头发被风吹起，身后有灯架和摩托车' },
+          after: { src: '/integrations/shotviva/hair-cutout.webp', alt: '真实案例：同一位模特抠成透明底，每一缕飞起的发丝都保留' } },
+        { label: '精准编辑图片文字', note: '写一句话改字，字体不变，照片和版式没动',
+          before: { src: '/integrations/shotviva/poster-before.webp', alt: '真实案例：「青岚茶事」茶饮店海报，大字写着新店开业，下面是两杯水果冰茶' },
+          after: { src: '/integrations/shotviva/poster-after.webp', alt: '真实案例：同一张海报，大字改成了一周年店庆，字体没变' } },
       ],
     },
     inGraylum: [

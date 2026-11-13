@@ -39,7 +39,8 @@ i.mark svg { width: 22px; height: 22px; stroke-width: 1.8; }
 .connection[data-connection='connected'] { border-color: #dcebdf; background: var(--gl-success-bg); }
 .connection p { margin: 0; }
 .connection > p { align-self: center; }
-.connection b { color: var(--gl-text); font-weight: 600; }
+.connection b, .connection strong { color: var(--gl-text); font-weight: 600; }
+.connection strong { font-variant-numeric: tabular-nums; }
 .connection[data-connection='connected'] b { color: var(--gl-success); }
 .connectionBody { display: grid; gap: 12px; min-width: 0; padding-top: 5px; }
 .connectionActions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
@@ -52,31 +53,41 @@ i.mark svg { width: 22px; height: 22px; stroke-width: 1.8; }
 .pair[data-linked='true'] .wire::before { right: 0; left: 0; border-top: 2px solid var(--gl-success); }
 .wire svg { position: relative; width: 18px; height: 18px; padding: 4px; border-radius: 50%; background: var(--gl-success); color: #fff; }
 
-/* The introduction, row by row: what the row is about on the left; on the right the product's own pictures, then few words. */
+/* The introduction, row by row: what the row is about, the product's own pictures, then few words. */
 .rows { margin-top: 20px; }
-.row { display: grid; grid-template-columns: 136px minmax(0, 1fr); gap: 16px; padding: 16px 0; border-top: 1px solid var(--gl-border); }
+.row { display: grid; gap: 12px; padding: 18px 0; border-top: 1px solid var(--gl-border); }
 .row:last-child { padding-bottom: 0; }
-.row h3 { margin: 0; color: var(--gl-text); font-size: 13px; font-weight: 600; line-height: 22px; }
-.rowBody { display: grid; gap: 12px; min-width: 0; }
+.row h3 { margin: 0; color: var(--gl-text); font-size: 15px; font-weight: 600; line-height: 22px; }
+.rowBody { display: grid; align-content: start; gap: 10px; min-width: 0; }
 .row ul { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; color: var(--gl-text-body); font-size: 14px; line-height: 22px; }
 .row li { position: relative; padding-left: 14px; }
 .row li::before { content: ''; position: absolute; top: 9px; left: 1px; width: 4px; height: 4px; border-radius: 50%; background: #bdbdbd; }
 .lead { margin: 0; color: var(--gl-text-body); font-size: 14px; line-height: 22px; }
-.fine { margin: -4px 0 0; color: var(--gl-text-secondary-aa); font-size: 13px; line-height: 20px; }
-/* A sample picture (4:5 as the product publishes them) with its words under it. */
+.fine { margin: 0; color: var(--gl-text-secondary-aa); font-size: 13px; line-height: 20px; }
+/* Every sample picture is 4:5 (as the product publishes them); its box is there before the picture is. */
+.shot img, .split img { display: block; width: 100%; height: auto; aspect-ratio: 4 / 5; background: var(--gl-surface-muted); object-fit: cover; }
+/* 能做什么: the photo as taken, an arrow, what a template made of it, each named under it; the words beside them. */
+.what { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 24px; }
+.turn { display: grid; grid-template-columns: 168px auto 168px; gap: 10px; }
 .shot { display: grid; gap: 6px; min-width: 0; margin: 0; }
-.shot img { display: block; width: 100%; height: auto; aspect-ratio: 4 / 5; border-radius: var(--gl-radius-card); background: var(--gl-surface-muted);
-  object-fit: cover; outline: 1px solid rgba(0, 0, 0, .07); outline-offset: -1px; }
-.shot figcaption { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 6px; color: var(--gl-text-secondary-aa); font-size: 13px; line-height: 20px; }
-.shot b { color: var(--gl-text); font-weight: 600; }
-/* The photo as taken, an arrow, and what a template made of it. */
-.turn { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 10px; }
+.shot img { border-radius: var(--gl-radius-card); outline: 1px solid rgba(0, 0, 0, .07); outline-offset: -1px; }
+.shot figcaption { color: var(--gl-text-secondary-aa); font-size: 13px; line-height: 20px; }
+.shot + svg + .shot figcaption { color: var(--gl-text); font-weight: 600; }
 /* The arrow sits at the middle of the two pictures, not of the pictures and their captions. */
 .turnArrow { align-self: center; width: 18px; height: 18px; margin-bottom: 26px; color: var(--gl-text-secondary-aa); }
-.turn .shot:first-child b { color: var(--gl-text-secondary-aa); font-weight: 500; }
-/* One picture for each kind of use: a row of three squares, cut from the middle of each picture. */
-.uses { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
-.uses .shot img { aspect-ratio: 1; }
+/* 什么时候适合用: one frame for each kind of use, the photo on the left and what came of it on the right. */
+.row .uses { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px 12px; }
+.row .uses li { padding: 0; }
+.row .uses li::before { content: none; }
+.use { display: grid; gap: 8px; min-width: 0; margin: 0; }
+.split { position: relative; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px; overflow: hidden;
+  border-radius: var(--gl-radius-card); background: var(--gl-surface); outline: 1px solid rgba(0, 0, 0, .08); outline-offset: -1px; }
+/* A result without a background stands on the squares that mean "nothing here". */
+.split[data-cutout] img:last-of-type { background: repeating-conic-gradient(#e6e6e6 0% 25%, #fff 0% 50%) 0 0 / 12px 12px; }
+.seam { position: absolute; top: 50%; left: 50%; width: 22px; height: 22px; padding: 4px; border-radius: 50%; background: #fff;
+  color: var(--gl-text); box-shadow: 0 1px 3px rgba(0, 0, 0, .18); translate: -50% -50%; }
+.use figcaption { display: grid; gap: 1px; color: var(--gl-text-secondary-aa); font-size: 13px; line-height: 19px; }
+.use b { color: var(--gl-text); font-weight: 600; line-height: 20px; }
 
 .links { display: flex; flex: none; justify-content: flex-end; gap: 8px; }
 .primary, .secondary, .danger, .quiet { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 36px;
@@ -94,7 +105,7 @@ i.mark svg { width: 22px; height: 22px; stroke-width: 1.8; }
 .error { color: var(--gl-error); font-size: 13px; line-height: 20px; }
 
 @media (min-width: 640px) {
-  .detail { width: calc(100vw - 48px); max-width: 600px; max-height: min(88vh, 780px); padding: 0; overflow: hidden; }
+  .detail { width: calc(100vw - 48px); max-width: 680px; max-height: min(88vh, 780px); padding: 0; overflow: hidden; }
   .head { padding: 20px 56px 16px 24px; }
   .scroll { padding: 20px 24px 24px; }
   .links { padding: 14px 24px; }
@@ -107,7 +118,11 @@ i.mark svg { width: 22px; height: 22px; stroke-width: 1.8; }
   .scroll { margin: 0 -16px; padding: 16px 16px 20px; }
   .connection { grid-template-columns: minmax(0, 1fr); }
   .connectionBody { padding-top: 0; }
-  .row { grid-template-columns: minmax(0, 1fr); gap: 10px; padding: 16px 0; }
+  .row { padding: 16px 0; }
+  /* The two pictures share the sheet's width; the words go under them. Two kinds of use to a row. */
+  .what { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .turn { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); }
+  .row .uses { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 10px; }
   /* Thumb-sized: 44px for what is pressed inside the sheet (its foot's link is the sheet's own 48px). */
   .primary, .secondary, .danger, .quiet { min-height: 44px; padding: 0 16px; font-size: 15px; }
   .connection[data-connection='ready'] .primary { flex: 1; }
