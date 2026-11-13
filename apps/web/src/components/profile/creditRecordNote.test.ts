@@ -14,6 +14,9 @@ describe('creditRecordNote', () => {
     expect(creditRecordNote('Opening grant for new user profile bootstrap')).toBe('新用户赠送');
     expect(creditRecordNote('Opening grant already claimed by this identity')).toBe('新用户赠送已经领过');
     expect(creditRecordNote('Opening grant refused: daily cap')).toBe('当天的新用户赠送已经送完，这个账号没有赠送');
+    // BOT-GUARD: each refusal reason has its own plain line on the credit records page.
+    expect(creditRecordNote('Opening grant refused: same IP')).toBe('这个网络 24 小时内已注册多个账号，这个账号没有赠送');
+    expect(creditRecordNote('Opening grant refused: paused')).toBe('新用户赠送暂停中，这个账号没有赠送');
   });
 
   it('shows no second line for an ordinary AI spend: the label above already says it', () => {

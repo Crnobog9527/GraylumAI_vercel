@@ -146,6 +146,14 @@ const RENDERERS: Renderers = {
     line: `【网站报错】过去 ${f.minutes} 分钟服务器报错 ${f.count} 次，比平时多，可能有功能坏了。详细错误在 Sentry 里。`,
     path: '/admin/performance',
   }),
+  signup_gift_level: f => ({
+    line: f.level === 'half'
+      ? `【注册赠送】今天（北京时间 ${f.day}）已给 ${f.granted} 个新账号送了开户积分，过了每日上限 ${f.cap} 的一半。`
+        + '如果是正常增长可以调高上限；如果像是有人刷号，可以在「系统设置 → 积分计费设置」暂停注册赠送。'
+      : `【注册赠送·快满了】今天（北京时间 ${f.day}）已送 ${f.granted} 个，接近每日上限 ${f.cap}。`
+        + '到上限后当天的新账号都不送（以后也不补）。要多送请在「系统设置 → 积分计费设置」调高上限。',
+    path: '/admin/settings',
+  }),
   test: f => ({ line: `【测试】飞书告警已接通。${f.note}`, path: '/admin' }),
 };
 

@@ -2,7 +2,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SupabaseClient, User } from '@supabase/supabase-js';
 import { readOpeningGrantKeyring } from '../../lib/openingGrantKeyring';
-import { loadOpeningGrantDigests, normalizeOpeningGrantEmail, openingGrantDigests } from './openingGrantIdentity';
+import {
+  canonicalOpeningGrantEmail, loadOpeningGrantDigests, normalizeOpeningGrantEmail, openingGrantDigests,
+} from './openingGrantIdentity';
 
 const original = { ...process.env };
 const key = Buffer.from('test-only-opening-grant-key-00001').toString('base64');
@@ -27,6 +29,28 @@ describe('opening-grant HMAC identity boundary', () => {
     const digests = ['some.one@example.test', 'someone@example.test', 'someone+tag@example.test']
       .map(email => openingGrantDigests(user(email), keys)[0].digest);
     expect(new Set(digests).size).toBe(3);
+  });
+  it('BOT-GUARD: one mailbox is one identity: Gmail ignores dots and +tags, listed providers ignore +tags', () => {
+    expect(canonicalOpeningGrantEmail(' A.B.C+promo@GoogleMail.com ')).toBe('abc@gmail.com');
+    expect(canonicalOpeningGrantEmail('abc@gmail.com')).toBeNull();
+    expect(canonicalOpeningGrantEmail('first.last+x@outlook.com')).toBe('first.last@outlook.com');
+    expect(canonicalOpeningGrantEmail('first.last@outlook.com')).toBeNull();
+    expect(canonicalOpeningGrantEmail('name+tag@icloud.com')).toBe('name@icloud.com');
+    // Unlisted domains keep + and dots: they may be part of a different, real address.
+    expect(canonicalOpeningGrantEmail('name+tag@example.test')).toBeNull();
+    expect(canonicalOpeningGrantEmail('name+tag@qq.com')).toBeNull();
+    expect(canonicalOpeningGrantEmail('+only@gmail.com')).toBeNull();
+    const shared = (email: string) => new Set(openingGrantDigests(user(email), keys).map(item => item.digest));
+    const base = shared('abc@gmail.com');
+    for (const alias of ['a.b.c@gmail.com', 'abc+2@gmail.com', 'A.bc+x@googlemail.com']) {
+      const alias_ = shared(alias);
+      expect([...alias_].some(digest => base.has(digest)), alias).toBe(true);
+      expect(alias_.size, alias).toBe(2); // its own spelling plus the mailbox
+    }
+    // Different Gmail mailboxes and unlisted domains share nothing.
+    expect([...shared('abd@gmail.com')].some(digest => base.has(digest))).toBe(false);
+    const plain = shared('name@example.test');
+    expect([...shared('name+tag@example.test')].some(digest => plain.has(digest))).toBe(false);
   });
   it('records both email and stable Google issuer+subject, ignoring nicknames and metadata', () => {
     const first = openingGrantDigests(user('first@example.test', 'google', 'stable-sub'), keys);

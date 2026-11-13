@@ -44,6 +44,11 @@ try {
   const applied = await v(catalogSql);
   await c.query(read(migrationPath));
   await c.query(read(migrationPath));
+  // Later migrations that redefine this one's functions (0528) are applied again after it, as on a database built in order.
+  const redefines = /FUNCTION (IF EXISTS )?public\.(opening_grant_(remember|claim)|signup_gift_\w+|signup_request|hook_before_user_created)\(/;
+  for (const later of readdirSync(new URL('../../migrations/', import.meta.url)).filter(name => name > migration).sort()) {
+    if (redefines.test(read(`packages/db/migrations/${later}`))) await c.query(read(`packages/db/migrations/${later}`));
+  }
   assert.deepEqual(await v(catalogSql), applied);
   report.checks.push('applying the migration again (twice) leaves the catalog unchanged');
 
@@ -97,8 +102,12 @@ try {
   assert.deepEqual(await v('SELECT hook_before_user_created($1::jsonb) v', ['{}']), {}, 'an event without a user is not an email sign-up');
   report.checks.push('hook refuses email sign-ups without a fresh registration (403), accepts with one; phone and Google pass');
 
-  // Grant gate. A fresh database: nothing granted today, default cap 30, not paused.
-  assert.deepEqual(await today(), { cap: 30, paused: false, granted: 0, day: await v("SELECT to_char(signup_gift_day(),'YYYY-MM-DD') v") });
+  // Grant gate. A fresh database: nothing granted today, default cap 30, not paused; 0528 allows 5 grants per IP by default.
+  const fresh = await today();
+  assert.deepEqual({ ...fresh, ip_limit: undefined }, { cap: 30, paused: false, granted: 0, ip_limit: undefined,
+    day: await v("SELECT to_char(signup_gift_day(),'YYYY-MM-DD') v") });
+  // This suite checks 0526's one-grant-per-IP rule; the limit is a setting since 0528 (bot-guard-ip-limit tests the default).
+  await setting('signup_gift_ip_limit', 1);
   const first = await profile();
   assert.equal(await claim(first, '203.0.113.20'), true);
   assert.equal(await balance(first), 500);

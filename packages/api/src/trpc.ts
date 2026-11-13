@@ -7,6 +7,7 @@ import { logger } from './lib/logger';
 import { assertUsableUserStatus, normalizeUserStatus } from './lib/accountStatus';
 import {createRuntimeBudget,withRuntimeBudget,type RuntimeBudget} from './services/turn/settings/budget';
 import { openingGrantDigests, openingGrantIp } from './services/accountErasure/openingGrantIdentity';
+import { noteOpeningGrant } from './services/signupGuard/giftAlert';
 import { profileIdentityUpdate, profileInsertPhone } from './lib/profileIdentity';
 import { procedureRateLimit } from './middleware/procedureRateLimit';
 export {createRuntimeBudget,withRuntimeBudget};
@@ -170,14 +171,12 @@ async function applyOpeningGrant(ctx: ApiContext, userId: string) {
     p_profile_id: userId,
     p_digests: openingGrantDigests(ctx.user), p_ip: openingGrantIp(ctx.headers), // BOT-GUARD same-IP rule
   });
-
-  if (error) {
-    throw error;
-  }
+  if (error) throw error;
 
   if (!data || typeof data.granted !== 'boolean') {
     throw new Error('atomic opening grant ledger RPC returned no rows');
   }
+  await noteOpeningGrant(data); // BOT-GUARD: the day's grants passed half / 90% of the cap -> the Owner's alert
 }
 
 async function findOpeningGrantLedgerEntry(ctx: ApiContext, userId: string) {

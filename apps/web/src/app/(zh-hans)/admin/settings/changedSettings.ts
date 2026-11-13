@@ -33,8 +33,3 @@ export function mergeReadSettings<T extends { value: string }>(
     return [key, { ...base, value: edited ? current[key].value : shownValue(saved, defaults, key) ?? base.value }];
   }));
 }
-
-/** Saving the pause switch on asks first (BOT-GUARD): a paused grant is never given to those accounts later. */
-export function pausesSignupGift(changes: { key: string; value: unknown }[]) {
-  return changes.some(change => change.key === 'signup_gift_paused' && String(change.value) === 'true');
-}

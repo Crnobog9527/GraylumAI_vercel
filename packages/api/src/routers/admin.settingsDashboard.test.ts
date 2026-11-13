@@ -147,27 +147,11 @@ describe('signup gift settings', () => {
       await expect(settings.updateSystemSettings({ key: 'signup_gift_paused', value }), String(value)).rejects.toThrow();
     }
     expect(stored.get('signup_gift_daily_cap')).toBe(' 45 ');
-  });
-
-  it("reads today's count through the service-role function and refuses an unexpected shape", async () => {
-    const today = { day: '2026-11-13', granted: 3, cap: 30, paused: false };
-    const caller = (data: unknown, error: unknown = null) => {
-      return adminRouter.createCaller({
-        headers: new Headers(), user: { id: 'fixture-admin' }, isEmailVerified: true, authProvider: 'email', hasSupabaseAdminPrivileges: true,
-        supabase: profileClient, supabasePublic: profileClient,
-        supabaseAdmin: { ...profileClient, rpc: vi.fn(async (fn: string) => { expect(fn).toBe('signup_gift_today'); return { data, error }; }) },
-      } as unknown as Parameters<typeof adminRouter.createCaller>[0]);
-    };
-    await expect(caller(today).getSignupGiftToday()).resolves.toEqual(today);
-    await expect(caller({ ...today, granted: -1 }).getSignupGiftToday()).rejects.toThrow();
-    await expect(caller(null, { code: '42501' }).getSignupGiftToday()).rejects.toThrow();
+    // 0528: grants per network in 24 hours, 1-50 (the pause, not 0, stops everyone).
+    for (const value of ['5', 1, 50]) await settings.updateSystemSettingsBulk([{ key: 'signup_gift_ip_limit', value }]);
+    for (const value of ['', 0, '0', 51, 1000, '2.5', 'abc', null]) {
+      await expect(settings.updateSystemSettingsBulk([{ key: 'signup_gift_ip_limit', value }]), String(value)).rejects.toThrow();
+    }
+    expect(stored.get('signup_gift_ip_limit')).toBe(50);
   });
 });
-
-const profileClient = {
-  from(table: string) {
-    if (table !== 'profiles') throw new Error(`Unexpected table ${table}`);
-    return { select() { return this; }, eq() { return this; },
-      single: async () => ({ data: { id: 'fixture-admin', role: 'admin', status: 'active', nickname: 'Fixture', is_deleted: 'false' }, error: null }) };
-  },
-};

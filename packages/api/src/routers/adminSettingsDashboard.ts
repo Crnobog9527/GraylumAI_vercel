@@ -59,20 +59,4 @@ export const adminSettingsDashboardProcedures = {
         membershipPlans: await hydrateStripeCatalogPrices({ db: ctx.supabaseAdmin, kind: 'membership_plan', rows: membershipPlansResult.data }),
       };
     }),
-
-  /**
-   * BOT-GUARD: today's opening grants (Beijing day) and the cap / pause in force, for the billing settings tab.
-   */
-  getSignupGiftToday: adminProcedure
-    .query(async ({ ctx }) => {
-      const { data, error } = await ctx.supabaseAdmin.rpc('signup_gift_today');
-      if (error) throw createAdminOperationError('读取今日注册赠送', error);
-      const parsed = signupGiftTodaySchema.safeParse(data);
-      if (!parsed.success) throw createAdminOperationError('读取今日注册赠送', new Error('signup_gift_today shape'));
-      return parsed.data;
-    }),
 };
-
-const signupGiftTodaySchema = z.object({
-  day: z.string(), granted: z.number().int().min(0), cap: z.number().int().min(0), paused: z.boolean(),
-});

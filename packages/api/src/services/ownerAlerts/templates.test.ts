@@ -19,6 +19,7 @@ const EXAMPLES: { [K in OwnerAlertKind]: OwnerAlertFacts[K] } = {
   platform_absorb: { model: 'anthropic/claude-sonnet-5.5', utcDate: '2026-11-07', usd: '12.304000000000', thresholdUsd: '10' },
   ops_backlog: { code: 'ERASURE_BACKLOG', level: 'error' },
   error_spike: { count: 23, minutes: 10 },
+  signup_gift_level: { day: '2026-11-13', level: 'near_full', granted: 27, cap: 30 },
   test: { note: '这是一条测试消息，收到说明 staging 的两个变量配好了。' },
 };
 

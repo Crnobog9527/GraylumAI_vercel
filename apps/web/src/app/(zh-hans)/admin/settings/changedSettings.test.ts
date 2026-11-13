@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
-import { changedSettings, mergeReadSettings, pausesSignupGift } from './changedSettings';
+import { changedSettings, mergeReadSettings } from './changedSettings';
 
 const defaults = { site_name: { value: 'Graylum' }, billing_credits_per_usd: { value: '' }, max_input_characters: { value: '2000' } };
 
@@ -50,14 +50,5 @@ describe('mergeReadSettings', () => {
   it('after saving all, the stored values equal the edits', () => {
     const current = { site_name: { value: 'B', label: '平台名称' }, max_input_characters: { value: '', label: '上限' } };
     expect(mergeReadSettings(base, { site_name: 'B' }, current, { site_name: 'A' }).site_name.value).toBe('B');
-  });
-});
-
-describe('pausesSignupGift (BOT-GUARD)', () => {
-  it('asks only when the save turns the pause on', () => {
-    expect(pausesSignupGift([{ key: 'signup_gift_paused', value: 'true' }])).toBe(true);
-    expect(pausesSignupGift([{ key: 'site_name', value: 'x' }, { key: 'signup_gift_paused', value: true }])).toBe(true);
-    expect(pausesSignupGift([{ key: 'signup_gift_paused', value: 'false' }])).toBe(false);
-    expect(pausesSignupGift([{ key: 'signup_gift_daily_cap', value: '0' }])).toBe(false);
   });
 });
