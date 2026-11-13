@@ -35,8 +35,10 @@ export function ScheduleDetailDialog({ entry, onClose, onChange }: {
               {entry.targets.length === 0 && <li className={styles.muted}>没有平台</li>}
               {entry.targets.map(target => <li key={target.connectionId}>
                 {platformName(target.platform)}
-                {target.status === 'published' && target.url ? <a className="ml-1" href={target.url} target="_blank"
-                  rel="noopener noreferrer">查看帖子</a> : target.status === 'failed' ? ' · 失败' : ''}
+                {/* Each platform's outcome in words; a sent post also links to itself when the platform gave its address. */}
+                {target.status === 'published' ? ' · 已发布' : target.status === 'failed' ? ' · 失败' : ''}
+                {target.status === 'published' && target.url && <a className="ml-1" href={target.url} target="_blank"
+                  rel="noopener noreferrer">查看帖子</a>}
               </li>)}
             </ul></dd>
             <dt>文案</dt>

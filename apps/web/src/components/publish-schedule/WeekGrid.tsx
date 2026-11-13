@@ -13,16 +13,19 @@ const HOURS = Array.from({ length: 24 }, (_, hour) => hour);
 const pad = (n: number) => String(n).padStart(2, '0');
 
 /** A post on the week axis or under the phone's month grid: time and status, the platforms, the caption's start. */
-export function EntryCard({ entry, onOpen, className, style }: {
+export function EntryCard({ entry, onOpen, className, style, compact = false }: {
   entry: ScheduleEntry; onOpen: (entry: ScheduleEntry) => void; className?: string; style?: React.CSSProperties;
+  // Side by side with other posts (a narrow card): the whole time and the platforms only; the rest is in its name and details.
+  compact?: boolean;
 }) {
   const { status, tone } = chipOf(entry);
   return (
     <button type="button" className={`${styles.card} ${styles.tone} ${className ?? ''}`} data-tone={tone} style={style} title={chipName(entry)}
-      aria-label={chipName(entry)} onClick={() => onOpen(entry)}>
-      <span className={styles.cardLine}><time dateTime={entry.at}>{timeLabel(entry.at)}</time> · {status.label}</span>
+      aria-label={chipName(entry)} data-compact={compact || undefined} onClick={() => onOpen(entry)}>
+      {compact ? <time dateTime={entry.at}>{timeLabel(entry.at)}</time>
+        : <span className={styles.cardLine}><time dateTime={entry.at}>{timeLabel(entry.at)}</time> · {status.label}</span>}
       <span className={styles.cardLine}>{platformsLabel(entry, platformName)}</span>
-      {entry.captionPreview && <span className={styles.cardLine}>{entry.captionPreview}</span>}
+      {!compact && entry.captionPreview && <span className={styles.cardLine}>{entry.captionPreview}</span>}
     </button>
   );
 }
@@ -64,7 +67,7 @@ export function WeekGrid({ days, entries, now, onOpen }: {
               aria-label={`${dayLabel(day)}${today ? '（今天）' : ''}，${placed.length} 条`}>
               {today && <div className={styles.now} style={{ top: (minutesOfDay(now) / 60) * HOUR_PX }} aria-hidden />}
               {placed.map(({ entry, top, column, columns }) => (
-                <EntryCard key={entry.id} entry={entry} onOpen={onOpen} style={{
+                <EntryCard key={entry.id} entry={entry} onOpen={onOpen} compact={columns > 1} style={{
                   top, height: HOUR_PX - 4, left: `calc(${(column / columns) * 100}% + 2px)`, width: `calc(${100 / columns}% - 4px)`,
                 }} />
               ))}
