@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 'use client';
 import { TurnStepList } from '@/components/chat-display/turn-step-list';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { ChatInlineNotice, ChatNoticeList } from '@/components/chat/ChatInlineNotice';
 import { AgentWorkStatus } from '@/components/chat-display/agent-work-status';
 import {
@@ -19,7 +19,7 @@ import { trpc } from '@/trpc/client';
 import { RUNTIME_CHOICES_STALE_MS } from '@/lib/runtime-choices';
 import { CompareHost } from '@/components/fusion-compare/ComparePicker';
 import { ComparePhoneEntry } from '@/components/fusion-compare/ComparePhoneEntry';
-import { CompareThread, useCompareThread } from '@/components/fusion-compare/CompareThread';
+import { CompareThread, placeCompareCards, useCompareThread } from '@/components/fusion-compare/CompareThread';
 import {
   clearForSend, forgetPending, markPendingRestored, openingDraftWithReferences, readPending, rememberPending,
   requestIdFor, saveDraftReferences,
@@ -120,6 +120,8 @@ export function TurnWorkspace({ sessionId }: { sessionId: string }) {
     skill: chosenSkill ? { kind: 'skill' as const, moduleId: chosenSkill.moduleId, revisionId: chosenSkill.revisionId } : undefined };
   const messages = chat.view?.messages ?? [];
   const turns = messages.filter(m => m.role === 'assistant');
+  // FUSION-COMPARE: each compare card sits where it was asked (before its own turn's replies), the same before and after a refresh.
+  const placedCards = placeCompareCards(compare.cards, turns);
   const asked = (turnId: number | null) => messages.find(m => m.role === 'user' && m.turnId === turnId)?.content ?? null;
   const signature = transcriptSignature(messages.map(m => m.seq).join('|'), outgoing ? { text: outgoing } : null);
   useEffect(() => {
@@ -162,8 +164,12 @@ export function TurnWorkspace({ sessionId }: { sessionId: string }) {
       <div ref={scrollArea} className={workStyles.scrollArea} aria-label="对话记录">
         {!messages.length && !outgoing && <RuntimeEmptyState text="输入一条消息，发送后可刷新查看记录。"/>}
         <section className={workStyles.transcript}>
-          {turns.map(reply => { const steps = reply.turnId === null ? [] : chat.stepsByTurn.get(reply.turnId) ?? reply.steps ?? [];
-            return <RuntimeTurnView key={reply.seq} userText={asked(reply.turnId)}
+          {turns.map((reply, index) => { const steps = reply.turnId === null ? [] : chat.stepsByTurn.get(reply.turnId) ?? reply.steps ?? [];
+            const cardsHere = placedCards.get(index);
+            return <Fragment key={reply.seq}>
+            {cardsHere && <CompareThread cards={cardsHere} names={compare.names} onQuote={update}
+              onAdopted={() => { void compare.refresh(); void chat.reload(); }}/>}
+            <RuntimeTurnView userText={asked(reply.turnId)}
               photos={reply.turnId === null ? undefined : photosByTurn.get(reply.turnId)}>
             {reply.turnId !== null && <TurnStepList steps={steps}/>}
             {reply.turnId !== null && <AgentWorkStatus items={workRows.get(reply.turnId) ?? []}/>}
@@ -172,10 +178,11 @@ export function TurnWorkspace({ sessionId }: { sessionId: string }) {
               turnId={reply.turnId} reply={reply.content}
               savedItems={results.data.filter(item => item.sourceTurnId === reply.turnId)}
               onOpenResults={() => { setPanelOpen(true); setReveal(count => count + 1); }}/>}
-          </RuntimeTurnView>; })}
+          </RuntimeTurnView></Fragment>; })}
           {results.isError && <QueryNotice error={results.error} label="本对话成果夹" retry={() => results.refetch()}/>}
-          <CompareThread cards={compare.cards} names={compare.names} onQuote={update}
-            onAdopted={() => { void compare.refresh(); void chat.reload(); }}/>
+          {/* FUSION-COMPARE: the cards after every reply (the newest compare, or one whose turn is not listed yet). */}
+          {placedCards.get(turns.length) && <CompareThread cards={placedCards.get(turns.length)!} names={compare.names} onQuote={update}
+            onAdopted={() => { void compare.refresh(); void chat.reload(); }}/>}
           {pendingText !== null && <>
             {pendingText && <RuntimePendingMessage text={pendingText} sending={chat.sending}/>}
             <RuntimeTurnView>
