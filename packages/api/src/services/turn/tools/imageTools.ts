@@ -65,6 +65,19 @@ const ONE_SENTENCE = 'In one sentence, tell the user why and what they can do ne
   + 'do not repeat the prompt or the description.';
 export const IMAGE_SHOWN_NOTE = 'The image is shown to the user as a card. Do not repeat the prompt or describe the image.';
 export const IMAGE_FAILED_NOTE = `Not made. Do not call again in this reply. ${ONE_SENTENCE}`;
+/** Owner 2026-11-13: two balances, said as both or not at all (the reply said "3 credits left" with 200 free credits too). */
+export const IMAGE_BALANCE_NOTE = 'Shotviva has two balances: paidCredits and freeCredits. If you mention what is left, name both, as '
+  + '"付费积分 X、免费积分 Y" (in the user\'s language), never one alone; or do not mention the balance.';
+/** Owner 2026-11-13: "connect Shotviva first" came with no link. The integrations page connects, or explains the membership. */
+export const INTEGRATIONS_PATH = '/app/integrations';
+const CONNECT_CODES: ReadonlySet<string> = new Set(['not_linked', 'link_revoked', 'membership_required']);
+export const IMAGE_CONNECT_NOTE = `Give the user the integrations page as a Markdown link, exactly [去连接 Shotviva](${INTEGRATIONS_PATH}) `
+  + '(the link text in the user\'s language; the address as it is).';
+/** The line the plan adds to the turn's note when both image tools are trimmed because the account cannot use them yet. */
+export function imageTrimNote(reason: string): string {
+  if (reason !== 'not_linked' && reason !== 'not_entitled') return '';
+  return ` Images need a connected Shotviva account (Pro or Gold members): if the user asks for one, say so in one sentence. ${IMAGE_CONNECT_NOTE}`;
+}
 const IMAGE_UNAVAILABLE = (reason: string) => JSON.stringify({ status: 'failed', code: reason,
   note: `Image generation cannot be used in this reply. ${ONE_SENTENCE}` });
 
@@ -81,15 +94,17 @@ export function imageIdempotencyKey(sessionId: string, callId: string, request: 
 export function imageToolResult(outcome: ImageOutcome): string {
   if (outcome.status === 'succeeded') {
     return JSON.stringify({ status: 'succeeded', jobId: outcome.jobId, creditsCharged: outcome.creditsCharged,
-      creditsRemaining: outcome.creditsRemaining, note: IMAGE_SHOWN_NOTE });
+      paidCredits: outcome.creditsRemaining, freeCredits: outcome.freeCreditsRemaining, note: `${IMAGE_SHOWN_NOTE} ${IMAGE_BALANCE_NOTE}` });
   }
   if (outcome.status === 'running') {
     return JSON.stringify({ status: 'running', ...(outcome.jobId ? { jobId: outcome.jobId } : {}),
       note: 'Still generating. In one sentence, tell the user it will appear in their Shotviva works; do not call again '
         + 'and do not repeat the prompt.' });
   }
+  const connect = CONNECT_CODES.has(outcome.code);
   return JSON.stringify({ status: 'failed', code: outcome.code, ...(outcome.jobId ? { jobId: outcome.jobId } : {}),
-    refunded: outcome.refunded, note: IMAGE_FAILED_NOTE });
+    refunded: outcome.refunded, ...(connect ? { link: INTEGRATIONS_PATH } : {}),
+    note: connect ? `${IMAGE_FAILED_NOTE} ${IMAGE_CONNECT_NOTE}` : IMAGE_FAILED_NOTE });
 }
 
 /** The two RuntimeTools. `usable`: the plan left them available this reply; each has its own per-reply cap. */
@@ -103,7 +118,8 @@ export function imageTools(input: { usable: (name: string) => boolean; calls: Im
       lists++; input.onCall();
       const listed = await swallow('turn_image_templates_failed', input.calls.listTemplates(), { ok: false as const, code: 'unavailable' });
       if (!listed.ok) return JSON.stringify({ status: 'failed', code: listed.code,
-        note: `The template list could not be read. ${ONE_SENTENCE}` });
+        ...(CONNECT_CODES.has(listed.code) ? { link: INTEGRATIONS_PATH } : {}),
+        note: `The template list could not be read. ${ONE_SENTENCE}${CONNECT_CODES.has(listed.code) ? ` ${IMAGE_CONNECT_NOTE}` : ''}` });
       return JSON.stringify({ status: 'ok', items: listed.templates.slice(0, MAX_TEMPLATES).map(template => ({
         id: template.id, name: template.name, category: template.category, credits: template.credits_cost,
         fields: template.fields.copy.map(field => ({ key: field.key, label: field.label, required: field.required,

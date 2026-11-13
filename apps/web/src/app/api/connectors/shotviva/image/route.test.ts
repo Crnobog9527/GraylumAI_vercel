@@ -22,8 +22,10 @@ describe('GET /api/connectors/shotviva/image', () => {
     const response = await get(JOB);
     expect(response.status).toBe(200);
     expect(response.headers.get('content-type')).toBe('image/webp');
-    expect(response.headers.get('cache-control')).toBe('private, max-age=3600');
+    // A finished job's image never changes: kept by this browser only, not asked again.
+    expect(response.headers.get('cache-control')).toBe('private, max-age=31536000, immutable');
     expect(response.headers.get('x-content-type-options')).toBe('nosniff');
+    // Bytes sharp cannot read are sent as they came (cardImage), so the card still shows them.
     expect(new Uint8Array(await response.arrayBuffer())).toEqual(new Uint8Array([1, 2, 3]));
     expect(mocks.fetchImage).toHaveBeenCalledWith({ admin: {}, baseUrl: 'https://shotviva.test', profileId: me, jobId: JOB });
   });
@@ -36,5 +38,17 @@ describe('GET /api/connectors/shotviva/image', () => {
     expect((await get(JOB)).status).toBe(404);
     mocks.fetchImage.mockRejectedValueOnce(new Error('private'));
     expect((await get(JOB)).status).toBe(502);
+  });
+
+  it('the card gets a WebP at most twice its width, not Shotviva\'s full PNG', async () => {
+    const { default: sharp } = await import('sharp');
+    const png = await sharp({ create: { width: 1536, height: 1536, channels: 3, background: '#a87b54',
+      noise: { type: 'gaussian', mean: 128, sigma: 40 } } }).png().toBuffer();
+    mocks.fetchImage.mockResolvedValueOnce({ ok: true, bytes: png, contentType: 'image/png' });
+    const response = await get(JOB);
+    expect(response.headers.get('content-type')).toBe('image/webp');
+    const body = Buffer.from(await response.arrayBuffer());
+    expect(body.byteLength).toBeLessThan(png.byteLength / 4);
+    expect((await sharp(body).metadata()).width).toBe(840);
   });
 });

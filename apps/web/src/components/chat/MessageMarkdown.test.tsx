@@ -70,6 +70,9 @@ describe("MessageMarkdown: safety", () => {
     expect(html).toContain('<a href="/app/library">资料库</a>');
     expect(html).toContain('<a href="/app/library?tab=voice">我的文风</a>');
     expect(html).not.toContain("_blank");
+    // INTEGRATION-SHOTVIVA (Owner 2026-11-13): an image the account cannot make yet links the page that connects Shotviva.
+    expect(render("[去连接 Shotviva](/app/integrations)")).toContain('<a href="/app/integrations">去连接 Shotviva</a>');
+    expect(render("[x](/app/integrations/evil)")).not.toContain("href");
   });
 
   it("never renders raw HTML from the model", () => {

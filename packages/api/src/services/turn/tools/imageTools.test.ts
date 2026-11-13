@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from 'vitest';
-import { IMAGE_SHOWN_NOTE, IMAGE_TOOLS_INSTRUCTIONS, imageIdempotencyKey, imageToolBytes, imageToolResult, imageTools,
-  type ImageToolCalls } from './imageTools';
+import { IMAGE_BALANCE_NOTE, IMAGE_SHOWN_NOTE, IMAGE_TOOLS_INSTRUCTIONS, imageIdempotencyKey, imageToolBytes, imageToolResult,
+  imageTools, imageTrimNote, type ImageToolCalls } from './imageTools';
 import { IMAGE_STEP_REASONS } from '../sse';
 
 const SESSION = '00000000-0000-4000-8000-000000000051';
@@ -35,7 +35,8 @@ describe('image tools', () => {
     const c = calls();
     const { generate, onCall } = tools({ calls: c });
     const result = JSON.parse(await generate.execute({ template_id: 'freeform', prompt: 'a red cup' }, 'call-1'));
-    expect(result).toEqual({ status: 'succeeded', jobId: JOB, creditsCharged: 2, creditsRemaining: 8, note: IMAGE_SHOWN_NOTE });
+    expect(result).toEqual({ status: 'succeeded', jobId: JOB, creditsCharged: 2, paidCredits: 8, freeCredits: 0,
+      note: `${IMAGE_SHOWN_NOTE} ${IMAGE_BALANCE_NOTE}` });
     expect(JSON.stringify(result)).not.toContain('r2.cloudflarestorage');
     expect(c.generate).toHaveBeenCalledWith({ idempotencyKey: expect.stringMatching(/^graylum:.+:call-1:/), templateId: 'freeform',
       copy: { prompt: 'a red cup' } });
@@ -112,5 +113,37 @@ describe('image tools', () => {
     }
     expect(IMAGE_TOOLS_INSTRUCTIONS).toMatch(/never write out the prompt, the description or the template fields/);
     expect(IMAGE_TOOLS_INSTRUCTIONS).toMatch(/say in one sentence why and what the user can do next/);
+  });
+
+  // Owner 2026-11-13: the reply said "3 credits left" while the account also had 200+ free credits.
+  it('a made image gives both balances apart and asks for both or neither', () => {
+    const result = JSON.parse(imageToolResult({ ...succeeded, creditsRemaining: 3, freeCreditsRemaining: 215 }));
+    expect(result).toMatchObject({ paidCredits: 3, freeCredits: 215 });
+    expect(result).not.toHaveProperty('creditsRemaining');
+    expect(result.note).toContain('"付费积分 X、免费积分 Y"');
+    expect(result.note).toMatch(/never one alone; or do not mention the balance/);
+  });
+
+  // Owner 2026-11-13: "connect Shotviva first" came with no link to do it.
+  it('not connected, disconnected or not a member: the result gives the integrations page as a link; other failures do not', () => {
+    for (const code of ['not_linked', 'link_revoked', 'membership_required'] as const) {
+      const result = JSON.parse(imageToolResult({ status: 'failed', code, topUpUrl: null, jobId: null, refunded: false }));
+      expect(result.link, code).toBe('/app/integrations');
+      expect(result.note, code).toContain('[去连接 Shotviva](/app/integrations)');
+    }
+    for (const code of ['quota_exhausted', 'IDENTITY_SWAP_REFUSED', 'unavailable'] as const) {
+      const result = JSON.parse(imageToolResult({ status: 'failed', code, topUpUrl: null, jobId: null, refunded: false }));
+      expect(result, code).not.toHaveProperty('link');
+      expect(result.note, code).not.toContain('/app/integrations');
+    }
+    expect(imageTrimNote('not_linked')).toContain('[去连接 Shotviva](/app/integrations)');
+    expect(imageTrimNote('not_entitled')).toContain('[去连接 Shotviva](/app/integrations)');
+    expect(imageTrimNote('capacity')).toBe('');
+  });
+
+  it('a template list the account cannot read yet links the integrations page too', async () => {
+    const c = calls({ listTemplates: vi.fn(async () => ({ ok: false as const, code: 'not_linked' })) });
+    expect(JSON.parse(await tools({ calls: c }).list.execute({}, 'c'))).toMatchObject({ status: 'failed', code: 'not_linked',
+      link: '/app/integrations' });
   });
 });
