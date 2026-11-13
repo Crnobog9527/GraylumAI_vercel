@@ -9,7 +9,8 @@ import { accountDisplayName, membershipText } from '@/lib/account-presentation';
 import styles from './home.module.css';
 import { QueryNotice } from '@/components/opc/query-notice';
 import { LanguageSwitch } from '@/components/layout/LanguageSwitch';
-import { GlobalHeader } from '@/components/opc/rail-view';
+import { AnnouncementBar, GlobalHeader } from '@/components/opc/rail-view';
+import { useAnnouncementOpen } from '@/components/opc/use-announcement';
 import { PhoneTabs } from '@/components/opc/phone-tabs';
 import { AccountAvatar } from '@/components/profile/AccountAvatar';
 import { HomeMethod } from './home-method';
@@ -25,6 +26,9 @@ type HomeBusiness={accounts:HomeAccount[]};
 
 export default function HomePage(){
  const startIntent=useRef<string|null>(null);
+ // The announcement of the signed-in pages, here too (Owner 2026-11-12): the one message (lib/announcement.ts) and the one
+ // record of closing it (use-announcement.ts), so closing it on either page closes it on both. The public home page has none.
+ const [noticeOpen,closeNotice]=useAnnouncementOpen();
  // One click starts one draft: the intent id is the start request id (从头分析, or 我已有定位 for R15).
  const startOnce=(event:{preventDefault:()=>void},mode:StartMode)=>{event.preventDefault();if(startIntent.current)return;
   startIntent.current=crypto.randomUUID();location.assign(startEntryHref(mode,startIntent.current));};
@@ -47,6 +51,7 @@ export default function HomePage(){
   {/* The shared top bar of the workbench (GlobalHeader); the home page has no rail, so its phone menu button is hidden in home.module.css. */}
   <GlobalHeader area="search" end={<div className={styles.headerEnd}><LanguageSwitch className={styles.language}/><Link href="/app/profile?tab=subscription">{credits.status==='ready'?credits.credits:'—'} 积分</Link><Link href="/app/profile" aria-label="个人中心" className={styles.avatar}><AccountAvatar url={profile.data?.avatar_url} initial={(name??'我').slice(0,1)}
     style={{ display: 'grid', placeItems: 'center', width: '100%', height: '100%', borderRadius: 'inherit' }}/></Link></div>}/>
+  {noticeOpen&&<AnnouncementBar onClose={closeNotice}/>}
   <main className={styles.page}>
    <section className={styles.account}><div><strong>{name?`你好，${name}`:'你好'}</strong><span>{membershipText(profile)}</span></div><Link href="/app/profile?tab=subscription">账户与积分 →</Link></section>
    <section className={styles.value}><h1>让你的业务，<br/>拥有清楚的内容方向</h1><p>从找到自己的位置，到持续做出有价值的内容。<br/>Graylum 和你一起分析、判断和创作，让每一步都有依据。</p></section>
