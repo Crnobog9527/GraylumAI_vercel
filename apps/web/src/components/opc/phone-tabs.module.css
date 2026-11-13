@@ -18,5 +18,13 @@
   }
   .tabs a[aria-current] { color: #1f1e1c; font-weight: 650; }
   .tabs a:focus-visible { outline: 2px solid #1f1e1c; outline-offset: -2px; }
+  /*
+   * The room a page leaves for the bar: the bar's height, the home indicator and a 16px gap. The consent bar's space
+   * (--consent-bar-space) is not added here: it is given once already by whatever the page scrolls in. A page that scrolls
+   * with the document ends above the consent bar (the body's end, globals.css); the shell's frames are shorter by it
+   * (workspace-frame.module.css). The bar sits above the same space, so the room and the bar move up together. Adding the
+   * space here again would leave a blank band as tall as the consent bar (measured 2026-11-13 after the review of #1943:
+   * with a 132px consent bar the page's last line stayed clear of the bar by the same distance as without one).
+   */
   .room { padding-bottom: calc(56px + env(safe-area-inset-bottom, 0px) + 16px) !important; }
 }
