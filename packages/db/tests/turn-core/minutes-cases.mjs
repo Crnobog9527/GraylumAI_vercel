@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// CONTENT-CONVERSATION-2 (0533): kind=minutes. One metered call on a free conversation or a topic window; the minutes are one message
+// CONTENT-CONVERSATION-2 (0542): kind=minutes. One metered call on a free conversation or a topic window; the minutes are one message
 // that is never visible, so no later history or page read holds them; turn_session_minutes lists them; deleting the conversation
 // clears them; a refused or empty close saves nothing and charges nothing.
 import assert from 'node:assert/strict';
@@ -71,5 +71,5 @@ export async function minutesCases(t){
    [sid,a.actor,JSON.stringify({kind:'positioning_topic',draftId:randomUUID()}),randomUUID()]);
   assert.match(await refusal(open(a,{kind:'minutes',pol:pol(),session:sid})),/TURN_SESSION_DENIED/);
  }
- report.checks.push('CONTENT-CONVERSATION-2 0533: minutes are one metered call; kept as one invisible message never in later history or the page; listed newest first; refused results write nothing; conversation delete clears them; other scopes refused');
+ report.checks.push('CONTENT-CONVERSATION-2 0542: minutes are one metered call; kept as one invisible message never in later history or the page; listed newest first; refused results write nothing; conversation delete clears them; other scopes refused');
 }

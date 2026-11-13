@@ -26,14 +26,14 @@ import type { TurnEvent } from './sse';
  * CONTENT-CONVERSATION-2 kind=minutes (Owner 2026-11-14: "整理聊天纪要"; Owner 2026-10-03 item 45: only when the user asks, never
  * every turn). One call on the organizer (summary) model, no tools, on the conversation's visible history as turn_open returns it.
  * Metered by usage as an ordinary turn; a refusal, a failed or empty answer pays nothing. The minutes are written by turn_close as
- * one message that is never visible (migration 0533), so no later turn, and no later minutes, reads them; turn_session_minutes
+ * one message that is never visible (migration 0542), so no later turn, and no later minutes, reads them; turn_session_minutes
  * lists them. A free conversation gets meeting minutes; a topic window ("整理本选题") gets this topic's state only.
  */
 export type MinutesInput = { actorId: string; sessionId: string; requestId: string };
 
 /** The minutes are short: a few hundred to a couple of thousand words. */
 const MINUTES_OUTPUT_TOKENS = 4000;
-/** turn_close keeps at most this many characters (0533). */
+/** turn_close keeps at most this many characters (0542). */
 const MINUTES_MAX_CHARS = 40000;
 
 /** Host format, not a Skill's step: the free conversation's minutes. */

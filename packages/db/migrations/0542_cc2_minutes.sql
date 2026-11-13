@@ -1,7 +1,7 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC.
 -- All rights reserved. This code is proprietary and confidential.
 -- CONTENT-CONVERSATION-2 PR3 (Owner 2026-11-14: "整理聊天纪要" before launch; the first version only copies and exports). Number
--- 0533 assigned by the controller. Minutes on the CORE-PATH-V2 turn path, no new table:
+-- 0542 assigned by the controller. Minutes on the CORE-PATH-V2 turn path, no new table:
 --   * turns_kind_check gains 'minutes': one call on the organizer model, metered by usage as an ordinary turn, refunded in full
 --     when nothing is delivered (turn_user_charge unchanged).
 --   * turn_open: whole current definition; 'minutes' joins the kind list, and is allowed only on a positioning_draft scope
@@ -75,7 +75,7 @@ BEGIN
   ELSE
     SELECT * INTO s FROM runtime_sessions WHERE id = p_session_id AND actor_id = p_actor_id FOR UPDATE;
     IF s.id IS NULL THEN RAISE EXCEPTION 'TURN_SESSION_DENIED' USING ERRCODE='42501'; END IF;
-    -- CONTENT-CONVERSATION-2 (0533): minutes are taken of a conversation the page offers them on (a free conversation or a topic
+    -- CONTENT-CONVERSATION-2 (0542): minutes are taken of a conversation the page offers them on (a free conversation or a topic
     -- window, both of these two scope kinds); no other scope. The session row alone decides, so no other table is read here.
     IF p_kind = 'minutes' AND s.scope->>'kind' NOT IN ('work_item', 'positioning_draft') THEN
       RAISE EXCEPTION 'TURN_SESSION_DENIED' USING ERRCODE='42501';
@@ -296,7 +296,7 @@ BEGIN
     ELSIF t.kind = 'voice' THEN
       PERFORM public.turn_voice_apply(t, v_kind, p_kind_result);
     ELSIF t.kind = 'minutes' THEN
-      -- CONTENT-CONVERSATION-2 (0533): the minutes are one message of the conversation that is never visible, so no later turn's
+      -- CONTENT-CONVERSATION-2 (0542): the minutes are one message of the conversation that is never visible, so no later turn's
       -- history (turn_open step 5) and no page read (turn_session_view) ever holds them; turn_session_minutes lists them. Deleting the
       -- conversation, its content or the account clears them with every other message.
       IF jsonb_typeof(p_kind_result) IS DISTINCT FROM 'object' OR jsonb_typeof(p_kind_result->'minutes') IS DISTINCT FROM 'string'
@@ -418,7 +418,7 @@ CREATE OR REPLACE FUNCTION public.turn_session_minutes(p_actor_id uuid, p_sessio
 AS $function$
 DECLARE s runtime_sessions;
 BEGIN
-  -- CONTENT-CONVERSATION-2 (0533): the minutes of one conversation, newest first, by the owner's key only; nothing is written.
+  -- CONTENT-CONVERSATION-2 (0542): the minutes of one conversation, newest first, by the owner's key only; nothing is written.
   -- As turn_session_view: a disabled account and a deleted conversation read nothing.
   IF NOT EXISTS (SELECT 1 FROM profiles WHERE id = p_actor_id AND status = 'active' AND is_deleted::text = 'false') THEN
     RAISE EXCEPTION 'TURN_ACCOUNT_DENIED' USING ERRCODE='42501';

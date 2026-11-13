@@ -4,7 +4,7 @@ import { TRPCError } from '@trpc/server';
 
 /*
  * CONTENT-CONVERSATION-2 (Owner 2026-11-14): the minutes of one conversation ("整理纪要" / "整理本选题"), newest first. One read
- * (turn_session_minutes, migration 0533) by the owner's key after the conversation's scope check (session_view_allowed, as the
+ * (turn_session_minutes, migration 0542) by the owner's key after the conversation's scope check (session_view_allowed, as the
  * turn view). The minutes themselves are made by a turn (POST /api/turn kind=minutes); nothing is written here.
  */
 const uuid = z.string().uuid();
