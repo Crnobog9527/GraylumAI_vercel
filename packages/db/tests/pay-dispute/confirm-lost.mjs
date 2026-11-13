@@ -74,8 +74,7 @@ export async function confirmLostCases({c,v,profile,pack,receive,withdraw,ops,re
  report.checks.push('Waffo dispute confirmed lost without an outcome feed; status closes as lost');
 
  // Founder membership: frozen while open, ended with reason dispute_lost once confirmed; membership stays unpaid.
- const f=await member(start,end,'monthly','gold');
- await c.query("UPDATE payment_orders SET offer_kind='founder' WHERE id=$1",[f.order]);
+ const f=await member(start,end,'monthly','gold','founder');
  const fd=await receive(f,{subscriptionId:f.providerSub});
  const founder=()=>asService(()=>v('SELECT pay_founder_status($1) v',[f.user]));
  assert.equal((await founder()).state,'frozen');

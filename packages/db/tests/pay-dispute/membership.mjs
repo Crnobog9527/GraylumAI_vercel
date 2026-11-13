@@ -8,7 +8,7 @@ import {turnMoneyCases} from './turn-money.mjs';
 import {confirmLostCases} from './confirm-lost.mjs';
 export async function membershipCases({c,v,profile,pack,receive,withdraw,ops,report}) {
  const facts=async user=>{await c.query('SET ROLE service_role');try{return await v('SELECT pay_common_membership_facts($1) v',[user]);}finally{await c.query('RESET ROLE');}};
- const member=async(start,end,cycle='monthly',level='pro')=>{
+ const member=async(start,end,cycle='monthly',level='pro',offer='standard')=>{
   const user=await profile(0),order=randomUUID(),sub=randomUUID(),plan=randomUUID();
   await c.query(`INSERT INTO membership_plans(id,name,level,monthly_price,yearly_price,monthly_credits,yearly_credits,
    allow_fusion_review,allow_fusion_compare,library_storage_bytes) VALUES($1,'Fixture',$2,10,120,100,1200,true,true,500000000)
@@ -30,9 +30,9 @@ export async function membershipCases({c,v,profile,pack,receive,withdraw,ops,rep
    entitlement_start,entitlement_end,qualified_paid_at,qualification_state,routing_version,terms_version,terms_accepted_at,offer_kind,
    price_ref_id,stripe_managed_payments,dispute_payment_key,dispute_subscription_key)
    VALUES($1,$2,'membership_plan',$3,$4,'subscription','completed','paid',$5,'usd','stripe','fixture','test','card_cn',
-    gen_random_uuid(),repeat('a',64),$6,now(),$7,'checkout',$14,true,$8,$9,$10,$9,'sold',1,'terms-v1',now(),'standard',$11,false,$12,$13)`,
+    gen_random_uuid(),repeat('a',64),$6,now(),$7,'checkout',$14,true,$8,$9,$10,$9,'sold',1,'terms-v1',now(),$15,$11,false,$12,$13)`,
    [order,user,pid,cycle,cycle==='yearly'?12000:1000,snap,sub,cycle==='yearly'?'year':'month',start,end,price,
-    'fixture:test:pi_'+order.replaceAll('-',''),'fixture:test:sub_'+sub.replaceAll('-',''),level]);
+    'fixture:test:pi_'+order.replaceAll('-',''),'fixture:test:sub_'+sub.replaceAll('-',''),level,offer]);
   await c.query(`INSERT INTO payment_provider_refs(channel,merchant_namespace,mode,object_type,external_id,order_id)
    VALUES('stripe','fixture','test','payment',$1,$2)`,['in_'+order.replaceAll('-',''),order]);
   await c.query(`INSERT INTO payment_provider_refs(channel,merchant_namespace,mode,object_type,external_id,subscription_id)
