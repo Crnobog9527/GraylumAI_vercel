@@ -79,8 +79,11 @@ describe('VERCEL-COST-2: the script against a real repository', () => {
     const bare = mkdtempSync(join(tmpdir(), 'vercel-ignore-nogit-'));
     try { expect(exit(first, bare)).toBe(1); } finally { rmSync(bare, { recursive: true, force: true }); }
   });
-  it('is the app\'s ignoreCommand, run from the app folder', () => {
+  it('is the app\'s ignoreCommand, run from the app folder; main does not build on a push, staging does', () => {
     const config = JSON.parse(readFileSync(fileURLToPath(new URL('../vercel.json', import.meta.url)), 'utf8'));
     expect(config.ignoreCommand).toBe('node scripts/vercel-ignore-build.mjs');
+    // Production builds only when the controller creates the release deployment (runbook §14); staging builds on every merge.
+    expect(config.git.deploymentEnabled.main).toBe(false);
+    expect(config.git.deploymentEnabled.staging).toBe(true);
   });
 });
