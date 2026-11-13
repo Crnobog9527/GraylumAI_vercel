@@ -26,6 +26,7 @@ import { MentorBudgetTabContent, MentorBudgetTabTrigger } from '@/components/adm
 import { changedSettings, mergeReadSettings } from './changedSettings';
 import { MembershipPlanPermissions } from '@/components/admin/MembershipPlanPermissions';
 import { FUSION_COMPARE_SETTING_KEY, FusionCompareSetting } from '@/components/admin/FusionCompareSetting';
+import { VOICE_EXAMPLES_SETTING_KEY, VoiceExamplesSetting } from '@/components/admin/VoiceExamplesSetting';
 import { FusionReviewSettings } from '@/components/admin/FusionReviewSettings';
 import { PaymentFailoverSetting } from '@/components/admin/PaymentFailoverSetting';
 import { SignupGuardCard } from '@/components/admin/SignupGuardCard';
@@ -387,6 +388,7 @@ export default function AdminSettingsPage() {
           </Card>
           <div className="mt-6"><ModelIdentityGuardControl /></div>
           <div className="mt-6"><ResearchToolsSettings /></div>
+          <div className="mt-6"><VoiceExamplesSetting saved={savedSettings?.[VOICE_EXAMPLES_SETTING_KEY]} onSaved={reloadDashboard} /></div>
         </TabsContent>
 
         {/* Membership Tab */}

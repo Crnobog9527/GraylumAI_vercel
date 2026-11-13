@@ -21,6 +21,7 @@ export function MyVoice({ onOpenDocuments }: { onOpenDocuments: () => void }) {
   const confirm = trpc.voice.confirm.useMutation();
   const setEnabled = trpc.voice.setEnabled.useMutation();
   const remove = trpc.voice.delete.useMutation();
+  const setLabel = trpc.voice.setLabel.useMutation();
   const [preferred, setPreferred] = useState<string[] | null>(null);
   const [busy, setBusy] = useState(false);
   useEffect(() => { setPolling(state?.latest?.status === 'generating'); }, [state?.latest?.status]);
@@ -79,5 +80,9 @@ export function MyVoice({ onOpenDocuments }: { onOpenDocuments: () => void }) {
       await confirm.mutateAsync({ versionId, expectedRevision: state.revision, profile }); await query.refetch();
       toast.success(state.enabled ? '文风画像已确认，之后写稿会按它来。' : '文风画像已保存。"写稿时使用我的文风"现在是关闭的，打开后才会用。'); })}
     onDelete={versionId => void run(async () => { await remove.mutateAsync({ versionId }); await query.refetch(); })}
+    onSetLabel={async (versionId, documentId, type, topics) => {
+      let saved = false;
+      await run(async () => { await setLabel.mutateAsync({ versionId, documentId, type, topics }); await query.refetch(); saved = true; });
+      return saved; }}
     onOpenDocuments={onOpenDocuments} />;
 }
