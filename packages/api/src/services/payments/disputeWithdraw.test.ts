@@ -35,7 +35,7 @@ it('keeps the withdrawal when the email fails and fails closed on a database err
   expect(await withdrawDisputeHold(db(row('won')), ACTOR, DISPUTE)).toMatchObject({ restored: 100, email: 'failed' });
   await expect(withdrawDisputeHold(db(null, { message: 'x' }), ACTOR, DISPUTE)).rejects.toThrow('PAY_DISPUTE_WITHDRAW_UNAVAILABLE');
 });
-it('still accepts the old result shape from a database without 0531', async () => {
+it('still accepts the old result shape from a database without 0537', async () => {
   expect(await withdrawDisputeHold(db({ restored: 7, duplicate: false }), ACTOR, DISPUTE))
     .toEqual({ restored: 7, duplicate: false, backfilled: 0, email: 'not_won' });
 });
