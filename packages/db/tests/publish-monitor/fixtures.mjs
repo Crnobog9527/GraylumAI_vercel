@@ -41,7 +41,7 @@ const OLD_OBJECTS = /^(?!\s*--).*\b(runtime_executions|bill2_prepare|bill2_runs|
 const REFUSALS = /^\d{4}_refusals_no_postgrest_retry\.sql$/; // replays without its content_erasure_confirm copy (replaySql)
 const namesDroppedPrepare = file => !REFUSALS.test(file) && OLD_OBJECTS.test(readFileSync(resolve(import.meta.dirname, '../../migrations', file), 'utf8'));
 export const laterRedefinitions = from => readdirSync(resolve(import.meta.dirname, '../../migrations'))
-  .filter(file => /^\d{4}_(?:publish_monitor.*|turn_steps_history|mentor_turn_steps_history|shotviva_image_steps|refusals_no_postgrest_retry|voice_abort_keep_user_message)\.sql$/.test(file) && file.slice(0, 4) > from && !namesDroppedPrepare(file)).sort()
+  .filter(file => /^\d{4}_(?:publish_monitor.*|turn_steps_history|mentor_turn_steps_history|shotviva_image_steps|refusals_no_postgrest_retry|voice_abort_keep_user_message|cc2_minutes)\.sql$/.test(file) && file.slice(0, 4) > from && !namesDroppedPrepare(file)).sort()
   .map(file => `packages/db/migrations/${file}`);
 
 // The SQL to replay for one path laterRedefinitions returned.
