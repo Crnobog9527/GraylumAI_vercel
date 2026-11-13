@@ -53,7 +53,7 @@ it('returns only a boolean notice scoped to the authenticated profile', async ()
 });
 it('passes the active admin identity for a second database authorization check', async () => {
   const f = harness('admin');
-  expect(await f.caller.withdraw({ disputeId: ID })).toEqual({ restored: 7, duplicate: false });
+  expect(await f.caller.withdraw({ disputeId: ID })).toEqual({ restored: 7, duplicate: false, backfilled: 0, email: 'not_won' });
   expect(f.calls).toEqual([['pay_dispute_withdraw', { p_actor: ACTOR, p_dispute: ID }]]);
   await expect(f.caller.withdraw({ disputeId: 'bad' })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
 });

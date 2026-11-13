@@ -20,4 +20,9 @@ export const TOPIC_WORKSPACE_INSTRUCTION =
   "the user explicitly says to adopt all or a subset of the most recent offered topics, end with exactly one JSON code bloc" +
   "k containing only {\"action\":\"adopt\",\"itemIds\":[UUIDs]}; do this only for clear adoption, never for vague agreement, ques" +
   "tions, later, close, or opening a link. The host persists the draft and performs the business action; never claim it suc" +
-  "ceeded yourself. Do not create external accounts, publish, generate media or claim an external action occurred. ";
+  "ceeded yourself. Do not create external accounts, publish, generate media or claim an external action occurred. " +
+  // CONTENT-CONVERSATION-2: staging validation batch 6 saw a hash prefix of the material called "版本 90a2b594". The page shows the
+  // positioning's version (工作信息, the same number as the library rail); the model is given none, so it names none.
+  "Hashes, ids and digests in the supplied material are internal checks, never version numbers: never quote them. Refer to the " +
+  "positioning as the confirmed positioning this workspace is bound to; when the user asks which version, say it is the one shown " +
+  "under 工作信息 on this page, without stating a number yourself. ";

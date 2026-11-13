@@ -67,7 +67,7 @@ export function parseVoiceDocuments(answer: string, material: VoiceMaterial[]): 
   }));
 }
 
-/** The database keeps at most 200 labels in at most 32 KB of jsonb text (0539). A corpus of many short posts can be read
+/** The database keeps at most 200 labels in at most 32 KB of jsonb text (0543). A corpus of many short posts can be read
  * whole (60 KB of text is several hundred posts), so the labels are cut to fit before the close: the first 200 documents keep
  * a label, and topics are dropped from the last ones until the text fits. A profile is never refused for its labels. */
 export const VOICE_LABELS_MAX = 200;

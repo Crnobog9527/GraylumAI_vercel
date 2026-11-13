@@ -576,6 +576,53 @@ it('RUNTIME: CORE-PATH-V2 V2-10b C2: a package needs its claim and freezes its m
   expect(frozen.hash).toBe((claimed.data as { hash: string }).hash);
 });
 
+it('RUNTIME: CONTENT-CONVERSATION-2: a video topic window is given its final script and storyboard on every turn and freezes them as a list', async () => {
+  const f = await setup(), w = await workItem(f.actor, 'video');
+  const entry = { name: 'Work method', description: 'The method', ...w.skill, packageId: w.skill.skillId, packageHash: 'b'.repeat(64), resultBytes: 10 };
+  const bodies: string[] = [];
+  const transport: typeof fetch = async (_url, init) => { bodies.push(String(init?.body)); return sse('gen-cc2-' + bodies.length, ['Reply']); };
+  const { admin } = countingAdmin();
+  const send = async (requestId: string, workItem = true, sessionId = w.session) => {
+    const events: TurnEvent[] = [];
+    await withCatalogRequest(() => runChatTurn({ admin, clients: turnClients(admin), slots, transport, gate: { classify: allowGate },
+      newWork: { message: admit, calls: admit },
+      tools: { skills: async () => ({ catalog: [entry], prepared: new Map([[entry.name, 'method text']]) }) } },
+    { actorId: f.actor, sessionId, requestId, text: '出分镜', ...(workItem ? { workItem: true } : {}) }, e => { events.push(e); }));
+    return events;
+  };
+  const policyOf = async (requestId: string) => (await db.query('select policy from turns where actor_id=$1 and request_id=$2', [f.actor, requestId])).rows[0].policy;
+  // No saved script yet: the turn runs, with the topic-window rule and no source.
+  const first = randomUUID();
+  expect((await send(first)).at(-1)).toMatchObject({ type: 'result' });
+  expect(bodies.at(-1)).toContain('Host rule (topic window)');
+  expect((await policyOf(first)).workSources).toBeUndefined();
+  const script = randomUUID(), story = randomUUID();
+  await db.query("insert into opc_content_versions(id,actor_id,work_item_id,kind,version,status,body,request_id) values($1,$2,$3,'script',1,'final','CC2_SCRIPT',$4)",
+    [script, f.actor, w.item, randomUUID()]);
+  // The final script, then its storyboard: both go to the model as data, are frozen in order, and are not saved with the message.
+  const second = randomUUID();
+  expect((await send(second)).at(-1)).toMatchObject({ type: 'result' });
+  expect(bodies.at(-1)).toContain('CC2_SCRIPT');
+  expect((await policyOf(second)).workSources).toEqual([{ contentId: script, kind: 'script' }]);
+  await db.query(`insert into opc_content_versions(id,actor_id,work_item_id,kind,version,status,body,source_content_id,request_id)
+    values($1,$2,$3,'storyboard',1,'draft','CC2_STORY',$4,$5)`, [story, f.actor, w.item, script, randomUUID()]);
+  const third = randomUUID();
+  expect((await send(third)).at(-1)).toMatchObject({ type: 'result' });
+  expect(bodies.at(-1)).toContain('CC2_STORY');
+  expect((await policyOf(third)).workSources).toEqual([{ contentId: script, kind: 'script' }, { contentId: story, kind: 'storyboard' }]);
+  expect(JSON.stringify((await db.query('select content from session_messages where session_id=$1', [w.session])).rows)).not.toMatch(/CC2_SCRIPT|CC2_STORY/);
+  // The reply of that turn saves as editing advice reading the listed storyboard.
+  const turnId = (await db.query('select id from turns where actor_id=$1 and request_id=$2', [f.actor, third])).rows[0].id;
+  const saved = await admin.rpc('opc_content_from_turn', { p_actor_id: f.actor, p_work_item_id: w.item, p_request_id: randomUUID(),
+    p_expected_version: 0, p_kind: 'editing', p_status: 'draft', p_turn_id: turnId });
+  expect(saved.error).toBeNull();
+  expect((await db.query('select source_content_id from opc_content_versions where id=$1', [(saved.data as { id: string }).id])).rows[0].source_content_id).toBe(story);
+  // A free chat never gets the topic-window rule.
+  const free = randomUUID();
+  expect((await send(free, false, f.session)).at(-1)).toMatchObject({ type: 'result' });
+  expect(bodies.at(-1)).not.toContain('Host rule (topic window)');
+});
+
 // PUBLISH-MONITOR B2: a free chat message with one screenshot. The image goes to the model with that message and is written nowhere.
 const screenshot = () => {
   // A header-only JPEG with random filler after the scan header, so its bytes cannot match anything else in the database.

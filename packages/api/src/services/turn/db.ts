@@ -19,6 +19,11 @@ export function turnClients(primary: SupabaseClient, replica?: SupabaseClient): 
 const tombstones = z.object({ sessionTombstoned: z.boolean(), accountErasing: z.boolean(), voiceSourceRevoked: z.boolean() });
 export type Tombstones = z.infer<typeof tombstones>;
 export const tombstoned = (t: Tombstones) => t.sessionTombstoned || t.accountErasing || t.voiceSourceRevoked;
+/** VOICE-ABORT-FIX: a round voided only because the writing voice it used was deleted (the conversation and the account are
+ * still there). Its erased close keeps the user's message (turn_close, 0535); the page says the voice was deleted, not the chat. */
+export const voiceRevokedOnly = (t: Partial<Tombstones> | null | undefined) =>
+  Boolean(t?.voiceSourceRevoked && !t.sessionTombstoned && !t.accountErasing);
+export const erasedCode = (t: Partial<Tombstones> | null | undefined) => voiceRevokedOnly(t) ? 'TURN_VOICE_REVOKED' : 'TURN_TOMBSTONED';
 
 const historyItem = z.object({ seq: z.number().int().positive(), role: z.enum(['user', 'assistant']), content: z.string(),
   contentHash: z.string().regex(/^[0-9a-f]{64}$/) });
@@ -70,7 +75,10 @@ const reportTurn = z.object({ turnId: z.number().int().positive(), requestId: z.
 export type ReportTurn = z.infer<typeof reportTurn>;
 const workCheck = z.object({ work: z.object({ moduleId: z.string().uuid(), skillId: z.string().uuid(), revisionId: z.string().uuid(),
   brief: z.string().nullable(), material: z.string().nullable(), videoPackage: z.boolean(), materialRevision: z.number().int().nullable(),
-  materialHash: z.string().nullable() }).nullable() });
+  materialHash: z.string().nullable(),
+  // CONTENT-CONVERSATION-2 (0541): a video item's current final script, then that script's newest storyboard; none otherwise.
+  sources: z.array(z.object({ contentId: z.string().uuid(), kind: z.enum(['script', 'storyboard']), version: z.number().int().positive(),
+    body: z.string(), bytes: z.number() })).default([]) }).nullable() });
 const workSource = z.discriminatedUnion('status', [z.object({ status: z.literal('none') }),
   z.object({ status: z.literal('refused'), code: z.string() }),
   z.object({ status: z.literal('ready'), contentId: z.string().uuid(), kind: z.enum(['script', 'storyboard']), version: z.number().int().positive(),
