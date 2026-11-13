@@ -11,14 +11,14 @@ import { createClient } from '@/lib/supabase';
 export type PhoneStep = 'phone' | 'code';
 
 /**
- * PHONE-OTP sign-in in the browser: number + both PIPL boxes → our send route → six-digit code →
+ * PHONE-OTP sign-in in the browser: number + the box (the terms and the privacy policy) → our send route → six-digit code →
  * verifyOtp, which signs in (a new number signs up). No password. The session lands in this browser like email sign-in.
  */
 export function usePhoneSignIn(redirectTarget: string) {
   const [step, setStep] = useState<PhoneStep>('phone');
   const [phone, setPhone] = useState('');
-  const [privacy, setPrivacy] = useState(false);
-  const [transfer, setTransfer] = useState(false);
+  /** "我已阅读并同意《服务条款》和《隐私政策》": one box for the two documents (Owner 2026-11-13). */
+  const [agreed, setAgreed] = useState(false);
   const [code, setCode] = useState('');
   const [pending, setPending] = useState<'send' | 'verify' | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -35,11 +35,11 @@ export function usePhoneSignIn(redirectTarget: string) {
   const send = useCallback(async () => {
     const parsed = parseMainlandPhone(phone);
     if (!parsed) return setError(PHONE_SEND_MESSAGES.PHONE_INVALID);
-    if (!privacy || !transfer) return setError(PHONE_SEND_MESSAGES.CONSENT_REQUIRED);
+    if (!agreed) return setError(PHONE_SEND_MESSAGES.CONSENT_REQUIRED);
     setPending('send');
     setError(null);
     try {
-      const failure = await requestPhoneCode({ phone: parsed.e164, createUser: true, privacyConsent: privacy, transferConsent: transfer });
+      const failure = await requestPhoneCode({ phone: parsed.e164, createUser: true, privacyConsent: agreed, termsConsent: agreed });
       if (failure) return setError(failure);
       setSentAt(Date.now());
       setNow(Date.now());
@@ -48,7 +48,7 @@ export function usePhoneSignIn(redirectTarget: string) {
     } finally {
       setPending(null);
     }
-  }, [phone, privacy, transfer]);
+  }, [phone, agreed]);
 
   const verify = useCallback(async (value: string = code) => {
     const parsed = parseMainlandPhone(phone);
@@ -80,7 +80,7 @@ export function usePhoneSignIn(redirectTarget: string) {
 
   return {
     step, phone, setPhone: (value: string) => { setPhone(value.replace(/[^\d\s+-]/g, '')); setError(null); },
-    privacy, setPrivacy, transfer, setTransfer, code, onCodeChange, pending, error, waitSeconds,
+    agreed, setAgreed, code, onCodeChange, pending, error, waitSeconds,
     maskedPhone: parseMainlandPhone(phone)?.national.replace(/^(\d{3})\d{4}(\d{4})$/, '$1****$2') ?? '',
     send, verify, changeNumber,
   };

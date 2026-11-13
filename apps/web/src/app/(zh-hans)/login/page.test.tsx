@@ -47,16 +47,22 @@ describe('/login with a retired invite link', () => {
 
 // PHONE-OTP (Owner 2026-11-07): the Simplified login page opens on the phone tab; the Taiwan entry (lang=zh-Hant) keeps email only.
 describe('/login phone tab', () => {
-  it.each(['', 'lang=zh-Hans', 'action=signup'])('opens on 手机号 with two separate consent boxes for ?%s', (query) => {
+  it.each(['', 'lang=zh-Hans', 'action=signup'])('opens on 手机号 with one box for the terms and the privacy policy for ?%s', (query) => {
     params.current = new URLSearchParams(query);
     const markup = renderToStaticMarkup(createElement(LoginPageContent));
     expect(markup).toMatch(/role="tab"[^>]*aria-selected="true"[^>]*>手机号/);
     expect(markup).toContain('>邮箱</button>');
     expect(markup).toContain('+86');
-    expect(markup).toContain('name="privacyConsent"');
-    expect(markup).toContain('name="transferConsent"');
-    expect(markup).not.toMatch(/name="privacyConsent"[^>]*checked/);
-    expect(markup).toContain('href="/privacy"');
+    // Owner 2026-11-13: one box, "我已阅读并同意《服务条款》和《隐私政策》", each name a link to its page; not ticked for the visitor.
+    expect(markup.match(/type="checkbox"/g)).toHaveLength(1);
+    expect(markup).toContain('name="termsPrivacyConsent"');
+    expect(markup).not.toMatch(/name="termsPrivacyConsent"[^>]*checked/);
+    expect(markup.replace(/<[^>]+>/g, '')).toContain('我已阅读并同意《服务条款》和《隐私政策》');
+    expect(markup).toMatch(/<a[^>]*href="\/terms"[^>]*>《服务条款》<\/a>/);
+    expect(markup).toMatch(/<a[^>]*href="\/privacy"[^>]*>《隐私政策》<\/a>/);
+    // The box for sending personal information out of mainland China is not shown ("不要展示").
+    expect(markup).not.toContain('transferConsent');
+    expect(markup).not.toMatch(/出境|境外|传输到/);
     expect(markup).not.toContain('type="email"');
     expect(markup).toMatch(/<button[^>]*type="submit"[^>]*disabled=""[^>]*>加载中\.\.\./);
   });
