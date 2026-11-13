@@ -13,7 +13,7 @@ import { researchTools, type ResearchToolsInput } from './research';
 import { researchRounds } from './rounds';
 import { READ_SOURCE_GUIDE } from './source';
 import { skillFileTool } from '../skills/skillFile';
-import { turnLoadSkillTool, turnSkillFileTool, type PreparedSkillFiles, type PreparedSkills } from './skills';
+import { turnLoadSkillTool, turnSkillFileTool, type PreparedSkillFiles, type PreparedSkills, type SkillExtra } from './skills';
 import type { GeneralResearchToolName, ToolCallDeps, ToolCallOutcome, ToolPlan, ToolSummary, TurnTools } from './types';
 
 export { planTurnTools, paidToolBounds, RESEARCH_INPUT_BYTES, type ResearchSetup } from './plan';
@@ -45,7 +45,7 @@ export type TurnToolsInput = {
   /** Checked before each paid tool call with its subcall count (newWorkGate); throws TurnStop to refuse. */
   callGate?: (subcalls: number) => Promise<void>;
   accounts?: { benchmark: readonly CanonicalAccount[]; currentMessage: string };
-  skills?: PreparedSkills; skillFiles?: PreparedSkillFiles; readSource?: SourceReader; sourceDescription?: string;
+  skills?: PreparedSkills; skillExtras?: SkillExtra; skillFiles?: PreparedSkillFiles; readSource?: SourceReader; sourceDescription?: string;
   onCall?: ResearchToolsInput['onCall'];
   /** INTEGRATION-SHOTVIVA: the account's image calls (absent: the image tools answer unavailable). */
   images?: ImageToolCalls;
@@ -87,7 +87,7 @@ export function turnTools(input: TurnToolsInput): TurnTools {
     if ((GENERAL_RESEARCH_TOOLS as readonly string[]).includes(name)) { tools.push(research.find(tool => tool.name === name)!); continue; }
     if (name === 'load_skill') {
       tools.push(usable(name) && input.skills
-        ? turnLoadSkillTool(input.skills, LOAD_SKILL_CALLS, () => { freeCalls++; })
+        ? turnLoadSkillTool(input.skills, LOAD_SKILL_CALLS, () => { freeCalls++; }, input.skillExtras)
         : loadSkillTool(async () => SKILL_LOAD_REFUSED));
       continue;
     }

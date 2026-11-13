@@ -3,7 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { canonicalAccount, type CanonicalAccount } from '../research/tools/accountLinks';
 import type { SocialPlatform } from '../research/vendors/types';
 import { discoverSkillCatalog, entryContentSource, moduleRequiredLevel, moduleUsesVoice, pinnedCatalogEntry } from './skills/skillCatalog';
-import { admitCatalogVoice } from './admission/voiceCatalog';
+import { admitCatalogVoice, readVoiceExamples } from './admission/voiceCatalog';
 import { swallow } from '../../lib/swallow';
 import { readOwnDataTier } from '../membershipEntitlements';
 import { loadChatHandbooks } from '../publishMonitor/coach/handbooks';
@@ -91,10 +91,12 @@ export function chatToolDeps(admin: SupabaseClient, user: () => SupabaseClient, 
       const contentSource = pin && pinned && pinnedListed ? await entryContentSource(sourceOf(pin), pinned, FREE_RESULT_RESERVE_BYTES) : undefined;
       return { catalog, prepared, ...(contentSource ? { contentSource } : {}) };
     },
-    async voice(actorId, catalog, message) {
-      const voice = await admitCatalogVoice(admin, actorId, catalog, message);
+    async voice(actorId, catalog, examplesOn) {
+      const voice = await admitCatalogVoice(admin, actorId, catalog, examplesOn);
+      const source = voice?.examples;
       return voice && { text: voice.text, ...(voice.frozen.versionId ? { versionId: voice.frozen.versionId } : {}),
-        ...(voice.examples ? { examples: voice.examples } : {}) };
+        // VOICE-2 PR-2: read only when the model loads one of these Skills (tools/skills.ts), never for a reply that writes nothing.
+        ...(source ? { examples: { modules: source.modules, read: (message: string) => readVoiceExamples(admin, actorId, source, message) } } : {}) };
     },
     // Before turn_open: the old path's full source check, and the own-data tier (read-only, so no lock on the profile). Free members
     // get window 0 and read the "members only" note; an unknown tier means no post reads this turn.

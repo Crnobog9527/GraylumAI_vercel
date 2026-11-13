@@ -48,7 +48,9 @@ export function withPinnedSkill(catalog: readonly SkillCatalogEntry[], pin: { mo
   return entry ? [...others, title ? { ...entry, title } : entry] : others;
 }
 
-export function turnLoadSkillTool(skills: PreparedSkills, maxLoads: number, onLoad?: () => void): RuntimeTool {
+/** VOICE-2 PR-2: what a load may add to a prepared result (the writing voice examples), read only when the Skill is loaded. */
+export type SkillExtra = (name: string, result: string) => Promise<string>;
+export function turnLoadSkillTool(skills: PreparedSkills, maxLoads: number, onLoad?: () => void, extra?: SkillExtra): RuntimeTool {
   let loads = 0;
   return loadSkillTool(async arguments_ => {
     const parsed = loadSkillParameters.safeParse(arguments_);
@@ -57,7 +59,7 @@ export function turnLoadSkillTool(skills: PreparedSkills, maxLoads: number, onLo
     if (!result || loads >= maxLoads) return SKILL_LOAD_REFUSED;
     loads++;
     onLoad?.();
-    return result;
+    return extra ? extra(parsed.data!.name, result) : result;
   }, () => loads < maxLoads);
 }
 

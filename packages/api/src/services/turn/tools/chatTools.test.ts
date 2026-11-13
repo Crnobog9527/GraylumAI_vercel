@@ -15,11 +15,10 @@ const entry = (name: string, extra = {}) => ({ name, description: `${name} metho
 const catalog = [entry('Hooks', { social: true as const }), entry('Pricing', { usesVoice: true as const, title: '定价方案' })];
 const skills = async () => ({ catalog, prepared: new Map([['Hooks', 'hooks text'], ['Pricing', 'pricing text']]) });
 
-function prepare(tools: ChatToolDeps & { currentMessage?: string }, switches: Record<string, unknown> = {}) {
+function prepare(tools: ChatToolDeps, switches: Record<string, unknown> = {}) {
   const rows = Object.entries({ ...researchSettings(false), ...switches }).map(([key, value]) => ({ key, value }));
-  const { currentMessage, ...deps } = tools;
   return prepareChatTools({ admin: {} as SupabaseClient, read: { rpc: vi.fn() } as never, configuration: Promise.resolve({ data: rows, error: null }),
-    tools: deps, actorId, sessionId, ...(currentMessage === undefined ? {} : { currentMessage }), requiredBytes: 1000, interactiveBytes: 90_000, quotedBytes: 150_000, modelMultiplier: '6', defaultMultiplier: '6', maxTools: 9 });
+    tools, actorId, sessionId, requiredBytes: 1000, interactiveBytes: 90_000, quotedBytes: 150_000, modelMultiplier: '6', defaultMultiplier: '6', maxTools: 9 });
 }
 const build = (setup: Awaited<ReturnType<typeof prepare>>, gated: boolean) => setup.build({} as never, { slots: freeSlots, currentMessage: 'x',
   deadline: Date.now() + 1000, callGate: async () => {}, onStop: () => {}, gated, onCall: { emit: () => {}, q: '100' } });
@@ -105,20 +104,32 @@ describe('a free chat\'s tools from the route\'s dependencies (CORE-PATH-V2 V2-6
   it('the catalog voice goes to the per-user segment with its version, never the shared one', async () => {
     const voice = vi.fn(async () => ({ text: '\nWriting voice', versionId: 'v1' }));
     const setup = await prepare({ skills, voice });
-    expect(voice).toHaveBeenCalledWith(actorId, catalog, '');
+    expect(voice).toHaveBeenCalledWith(actorId, catalog, true);
     expect(setup.userInstructions).toBe('\nWriting voice');
     expect(setup.voiceVersionId).toBe('v1');
     expect(setup.sharedInstructions(false)).not.toContain('Writing voice');
   });
 
-  // VOICE-2 PR-2: the examples go with the current message (the plan's note), sized, never into either instruction segment.
-  it('the voice examples ride with the current message, not the instructions', async () => {
-    const voice = vi.fn(async () => ({ text: '\nWriting voice', versionId: 'v1', examples: '\n<user_voice_examples>x</user_voice_examples>' }));
-    const setup = await prepare({ skills, voice, currentMessage: '帮我写一条小红书' });
-    expect(voice).toHaveBeenCalledWith(actorId, catalog, '帮我写一条小红书');
-    expect(setup.plan.note).toContain('<user_voice_examples>x</user_voice_examples>');
-    expect(setup.userInstructions).toBe('\nWriting voice');
-    expect(setup.sharedInstructions(false)).not.toContain('user_voice_examples');
+  // VOICE-2 PR-2: only a load of a flagged Skill reads and adds the examples; the switch off is passed to the voice read.
+  it('a load of a voice Skill adds the past pieces to its result; other loads, and replies without a load, read none', async () => {
+    const writer = '00000000-0000-4000-8000-000000000009';
+    const own = [entry('Hooks'), entry('Writer', { usesVoice: true as const, moduleId: writer })];
+    const prepared = new Map([['Hooks', JSON.stringify({ name: 'Hooks', instructions: 'h' })],
+      ['Writer', JSON.stringify({ name: 'Writer', instructions: 'w' })]]);
+    const read = vi.fn(async () => [{ text: '练完腿走路都打颤。' }]);
+    const voice = vi.fn(async () => ({ text: '\nWriting voice', versionId: 'v1', examples: { modules: [writer], read } }));
+    const setup = await prepare({ skills: async () => ({ catalog: own, prepared }), voice });
+    const built = await build(setup, false);
+    expect(read).not.toHaveBeenCalled();
+    const loadSkill = built.tools.find(tool => tool.name === 'load_skill')!;
+    expect(JSON.parse(String(await loadSkill.execute({ name: 'Hooks' }, 'c1')))).toEqual({ name: 'Hooks', instructions: 'h' });
+    expect(read).not.toHaveBeenCalled();
+    const loaded = JSON.parse(String(await loadSkill.execute({ name: 'Writer' }, 'c2')));
+    expect(read).toHaveBeenCalledWith('x');
+    expect(loaded.writingVoiceExamples).toContain('练完腿走路都打颤。');
+    expect(setup.userInstructions).not.toContain('练完腿');
+    await prepare({ skills: async () => ({ catalog: own, prepared }), voice }, { voice_examples: false });
+    expect(voice).toHaveBeenLastCalledWith(actorId, own, false);
   });
 
   it('a voice that cannot be read leaves the turn without it; no catalog means no voice read', async () => {

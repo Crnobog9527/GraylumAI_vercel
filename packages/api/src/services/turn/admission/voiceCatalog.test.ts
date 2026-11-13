@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {describe, expect, it} from 'vitest';
-import {admitCatalogVoice, withVoice} from './voiceCatalog';
+import {admitCatalogVoice, readVoiceExamples, withVoice} from './voiceCatalog';
 import {frozenVoiceProfile} from './voiceAdmission';
 import {voiceAddendum, VOICE_GUIDE, VOICE_HINT_INSTRUCTIONS} from '../agent/primaryInstructions';
 import type {SkillCatalogEntry} from '../skills/skillCatalog';
@@ -40,28 +40,24 @@ describe('admitCatalogVoice', () => {
     expect(voice?.text).toContain(VOICE_HINT_INSTRUCTIONS);
     expect(voice?.text).toContain('after loading one of these Skills: script-writer.');
   });
-  // VOICE-2 PR-2: examples for a writing request, from the version's labels; the administrator's switch falls back to voice-v3.
-  it('a writing request gets past pieces of another topic as a note; other messages and the switch off get none', async () => {
+  // VOICE-2 PR-2: admission reads no example (only a load does); the switch off falls back to voice-v3 without labels.
+  it('carries the labels for a later load and reads no example; the switch off gives voice-v3 and no labels', async () => {
     const documents = [{documentId: id(40), type: 'post', topics: ['做饭']}, {documentId: id(41), type: 'post', topics: ['健身']}];
     const calls: Array<[string, unknown]> = [];
-    const db = (setting?: unknown) => ({
-      from: (table: string) => table === 'system_settings'
-        ? {select: () => ({eq: () => ({maybeSingle: async () => ({data: setting === undefined ? null : {value: setting}, error: null})})})}
-        : {select: () => ({in: async (_: string, ids: string[]) => ({error: null, data: ids.map(value => ({id: value, uses_user_voice: true}))})})},
+    const db = {
+      from: () => ({select: () => ({in: async (_: string, ids: string[]) => ({error: null, data: ids.map(value => ({id: value, uses_user_voice: true}))})})}),
       rpc: async (name: string, args: unknown) => { calls.push([name, args]);
         if (name === 'voice_profile_current') return {data: current, error: null};
         if (name === 'voice_examples_read') return {data: [{documentId: id(41), filename: 'x.md', text: '练完腿走路都打颤。'}], error: null};
         return {data: {profile, documents, stats: null}, error: null}; },
-    }) as never;
-    const voice = await admitCatalogVoice(db(), id(5), catalog, '写一条关于做饭的小红书');
+    } as never;
+    const voice = await admitCatalogVoice(db, id(5), catalog);
     expect(voice?.frozen.guide).toBe('voice-v4');
-    expect(calls.find(([name]) => name === 'voice_examples_read')?.[1]).toEqual({a: id(5), vid: id(9), ids: [id(41)]});
-    expect(voice?.examples).toContain('练完腿走路都打颤。');
-    expect(voice?.text).not.toContain('练完腿走路都打颤。');
-    calls.length = 0;
-    expect((await admitCatalogVoice(db(), id(5), catalog, '今天天气怎么样'))?.examples).toBeUndefined();
+    expect(voice?.examples).toEqual({versionId: id(9), labels: documents, modules: [id(1), id(3)]});
     expect(calls.map(([name]) => name)).not.toContain('voice_examples_read');
-    const off = await admitCatalogVoice(db(false), id(5), catalog, '写一条关于做饭的小红书');
+    expect(await readVoiceExamples(db, id(5), voice!.examples!, '写一条关于做饭的小红书')).toEqual([{documentId: id(41), filename: 'x.md', text: '练完腿走路都打颤。'}]);
+    expect(calls.find(([name]) => name === 'voice_examples_read')?.[1]).toEqual({a: id(5), vid: id(9), ids: [id(41)]});
+    const off = await admitCatalogVoice(db, id(5), catalog, false);
     expect(off?.frozen.guide).toBe('voice-v3');
     expect(off?.examples).toBeUndefined();
   });

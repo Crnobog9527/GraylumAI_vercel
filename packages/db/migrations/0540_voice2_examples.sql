@@ -1,15 +1,16 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC.
 -- All rights reserved. This code is proprietary and confidential.
--- VOICE-2 PR-2 (文风 2.0; Owner 2026-11-14): when the user asks for writing, the reply also gets 2-3 short passages of the
--- user's own past writing of the same type and a different topic (picked by code from the labels 0539 saved), and the
--- confirmed voice carries the code-computed writing stats. Number 0540 from the controller.
+-- VOICE-2 PR-2 (文风 2.0; Owner 2026-11-14): when the model loads a writing Skill flagged "使用用户文风", that load's result also
+-- carries 2-3 short passages of the user's own past writing (the type they write most, topics the current message does not
+-- name; picked by code from the labels 0539 saved, never by guessing what the message asks for), and the confirmed voice
+-- carries the code-computed writing stats. Number 0540 from the controller.
 --   * voice_profile_read: whole current definition plus stats and documents of the version (callers built before read only
 --     the profile).
 --   * voice_examples_read(a, vid, ids): the opening text (at most 2,000 characters of its first three segments) of up to 3 documents, only when vid is the
 --     account's own confirmed or superseded version and each document is one it read (its sources), still ready and at the
 --     same content version. Anything else is left out, never an error. service_role only, as voice_profile_read.
 -- Deletion: the passages are only ever documents of the version; deleting one deletes the version (voice_library_trigger),
--- which voids a running reply bound to it (turn_tombstones, unchanged). The passages travel with the current message only:
+-- which voids a running reply bound to it (turn_tombstones, unchanged). The passages travel in that one tool result only:
 -- they are never stored in the conversation history.
 -- Compatibility: no table change; old code ignores the new keys. Repeatable: CREATE OR REPLACE only.
 -- Recovery: re-apply voice_profile_read from 0341_voice_profiles.sql and DROP FUNCTION public.voice_examples_read(uuid,uuid,uuid[]).

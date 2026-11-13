@@ -1,5 +1,9 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { TurnReplay } from '../resume';
+import { VOICE_EXAMPLES_SETTING, voiceExamplesOn } from '../admission/voiceExamplesSetting';
+import { rowFor } from '../settings/settingsRows';
+import { withVoiceExamples } from '../../voice/examples';
+import { FREE_RESULT_RESERVE_BYTES } from './plan';
 import { swallow } from '../../../lib/swallow';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { CanonicalAccount } from '../../research/tools/accountLinks';
@@ -41,8 +45,9 @@ export type ChatToolDeps = {
   /** The account's Skill catalog and each entry's prepared load result (read before turn_open; cached by package hash). */
   skills?: (actorId: string, pin?: WorkSkill) => Promise<{ catalog: SkillCatalogEntry[]; prepared: PreparedSkills; contentSource?: 'script' | 'storyboard' }>;
   /** The confirmed voice of the catalog's writing Skills: a per-user system paragraph, and the version turn_open freezes. */
-  /** `message`: the user's current message (VOICE-2 PR-2 picks past pieces of another topic for a writing request). */
-  voice?: (actorId: string, catalog: SkillCatalogEntry[], message: string) => Promise<{ text: string; versionId?: string; examples?: string } | undefined>;
+  /** `examplesOn`: the administrator's VOICE-2 switch. `examples`: the past pieces a load of one of `modules` adds (read then). */
+  voice?: (actorId: string, catalog: SkillCatalogEntry[], examplesOn: boolean) => Promise<{ text: string; versionId?: string;
+    examples?: { modules: string[]; read: (message: string) => Promise<Array<{ text: string }>> } } | undefined>;
   /** Offer read_source over the user's own library (library_turn_read through the read client) while the two library switches are
    *  on; tests may give their own reader. */
   library?: boolean | ((actorId: string, sessionId: string) => SourceReader);
@@ -100,7 +105,6 @@ const REPLY_RESERVE_MS = 60_000;
 export async function prepareChatTools(input: { admin: SupabaseClient; read: TurnClients['read'];
   configuration: Promise<ConfigurationRows>; tools: ChatToolDeps;
   actorId: string; sessionId: string; pin?: WorkSkill; requiredBytes: number; interactiveBytes: number; quotedBytes: number; chosen?: ChatSelection;
-  /** The user's message of this turn (VOICE-2 PR-2: the voice examples depend on it). */ currentMessage?: string;
   modelMultiplier: string; defaultMultiplier: string;
   /** The route profile's tool ceiling: a group that does not fit is not offered at all (payg-three-tools rule). */
   maxTools: number }): Promise<ChatToolsSetup> {
@@ -136,13 +140,14 @@ export async function prepareChatTools(input: { admin: SupabaseClient; read: Tur
   const coachText = COACH_REVIEW_INSTRUCTIONS + COACH_CAPTURE_INSTRUCTIONS;
   const postsText = workspaceRead && access.posts ? OWN_POSTS_INSTRUCTIONS + (access.posts.coach ? coachText : '') : '';
   const voice = input.tools.voice && catalog.length
-    ? await swallow('turn_tools_voice_unavailable', input.tools.voice(input.actorId, catalog, input.currentMessage ?? ''), undefined) : undefined;
+    ? await swallow('turn_tools_voice_unavailable', input.tools.voice(input.actorId, catalog,
+      voiceExamplesOn(rowFor(await input.configuration, VOICE_EXAMPLES_SETTING).data?.value)), undefined) : undefined;
   const { plan, research: setup } = await planTurnTools({ admin: input.admin, configuration: input.configuration, offered,
     freeReady: { load_skill: Boolean(skills?.prepared.size) },
     ...(workspaceRead ? { source: { strategyBytes: WORKSPACE_STRATEGY_RESULT_BYTES,
       ...(access.posts ? { posts: access.posts.windowDays > 0 ? { bytes: OWN_POSTS_RESERVE, calls: OWN_POSTS_READS }
         : { bytes: 1200, calls: READ_SOURCE_CALLS } } : {}) } } : {}),
-    requiredBytes: input.requiredBytes + definitionBytes + Buffer.byteLength(catalogText + libraryText + (voice?.text ?? '') + (voice?.examples ?? '')
+    requiredBytes: input.requiredBytes + definitionBytes + Buffer.byteLength(catalogText + libraryText + (voice?.text ?? '')
       + workspaceText + WORKSPACE_STRATEGY_INSTRUCTIONS + postsText + (imagesOffered ? IMAGE_TOOLS_INSTRUCTIONS : '')),
     ...(imagesOffered && imagesReady !== null ? { imagesReady } : {}),
     // A turn whose research is usable may use the research ceiling; otherwise the interactive one (Owner 10-17 / 10-27).
@@ -155,8 +160,7 @@ export async function prepareChatTools(input: { admin: SupabaseClient; read: Tur
   const benchmark = setup && input.tools.benchmarkAccounts ? await swallow('turn_tools_benchmark_accounts_unavailable',
     input.tools.benchmarkAccounts(input.actorId, input.sessionId), []) : [];
   return {
-    // VOICE-2 PR-2: the voice examples ride with the current message (the plan's note, after the cached history), never stored.
-    plan: voice?.examples ? { ...plan, note: plan.note + voice.examples } : plan, research: setup, inputLimit, definitionBytes,
+    plan, research: setup, inputLimit, definitionBytes,
     coachCapture: Boolean(plan.sourceRoom?.posts && access.posts?.coach && access.posts.windowDays > 0),
     sharedInstructions: gated => researchInstructions(plan) + libraryText + skillCatalogInstructions(allowedSkills(catalog, gated))
       + (imagesOffered ? IMAGE_TOOLS_INSTRUCTIONS : ''),
@@ -200,6 +204,8 @@ export async function prepareChatTools(input: { admin: SupabaseClient; read: Tur
           const prepared = skills!.prepared.get(entry.name);
           return prepared === undefined ? [] : [[entry.name, prepared] as const];
         })) } : {}),
+        // VOICE-2 PR-2: a load of a Skill flagged "使用用户文风" adds the user's past pieces of another topic to its result.
+        ...(skillOffered && voice?.examples ? { skillExtras: voiceExamplesExtra(catalog, voice.examples, extra.currentMessage) } : {}),
         ...(sourceOffered ? { sourceDescription: description, readSource: chatReader() } : {}),
         ...(imagesOffered && input.tools.images ? { images: input.tools.images.calls(input.actorId, input.sessionId,
           { turnId: calls.turnId, kept: extra.photos ?? null }) } : {}) });
@@ -211,4 +217,14 @@ export async function prepareChatTools(input: { admin: SupabaseClient; read: Tur
       return { ...built, tools };
     },
   };
+}
+
+/** The extra a load adds: for a Skill of `examples.modules`, the passages read now, within what admission reserved for one load.
+ * Any failure leaves the load as it was. */
+function voiceExamplesExtra(catalog: readonly SkillCatalogEntry[], examples: { modules: string[]; read: (message: string) =>
+  Promise<Array<{ text: string }>> }, message: string) {
+  const flagged = new Set(catalog.filter(entry => examples.modules.includes(entry.moduleId)).map(entry => entry.name));
+  return async (name: string, result: string) => flagged.has(name)
+    ? withVoiceExamples(result, await swallow('turn_voice_examples_unavailable', examples.read(message), []), FREE_RESULT_RESERVE_BYTES)
+    : result;
 }
