@@ -39,7 +39,7 @@ import { prepareChatTools, type ChatSelection, type ChatToolDeps, type ChatTools
 import { savedSteps } from './tools/toolStage';
 import { createRuntimeBudget } from './settings/budget';
 import { REPLY_CUT, REPLY_CUT_FAILURE, shownSoFar } from './shownReply';
-import { reviseVoiceDraft } from './voiceRevise';
+import { reviseVoiceDraft, voiceRewriteCalls } from './voiceRevise';
 import { RESEARCH_INPUT_BYTES } from './tools/plan';
 import { fitToolTurn } from './tools/capacity';
 import { chatImages, imageMark, withImages } from './chatImage';
@@ -248,14 +248,17 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
   if (startCredits === undefined) return emit({ type: 'error', code: 'TURN_START_THRESHOLD_UNCONFIGURED' });
   // A resume keeps to what the paused turn has left and replays its receipts.
   const resume = input.resume?.read;
-  // VOICE-2 PR-3: a reply that may be shown past passages keeps one more call for rewriting the sentences it copied.
-  const limits = { model: 1 + toolLimits.paidTools + toolLimits.freeTools + (tools?.voiceRewrite ? 1 : 0), ...toolLimits, decisions: 1 };
+  // VOICE-2 PR-3: a reply that may be shown past passages keeps one more call (same model, its bound) for rewriting copied sentences,
+  // declared as another model call so limits.model = 1 + tools + other calls holds, at the open and on a resume.
+  const rewriteCalls = voiceRewriteCalls(Boolean(tools?.voiceRewrite), quote);
+  const limits = { model: 1 + toolLimits.paidTools + toolLimits.freeTools + rewriteCalls.length, ...toolLimits, decisions: 1 };
   const replay = resume ? new TurnReplay(resume.calls) : undefined;
-  const frozenLimits = resume ? resumeLimits(limits, resume.limits, 0, replay?.replayedModels) : limits;
+  const frozenLimits = resume ? resumeLimits(limits, resume.limits, rewriteCalls.length, replay?.replayedModels) : limits;
   const policy = turnPolicy({ topUp: true, q: quote.q, multiplier: quote.multiplier, modelUpperUsd: quote.upperUsd,
     ...(frozenLimits.decisions ? { decisionUpperUsd } : {}),
     startThresholdCredits: startCredits,
     limits: frozenLimits, paidToolUpperUsd: (tools?.plan.paidToolUpperUsd ?? []).slice(0, frozenLimits.paidTools), stopLoss: config.stopLoss,
+    ...(rewriteCalls.length ? { otherModelCalls: rewriteCalls } : {}),
     historyItems: HISTORY_ITEMS, inputBytes: inputLimit, pricing: quote.pricing,
     frozen: { modelId: quote.modelId, model: quote.model, ...(tools?.voiceVersionId ? { voiceVersionId: tools.voiceVersionId } : {}) } });
   // A Skill result of a work item names the revision that wrote it (opc_work_result_turn).

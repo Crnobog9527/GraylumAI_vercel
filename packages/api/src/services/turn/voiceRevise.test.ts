@@ -5,7 +5,9 @@ vi.mock('./agent/runner', async original => ({ ...await original<object>(), runR
 vi.mock('./call', async original => ({ ...await original<object>(), modelCall: h.call }));
 vi.mock('./provider/providerRequest', async original => ({ ...await original<object>(), openRouterRequestBody: h.request }));
 import { TurnStop } from './call';
-import { reviseVoiceDraft } from './voiceRevise';
+import { reviseVoiceDraft, voiceRewriteCalls } from './voiceRevise';
+import { turnPolicy } from './policy';
+import { resumeLimits } from './resume';
 
 const shown = ['哎下班到家都七点了，咋整呢，一口锅搞定呗。'];
 const draft = '周末去爬山。哎下班到家都七点了，咋整呢，真累！';
@@ -39,5 +41,33 @@ describe('rewriting the copied sentences (VOICE-2 PR-3)', () => {
     expect(await reviseVoiceDraft(args)).toEqual({ text: draft, revised: 0 });
     h.runtime.mockRejectedValueOnce(new Error('down'));
     expect(await reviseVoiceDraft(args)).toEqual({ text: draft, revised: 0 });
+  });
+});
+
+// #2001 review: the rewrite call must reach the freeze as another model call, or every turn of such a reply is refused at the open.
+describe('the rewrite call in the freeze (turnPolicy, as chat.ts builds it)', () => {
+  const base = { q: '100', multiplier: '6', modelUpperUsd: '0.05', historyItems: 100, inputBytes: 90000, startThresholdCredits: 12,
+    stopLoss: { limitUsd: 1000, p: 8, poolSize: 8, uFastUsd: 1, uBigUsd: 5 }, topUp: true, decisionUpperUsd: '0.001' };
+  const quote = { upperUsd: '0.05', multiplier: '6' };
+  const toolLimits = { paidTools: 0, freeTools: 2 };
+  const chatLimits = (on: boolean) => { const other = voiceRewriteCalls(on, quote);
+    return { other, limits: { model: 1 + toolLimits.paidTools + toolLimits.freeTools + other.length, ...toolLimits, decisions: 1 } }; };
+  it('declared as another call of the same model: the policy is valid and its bound counts in G', () => {
+    const { other, limits } = chatLimits(true);
+    expect(other).toEqual([{ upperUsd: '0.05', multiplier: '6' }]);
+    const on = turnPolicy({ ...base, limits, otherModelCalls: other });
+    const off = turnPolicy({ ...base, ...chatLimits(false) });
+    expect(on.limits.model).toBe(4);
+    expect(on.gCredits).toBe(off.gCredits + off.uModelCredits);
+    expect(on.holdCredits).toBe(off.holdCredits);
+    // Without the declaration (what 681771ba did) the open is refused.
+    expect(() => turnPolicy({ ...base, limits })).toThrow('TURN_POLICY_INVALID');
+  });
+  it('a resumed turn keeps the call declared, with or without a replayed first answer', () => {
+    const { other, limits } = chatLimits(true);
+    for (const replayed of [0, 1]) {
+      const resumed = resumeLimits(limits, { model: 3, paidTools: 0, freeTools: 1, decisions: 1 } as never, other.length, replayed);
+      expect(() => turnPolicy({ ...base, limits: resumed, otherModelCalls: other })).not.toThrow();
+    }
   });
 });

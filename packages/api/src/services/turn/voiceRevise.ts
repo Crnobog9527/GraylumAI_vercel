@@ -14,6 +14,12 @@ import { FREE_CHAT_REQUEST_FORMAT, openRouterRequestBody, PLAIN_TEXT_STREAM, typ
  * other failure keeps the draft as it was.
  */
 const REWRITE_OUTPUT_TOKENS = 4096;
+
+/** The rewrite call as turnPolicy's "another model call": the same model under its own bound (its output cap is smaller), so the
+ * freeze and the stop-loss count it and limits.model = 1 + tools + other calls holds. None when the reply cannot be shown passages. */
+export function voiceRewriteCalls(on: boolean, quote: { upperUsd: string; multiplier: string }) {
+  return on ? [{ upperUsd: quote.upperUsd, multiplier: quote.multiplier }] : [];
+}
 type Args = { draft: string; shown: readonly string[]; quote: Parameters<typeof modelCall>[1] & { model: string; reasoning: unknown; outputLimit: number };
   callDeps: Parameters<typeof modelCall>[0]; callPolicy: unknown; callGate: (count: number) => Promise<void> };
 

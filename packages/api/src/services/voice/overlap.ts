@@ -2,26 +2,32 @@
 
 /*
  * VOICE-2 PR-3 (Owner 2026-11-14: "太像" = a run of 12 characters the same as the user's old pieces, and only those sentences are
- * rewritten): code finds the sentences of a draft that share a run of OVERLAP_CHARS characters (whitespace ignored) with the
- * passages the model was shown, and puts back only the rewrites that no longer do. Never the whole draft, never a second guess.
+ * rewritten): code finds the sentences of a draft that share a run of OVERLAP_CHARS units with the passages the model was shown,
+ * and puts back only the rewrites that no longer do. Never the whole draft, never a second guess. A unit is a character for
+ * Chinese, Japanese and Korean (and any mark), and a whole word for Latin-script text (controller 11-14: 12 English characters
+ * are two or three common words); whitespace is ignored. A repeat spanning two sentences is not looked for (after launch).
  */
 export const OVERLAP_CHARS = 12;
 /** At most this many sentences are sent for rewriting (a longer list is a copied draft the rewrite call cannot fix cheaply). */
 export const OVERLAP_MAX_SENTENCES = 12;
 
-const squeeze = (text: string) => [...text.replace(/\s+/g, '')];
-/** Every run of OVERLAP_CHARS characters of the sources, whitespace removed. */
+/** The units compared: a run of Latin-script letters or digits is one (a word, case ignored); any other character is one. */
+export function overlapUnits(text: string): string[] {
+  return (text.match(/[\p{Script=Latin}\p{N}'’]+|\S/gu) ?? []).map(unit => unit.toLowerCase());
+}
+const runKey = (units: readonly string[], at: number) => units.slice(at, at + OVERLAP_CHARS).join('\u0001');
+/** Every run of OVERLAP_CHARS units of the sources. */
 export function overlapIndex(sources: readonly string[]): Set<string> {
   const runs = new Set<string>();
   for (const source of sources) {
-    const chars = squeeze(source);
-    for (let i = 0; i + OVERLAP_CHARS <= chars.length; i++) runs.add(chars.slice(i, i + OVERLAP_CHARS).join(''));
+    const units = overlapUnits(source);
+    for (let i = 0; i + OVERLAP_CHARS <= units.length; i++) runs.add(runKey(units, i));
   }
   return runs;
 }
 export function sharesRun(sentence: string, runs: ReadonlySet<string>): boolean {
-  const chars = squeeze(sentence);
-  for (let i = 0; i + OVERLAP_CHARS <= chars.length; i++) if (runs.has(chars.slice(i, i + OVERLAP_CHARS).join(''))) return true;
+  const units = overlapUnits(sentence);
+  for (let i = 0; i + OVERLAP_CHARS <= units.length; i++) if (runs.has(runKey(units, i))) return true;
   return false;
 }
 

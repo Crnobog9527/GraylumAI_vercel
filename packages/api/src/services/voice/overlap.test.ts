@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
-import { applyRewrites, findOverlaps, OVERLAP_MAX_SENTENCES, rewriteInput, sentencesOf } from './overlap';
+import { applyRewrites, findOverlaps, OVERLAP_MAX_SENTENCES, overlapUnits, rewriteInput, sentencesOf } from './overlap';
 
 const old = ['哎下班到家都七点了，咋整呢，一口锅搞定呗。冰箱里还剩半颗白菜和两个鸡蛋。'];
 
@@ -38,5 +38,12 @@ describe('overlap with the past passages (VOICE-2 PR-3, Owner: 12 characters the
     expect(applyRewrites(draft, found, '好的，改好了', old)).toEqual({ text: draft, revised: 0 });
     expect(applyRewrites(draft, found, '{"1":"  "}', old)).toEqual({ text: draft, revised: 0 });
     expect(applyRewrites(draft, found, '```json\n{"1":"回家晚了就简单吃。"}\n```', old)).toEqual({ text: '回家晚了就简单吃。', revised: 1 });
+  });
+  it('English counts words, not letters (controller 11-14): a common phrase is not "too similar", twelve words the same are', () => {
+    expect(overlapUnits("I'm up at 6 AM, every day.")).toEqual(["i'm", 'up', 'at', '6', 'am', ',', 'every', 'day', '.']);
+    const english = ['Every morning I wake up at six and walk the dog around the lake before work.'];
+    expect(findOverlaps('In the morning I walk.', english)).toEqual([]);
+    expect(findOverlaps('Honestly, every morning I wake up at six and walk the dog around the park.', english)).toHaveLength(1);
+    expect(findOverlaps('Every morning I wake up at six and walk the cat.', english)).toEqual([]);
   });
 });
