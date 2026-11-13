@@ -9,7 +9,7 @@ CREATE OR REPLACE FUNCTION public.voice_version_view(v voice_profile_versions)
  SET search_path TO 'public', 'pg_temp'
 AS $function$
  SELECT CASE WHEN v.id IS NULL THEN NULL ELSE jsonb_build_object('id',v.id,'version',v.version,'status',v.status,
-  'profile',v.profile,'failure',v.failure,'createdAt',v.created_at,'confirmedAt',v.confirmed_at,
+  'profile',v.profile,'stats',v.stats,'documents',coalesce(v.documents,'[]'),'failure',v.failure,'createdAt',v.created_at,'confirmedAt',v.confirmed_at,
   'sources',(SELECT coalesce(jsonb_agg(jsonb_build_object('documentId',d.id,'filename',d.filename) ORDER BY s.ord),'[]')
    FROM jsonb_array_elements(v.sources) WITH ORDINALITY s(item,ord)
    JOIN library_documents d ON d.id=(s.item->>'documentId')::uuid AND d.actor_id=v.actor_id AND d.deleted_at IS NULL))

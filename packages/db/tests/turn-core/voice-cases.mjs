@@ -176,8 +176,12 @@ export async function voiceCases(t){
   assert.deepEqual(row.documents,[labels[0]],'a label for a document the version did not read is dropped');
   assert.equal(row.status,'draft');
   // Correcting a label: the owner's own version and a document it labelled; anything else is refused.
-  const label=(actor,vid,did,type,topics,client=c)=>one('select voice_document_label_set($1,$2,$3,$4,$5) v',
-   [actor,vid,did,type,JSON.stringify(topics)],client);
+  // As the app calls them: service_role (library_actor refuses any other role).
+  const svc=async(sql,args)=>{await c.query('begin');try{await c.query('set local role service_role');const v=await one(sql,args);
+   await c.query('commit');return v;}catch(e){await c.query('rollback');throw e;}};
+  const label=(actor,vid,did,type,topics,client)=>client
+   ?one('select voice_document_label_set($1,$2,$3,$4,$5) v',[actor,vid,did,type,JSON.stringify(topics)],client)
+   :svc('select voice_document_label_set($1,$2,$3,$4,$5) v',[actor,vid,did,type,JSON.stringify(topics)]);
   await label(a.actor,id,read,'script',['下班','做饭']);
   assert.deepEqual(await one('select documents v from voice_profile_versions where id=$1',[id]),
    [{documentId:read,type:'script',topics:['下班','做饭'],edited:true}]);
@@ -189,8 +193,8 @@ export async function voiceCases(t){
   try{await anon.query('set role authenticated');
    assert.match(await refusal(label(a.actor,id,read,'post',[],anon)),/permission denied/,'only the service role');}finally{await anon.end();}
   // An edit of the confirmed profile is a new version: stats and labels go with it.
-  await one('select voice_profile_confirm($1,$2,1,$3) v',[a.actor,id,JSON.stringify(profile)]);
-  await one('select voice_profile_confirm($1,$2,2,$3) v',[a.actor,id,JSON.stringify({...profile,tone:'更口语'})]);
+  await svc('select voice_profile_confirm($1,$2,1,$3) v',[a.actor,id,JSON.stringify(profile)]);
+  await svc('select voice_profile_confirm($1,$2,2,$3) v',[a.actor,id,JSON.stringify({...profile,tone:'更口语'})]);
   const copy=(await c.query("select stats,documents from voice_profile_versions where actor_id=$1 and version=2",[a.actor])).rows[0];
   assert.deepEqual(copy,{stats,documents:[{documentId:read,type:'script',topics:['下班','做饭'],edited:true}]});
   report.checks.push('voice 2.0: stats and labels saved with the profile (only for documents read), malformed ones refused, a label corrected only by its owner on a document the version read, an edited profile keeps them');

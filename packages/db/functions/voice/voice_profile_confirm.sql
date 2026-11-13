@@ -30,9 +30,11 @@ BEGIN
    WHERE actor_id=a AND status IN ('generating','draft') AND version>v.version) THEN
    RAISE EXCEPTION 'VOICE_PENDING_RESULT'; END IF;
   IF v.profile=result THEN RETURN voice_state(a); END IF;
-  INSERT INTO voice_profile_versions(actor_id,request_id,version,status,profile,sources,corpus,billing_settled,confirmed_at)
+  -- An edit of the confirmed profile is a new version of the same reading: its stats and document labels go with it (0536).
+  INSERT INTO voice_profile_versions(actor_id,request_id,version,status,profile,sources,corpus,billing_settled,confirmed_at,
+   stats,documents)
   VALUES(a,gen_random_uuid(),(SELECT max(version) FROM voice_profile_versions WHERE actor_id=a)+1,'confirmed',result,
-   v.sources,v.corpus,true,clock_timestamp()) RETURNING * INTO v;
+   v.sources,v.corpus,true,clock_timestamp(),v.stats,v.documents) RETURNING * INTO v;
  ELSE RAISE EXCEPTION 'VOICE_NOT_CONFIRMABLE'; END IF;
  UPDATE voice_profile_versions SET status='superseded',updated_at=clock_timestamp()
   WHERE id=old AND id<>v.id AND status='confirmed';
