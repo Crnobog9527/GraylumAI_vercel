@@ -17,7 +17,7 @@ vi.mock('@/components/fusion-review/JuryChooser', async () => {
 vi.mock('@/components/opc/profile-archive/profile-archive-api', () => ({ useProfileBusinesses: () => ({}) }));
 
 import { askCompare, COMPARE_ENTRY_HREF, COMPARE_NEEDS_QUESTION, registerCompareHost } from '@/components/fusion-compare/compare-entry';
-import { juryChoices, juryEntryHref } from '@/components/fusion-review/JuryChooser';
+import { JURY_REVISING_NOTE, juryChoices, juryEntryHref } from '@/components/fusion-review/JuryChooser';
 import { goldToolEntries } from './rail-gold-tools';
 import { RailView } from './rail-view';
 
@@ -109,6 +109,13 @@ describe('the jury entry\'s list of reports', () => {
     expect(juryChoices(businesses, drafts, reviews as never)[0]?.review?.reviewId).toBe('r2');
     expect(juryChoices(businesses, [{ draftId: 'd1', state: 'draft', currentVersion: 0 }], [])).toEqual([]);
     expect(juryChoices(undefined, undefined, undefined)).toEqual([]);
+  });
+
+  it('FUSION-REVIEW: a positioning under revision is listed with the reason it cannot be reviewed yet, not as a way in', () => {
+    const revising = juryChoices(businesses, [{ draftId: 'd1', state: 'draft', currentVersion: 9 }], []);
+    expect(revising).toEqual([expect.objectContaining({ draftId: 'd1', revising: true })]);
+    expect(juryChoices(businesses, drafts, [])[0]).not.toHaveProperty('revising');
+    expect(JURY_REVISING_NOTE).toBe('这份定位正在修订，修订完成后才能评审。');
   });
 });
 

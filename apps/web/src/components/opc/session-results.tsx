@@ -5,8 +5,9 @@ import { Button } from '@/components/ui/button';
 import { trpc } from '@/trpc/client';
 import { PublishResultLink } from '@/app/(zh-hans)/app/publish-monitor/publish/publish-entry';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
+import { MessageMarkdown } from '@/components/chat/MessageMarkdown';
 import {
-  RESULT_TYPES, RESULT_TYPE_LABEL, groupResults, resultErrorText, saveProblem, saveRequestId,
+  RESULT_TYPES, RESULT_TYPE_LABEL, groupResults, guessResultType, plainTitle, resultErrorText, saveProblem, saveRequestId,
   type ResultType, type SessionResultItem,
 } from '@/lib/session-results';
 
@@ -15,12 +16,15 @@ import {
  * (the AI never writes here); editing adds a version; deleting removes one result, never the reply.
  */
 /** Under a completed reply: confirm type, title and the exact text before saving. */
-export function SaveReplyButton({ sessionId, turnId, reply, savedItems, onOpenResults }: {
-  sessionId: string; turnId: number; reply: string; savedItems: readonly SessionResultItem[]; onOpenResults?(): void;
+export function SaveReplyButton({ sessionId, turnId, reply, savedItems, skills, onOpenResults }: {
+  sessionId: string; turnId: number; reply: string; savedItems: readonly SessionResultItem[];
+  /** The Skills this reply loaded (its load_skill step labels): a 口播稿 Skill's reply is saved as 口播稿 by default. */
+  skills?: readonly string[]; onOpenResults?(): void;
 }) {
   const utils = trpc.useUtils();
   const saveTurn = trpc.opc.sessionResultSaveTurn.useMutation();
-  const [open, setOpen] = useState(false), [type, setType] = useState<ResultType>('body');
+  const guessed = guessResultType({ skills, reply });
+  const [open, setOpen] = useState(false), [type, setType] = useState<ResultType>(guessed);
   const [title, setTitle] = useState(''), [text, setText] = useState(reply), [error, setError] = useState('');
   const [saved, setSaved] = useState('');
   async function confirm() {
@@ -32,11 +36,11 @@ export function SaveReplyButton({ sessionId, turnId, reply, savedItems, onOpenRe
         title: title.trim() || null, excerpt: text === reply ? null : text };
       const result = await saveTurn.mutateAsync({ ...fields, turnId });
       setOpen(false);
-      setSaved(savedNotice(type, title.trim() || (result as Partial<SessionResultItem> | undefined)?.title || ''));
+      setSaved(savedNotice(type, plainTitle(title.trim() || (result as Partial<SessionResultItem> | undefined)?.title || '')));
     } catch (cause) { setError(resultErrorText(cause)); }
     finally { await utils.opc.sessionResults.invalidate({ sessionId }); }
   }
-  const reopen = () => { setText(reply); setError(''); if (savedItems[0]) setType(savedItems[0].resultType); setOpen(true); };
+  const reopen = () => { setText(reply); setError(''); setType(savedItems[0]?.resultType ?? guessed); setOpen(true); };
   if (!open) return <div className="mt-2 space-y-1"><Button variant="outline" size="sm" onClick={reopen}>
     {savedItems.length ? '再存一段到成果夹' : '保存到成果夹'}</Button>
     {saved && <p role="status" className="text-xs text-[var(--text-secondary)]">{saved}
@@ -132,9 +136,10 @@ export function ResultCardView({ item, mode, draft, error, pending, versions, hi
   onMode(mode: 'view' | 'edit' | 'history' | 'delete'): void; onDraft(value: { title?: string; body?: string }): void;
   onSave(): void; onDelete(): void; publish?: ReactNode;
 }) {
-  return <article aria-label={item.title} className="space-y-2 rounded-lg border border-[var(--border-primary)] p-3">
+  const title = plainTitle(item.title);
+  return <article aria-label={title} className="space-y-2 rounded-lg border border-[var(--border-primary)] p-3">
     <header className="flex items-baseline justify-between gap-2">
-      <strong className="truncate">{item.title}</strong>
+      <strong className="truncate">{title}</strong>
       <span className="shrink-0 text-xs text-[var(--text-tertiary)]">第 {item.version} 版</span>
     </header>
     {!item.sourceAvailable && <p className="text-xs text-[var(--text-tertiary)]">生成它的回复已不可用，这里的内容仍保留。</p>}
@@ -143,10 +148,10 @@ export function ResultCardView({ item, mode, draft, error, pending, versions, hi
         onChange={event => onDraft({ title: event.target.value })}/>
       <textarea aria-label="修改内容" rows={8} maxLength={20000} className="w-full rounded border px-2 py-1" value={draft.body}
         onChange={event => onDraft({ body: event.target.value })}/>
-    </> : <p className="max-h-48 overflow-auto whitespace-pre-wrap">{item.body}</p>}
+    </> : <div className="max-h-48 overflow-auto"><MessageMarkdown text={item.body}/></div>}
     {mode === 'history' && <ol aria-label="历史版本" className="space-y-2 border-t pt-2">
       {(versions ?? []).map(version => <li key={version.id}><span className="text-xs text-[var(--text-tertiary)]">第 {version.version} 版</span>
-        <p className="max-h-32 overflow-auto whitespace-pre-wrap">{version.body}</p></li>)}
+        <div className="max-h-32 overflow-auto"><MessageMarkdown text={version.body}/></div></li>)}
       {!versions && !historyError && <li className="text-xs"><PageSkeleton compact rows={2} label="历史版本读取中"/></li>}
       {!versions && historyError && <li className="text-xs" role="alert">历史版本暂时读不出来。
         <Button size="sm" variant="ghost" onClick={onRetryHistory}>重试</Button></li>}

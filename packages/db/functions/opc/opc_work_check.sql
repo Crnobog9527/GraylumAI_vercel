@@ -38,7 +38,7 @@ BEGIN
   SELECT * INTO m FROM runtime_scope_material
    WHERE session_id=s.id AND NOT revoked AND erased_at IS NULL ORDER BY revision DESC LIMIT 1;
  END IF;
- -- CONTENT-CONVERSATION-2 (0532): a video item's conversation is given its current final script and that script's newest storyboard on
+ -- CONTENT-CONVERSATION-2 (0541): a video item's conversation is given its current final script and that script's newest storyboard on
  -- every turn, so a writing Skill the model loads during the turn can write a storyboard or editing advice from them and the reply can
  -- be saved as one (opc_content_from_turn reads the kind it needs from policy.workSources). Not for a turn that claimed video material
  -- (the old package flow keeps its own source); a storyboard of an older script is not given (opc_content_source_pick's STALE refusal).

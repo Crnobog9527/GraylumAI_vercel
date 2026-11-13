@@ -3,6 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { mapBounded } from '../../lib/mapBounded';
 import { databaseSkillSource, requestAuthentication, type UserVisibleModule } from './databaseSource';
 import { discoverSkills, type SkillSource } from './loader';
+import { freeChatExcluded } from './stepGuide';
 import { asRequiredLevel, lockedForTier, type RequiredMemberLevel } from './memberOnly';
 
 /*
@@ -33,8 +34,10 @@ export async function listChoiceSkills(input: {
   /** Test seams; the defaults are the database source and the loader. */
   sourceFor?: (options: Parameters<typeof databaseSkillSource>[0]) => SkillSource;
   discover?: typeof discoverSkills;
+  excluded?: typeof freeChatExcluded;
 }): Promise<ChoiceSkill[]> {
   const sourceFor = input.sourceFor ?? databaseSkillSource, discover = input.discover ?? discoverSkills;
+  const excluded = input.excluded ?? freeChatExcluded;
   // One identity check for the whole request, shared by every module's source.
   const authentication = requestAuthentication(input.userClient);
   const perModule = await mapBounded(input.modules, CHOICE_MODULES_AT_ONCE, async (module): Promise<ChoiceSkill[]> => {
@@ -48,13 +51,18 @@ export async function listChoiceSkills(input: {
       const descriptors = await source.list();
       const found = await discover(source);
       const requiredMemberLevel = asRequiredLevel(module.required_member_level);
-      return found.flatMap((skill) => {
+      const pinned = Boolean(input.pin && module.id === input.pin.moduleId);
+      const listed: ChoiceSkill[] = [];
+      for (const skill of found) {
         const descriptor = descriptors.find(item => item.revisionId === skill.public.revisionId);
-        // A package with tasks is a workflow, not something to pick in the composer.
-        if (!descriptor || Object.keys(descriptor.tasks).length) return [];
-        return [{ moduleId: module.id, revisionId: skill.public.revisionId, name: module.title, requiredMemberLevel,
-          locked: lockedForTier(input.tier, requiredMemberLevel) }];
-      });
+        if (!descriptor) continue;
+        // A package with tasks is a workflow, not something to pick in the composer. The positioning workflow is free chat's too
+        // (freeChatExcluded, the catalog's own rule): a message sent with it would be refused. A work conversation keeps its own method.
+        if (pinned ? Object.keys(descriptor.tasks).length > 0 : await excluded(source, descriptor)) continue;
+        listed.push({ moduleId: module.id, revisionId: skill.public.revisionId, name: module.title, requiredMemberLevel,
+          locked: lockedForTier(input.tier, requiredMemberLevel) });
+      }
+      return listed;
     } catch { return []; /* unavailable packages are not advertised as runnable */ }
   });
   return perModule.flat();
