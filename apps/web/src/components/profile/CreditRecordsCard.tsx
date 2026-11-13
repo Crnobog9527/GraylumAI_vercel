@@ -116,22 +116,28 @@ const DailyUsageTrendChart = memo(function DailyUsageTrendChart({
       </div>
 
       {/* 简化的条形图 */}
-      <div className="h-[200px] w-full flex items-end justify-between gap-1">
+      <div className="h-[200px] w-full flex items-end justify-between gap-1" data-testid="credit-trend">
         {chartData.map((day, index) => {
           // 防止除以0导致NaN
           const heightPercent = stats.maxUsage > 0 ? (day.usage / stats.maxUsage) * 100 : 0;
           return (
-            <div key={index} className="flex-1 flex flex-col items-center gap-1">
-              <div
-                className="w-full rounded-t transition-opacity duration-200 hover:opacity-80"
-                style={{
-                  height: `${heightPercent}%`,
-                  minHeight: '4px',
-                  background: 'var(--color-primary)',
-                  opacity: stats.maxUsage > 0 ? 0.7 + (heightPercent / 100) * 0.3 : 0.7
-                }}
-                title={`${day.fullDate}: ${day.usage} 积分`}
-              />
+            // Each day is a column as tall as the chart, and the bar stands in the part above the date. A bar's height is a share
+            // of that part, which needs a height of its own to be a share of: without one every bar fell back to its 4px
+            // minimum, whatever the day's amount (staging validation, 2026-11-13: 2,959 in 14 days drawn as a flat row).
+            <div key={index} className="flex h-full min-w-0 flex-1 flex-col items-center gap-1">
+              <div className="flex min-h-0 w-full flex-1 items-end">
+                <div
+                  className="w-full rounded-t transition-opacity duration-200 hover:opacity-80"
+                  style={{
+                    height: `${heightPercent}%`,
+                    // A day with spending is never thinner than 4px; a day without is a faint 2px mark, not a small bar.
+                    minHeight: day.usage > 0 ? '4px' : '2px',
+                    background: 'var(--color-primary)',
+                    opacity: day.usage > 0 ? 0.7 + (heightPercent / 100) * 0.3 : 0.25
+                  }}
+                  title={`${day.fullDate}: ${day.usage} 积分`}
+                />
+              </div>
               <span className="text-[10px] hidden md:block" style={{ color: 'var(--text-disabled)' }}>
                 {day.date.split('/')[1]}
               </span>
