@@ -2,10 +2,10 @@
 'use client';
 import { useState } from 'react';
 import Link from 'next/link';
-import { ArrowUpRight, Check, Image as ImageIcon } from 'lucide-react';
+import { ArrowRight, ArrowUpRight, Check, Image as ImageIcon } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import sheet from '@/components/design/bottom-sheet.module.css';
-import { trackedLink, type IntegrationModule } from '@/lib/integrations/catalog';
+import { trackedLink, type IntegrationModule, type IntegrationSample } from '@/lib/integrations/catalog';
 import type { ShotvivaState } from './use-shotviva';
 import styles from './integrations.module.css';
 
@@ -18,9 +18,9 @@ export function IntegrationIcon({ module }: { module: IntegrationModule }) {
 
 /**
  * One product's full introduction (Owner 2026-11-13: redesigned to the signed-in dialog of DESIGN.md "Light foundation"): a white
- * dialog with the product's mark and name in a head that stays put, the connection first, then what it does, when to use or buy
- * it and what connecting changes in Graylum, and the two tracked links in a foot that stays put. On a phone it is a sheet from
- * the bottom edge (design/bottom-sheet.module.css). The words are the catalog's and are not changed here.
+ * dialog with the product's mark and name in a head that stays put, the connection first, then what it does and when to use it,
+ * said mostly by the product's own sample pictures, then what connecting changes in Graylum, and the one tracked link in a foot
+ * that stays put. On a phone it is a sheet from the bottom edge (design/bottom-sheet.module.css). The words are the catalog's.
  */
 export function IntegrationDetail({ module, open, onOpenChange, shotviva }: {
   module: IntegrationModule; open: boolean; onOpenChange: (open: boolean) => void; shotviva?: ShotvivaState;
@@ -37,22 +37,57 @@ export function IntegrationDetail({ module, open, onOpenChange, shotviva }: {
           {module.philosophy && <p className={styles.philosophy}>{module.philosophy}</p>}
           <IntegrationDetailBody module={module} {...(shotviva ? { shotviva } : {})}/>
         </div>
-        <IntegrationLinks module={module} {...(shotviva ? { shotviva } : {})}/>
+        <IntegrationViewLink module={module} {...(shotviva ? { shotviva } : {})}/>
       </DialogContent>
     </Dialog>
   );
 }
 
-/** Under the product's own two paragraphs: the connection, then the introduction row by row. */
+/** Under the product's own two paragraphs: the connection, then the introduction row by row, pictures before words. */
 export function IntegrationDetailBody({ module, shotviva }: { module: IntegrationModule; shotviva?: ShotvivaState }) {
+  const { showcase } = module;
   return <>
     {module.connector === 'shotviva' && shotviva && <ShotvivaConnection shotviva={shotviva} icon={module.icon}/>}
     <div className={styles.rows}>
-      <Row title="能做什么" lines={module.features}/>
-      <Row title="什么时候适合用" lines={module.whenToUse}/>
-      {module.inGraylum && <Row title="连接到 Graylum 以后" lines={module.inGraylum}/>}
+      <section className={styles.row}>
+        <h3>能做什么</h3>
+        <div className={styles.rowBody}>
+          {/* The same thing twice: as the phone took it, and as a template gave it back. */}
+          {showcase && <div className={styles.turn}>
+            <Shot sample={showcase.before}/><ArrowRight className={styles.turnArrow} aria-hidden="true"/><Shot sample={showcase.after}/>
+          </div>}
+          <Lines lines={module.features} lead={!!showcase}/>
+        </div>
+      </section>
+      <section className={styles.row}>
+        <h3>什么时候适合用</h3>
+        <div className={styles.rowBody}>
+          {showcase && <div className={styles.uses}>{showcase.uses.map(sample => <Shot key={sample.src} sample={sample}/>)}</div>}
+          <Lines lines={module.whenToUse}/>
+        </div>
+      </section>
+      {module.inGraylum && <section className={styles.row}>
+        <h3>连接到 Graylum 以后</h3>
+        <div className={styles.rowBody}><Lines lines={module.inGraylum}/></div>
+      </section>}
     </div>
   </>;
+}
+
+/** One sample picture with its few words under it. */
+function Shot({ sample }: { sample: IntegrationSample }) {
+  return (
+    <figure className={styles.shot}>
+      <img src={sample.src} alt={sample.alt} width={480} height={600} loading="lazy" decoding="async"/>
+      <figcaption><b>{sample.label}</b>{sample.note && <span>{sample.note}</span>}</figcaption>
+    </figure>
+  );
+}
+
+/** A row's lines; under two pictures the first is what the pictures show, said once, and the rest are the small print. */
+function Lines({ lines, lead = false }: { lines: readonly string[]; lead?: boolean }) {
+  if (!lead) return <ul role="list">{lines.map(line => <li key={line}>{line}</li>)}</ul>;
+  return <>{lines.map((line, index) => <p key={line} className={index === 0 ? styles.lead : styles.fine}>{line}</p>)}</>;
 }
 
 /** Whether the dialog's own next step is to connect (a member, the connector on, not connected yet). */
@@ -62,24 +97,19 @@ const canConnect = (shotviva?: ShotvivaState) => {
 };
 
 /**
- * The two tracked links to the product's own pages, at the foot. One dark action per dialog (DESIGN.md "Buttons and actions"):
- * 去购买 is it, except while the dialog offers 连接, which then is.
+ * The tracked link to the product's own page, at the foot (Owner 2026-11-13: "只保留'去查看'"; there is no 去购买). One dark
+ * action per dialog (DESIGN.md "Buttons and actions"): 去查看 is it, except while the dialog offers 连接, which then is.
  */
-export function IntegrationLinks({ module, shotviva }: { module: IntegrationModule; shotviva?: ShotvivaState }) {
+export function IntegrationViewLink({ module, shotviva }: { module: IntegrationModule; shotviva?: ShotvivaState }) {
   return (
     <footer className={`${styles.links} ${sheet.bar}`}>
-      <a className={styles.secondary} href={trackedLink(module.viewUrl, module.id, 'view')} target="_blank" rel="noopener noreferrer">去查看<NewTab/></a>
-      <a className={canConnect(shotviva) ? styles.secondary : styles.primary} href={trackedLink(module.buyUrl, module.id, 'buy')}
-        target="_blank" rel="noopener noreferrer">去购买<NewTab/></a>
+      <a className={canConnect(shotviva) ? styles.secondary : styles.primary} href={trackedLink(module.viewUrl, module.id)}
+        target="_blank" rel="noopener noreferrer">去查看<NewTab/></a>
     </footer>
   );
 }
 /** These links leave Graylum for a new tab. */
 const NewTab = () => <ArrowUpRight size={15} aria-hidden="true"/>;
-
-function Row({ title, lines }: { title: string; lines: readonly string[] }) {
-  return <section className={styles.row}><h3>{title}</h3><ul role="list">{lines.map(line => <li key={line}>{line}</li>)}</ul></section>;
-}
 
 /** Graylum and the product side by side, with what is between them: a broken line, or a joined one once connected. */
 function Pair({ icon, linked = false }: { icon?: string; linked?: boolean }) {

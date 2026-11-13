@@ -4,7 +4,8 @@
 // version): the dialog was the dark one with the light page's dark grey words on it, and the state box had white words on a
 // cream ground, so most of it could not be read; and there was no mark of the product. So: every line of words is read against
 // what is behind it, in each of the four states; the mark is a picture that loaded; on a phone it is a sheet with its head and
-// its two links in place while the middle scrolls. INTEGRATION_SHOTS=<dir> saves a screenshot of each state.
+// its link in place while the middle scrolls. Owner 2026-11-13, on staging: only 去查看 at the foot (no 去购买), and the
+// introduction said by Shotviva's sample pictures before words. INTEGRATION_SHOTS=<dir> saves a screenshot of each state.
 import { mkdirSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -87,6 +88,8 @@ async function open(state: StateName, width: number, height = 780): Promise<{ pa
     if (path === '/integrations/shotviva.png' || path === '/graylum-logo.png') {
       return route.fulfill({ contentType: 'image/png', body: readFileSync(PUBLIC + path) });
     }
+    // Shotviva's sample pictures, the same way.
+    if (/^\/integrations\/shotviva\/[a-z-]+\.webp$/.test(path)) return route.fulfill({ contentType: 'image/webp', body: readFileSync(PUBLIC + path) });
     return route.abort();
   });
   const status = state === 'loading' ? { data: undefined, isLoading: true } : state === 'failed' ? { data: undefined, isLoading: false }
@@ -162,14 +165,20 @@ for (const state of ['off', 'members', 'ready', 'connected', 'loading', 'failed'
   }, 30000);
 }
 
-it('the four states: what the connection says and offers, and which one action is the dark one', async () => {
-  // Not open yet: nothing to press about the connection; 去购买 is the dialog's action.
+const VIEW = '?from=graylum&utm_source=graylum&utm_medium=integration&utm_campaign=shotviva&utm_content=view';
+/** The links at the dialog's foot: their words, where they open, and what they carry. */
+const foot = (page: Page) => page.getByRole('dialog').locator('footer a').evaluateAll(list =>
+  list.map(link => [link.textContent, link.getAttribute('target'), new URL((link as HTMLAnchorElement).href).pathname, new URL((link as HTMLAnchorElement).href).search]));
+
+it('the four states: what the connection says and offers, and which one action is the dark one; the foot is 去查看 alone', async () => {
+  // Not open yet: nothing to press about the connection; 去查看 is the dialog's action.
   let { page } = await open('off', 1280);
   try {
     const dialog = page.getByRole('dialog');
     await ui(dialog.getByText('未连接：连接暂未开放，可以先去 Shotviva 看看。')).toBeVisible();
     await ui(dialog.getByRole('button', { name: '连接 Shotviva' })).toHaveCount(0);
-    expect([await ground(page, '去查看'), await ground(page, '去购买')]).toEqual([WHITE, DARK]);
+    expect(await ground(page, '去查看')).toBe(DARK);
+    expect(await foot(page)).toEqual([['去查看', '_blank', '/zh', VIEW]]);
   } finally { await page.close(); }
   // Not a member: the membership page.
   ({ page } = await open('members', 1280));
@@ -178,17 +187,17 @@ it('the four states: what the connection says and offers, and which one action i
     await ui(dialog.getByText('未连接：连接 Shotviva 是 Pro 和 Gold 会员的功能。')).toBeVisible();
     await ui(dialog.getByRole('link', { name: '查看会员' })).toHaveAttribute('href', '/app/profile?tab=subscription');
     await ui(dialog.getByRole('button', { name: '连接 Shotviva' })).toHaveCount(0);
-    expect(await ground(page, '去购买')).toBe(DARK);
+    expect(await ground(page, '去查看')).toBe(DARK);
   } finally { await page.close(); }
-  // Can connect: 连接 is the one dark action, so the two links at the foot are both plain.
+  // Can connect: 连接 is the one dark action, so the link at the foot is plain.
   ({ page } = await open('ready', 1280));
   try {
     expect(await ground(page, '连接 Shotviva', 'button')).toBe(DARK);
-    expect([await ground(page, '去查看'), await ground(page, '去购买')]).toEqual([WHITE, WHITE]);
-    const links = page.getByRole('dialog').locator('footer a');
-    expect(await links.evaluateAll(list => list.map(link => [link.textContent, link.getAttribute('target'), new URL((link as HTMLAnchorElement).href).search])))
-      .toEqual([['去查看', '_blank', '?from=graylum&utm_source=graylum&utm_medium=integration&utm_campaign=shotviva&utm_content=view'],
-        ['去购买', '_blank', '?from=graylum&utm_source=graylum&utm_medium=integration&utm_campaign=shotviva&utm_content=buy']]);
+    expect(await ground(page, '去查看')).toBe(WHITE);
+    expect(await foot(page)).toEqual([['去查看', '_blank', '/zh', VIEW]]);
+    // Owner 2026-11-13: no 去购买, anywhere on the page or in the dialog.
+    await ui(page.getByText('去购买')).toHaveCount(0);
+    expect(await page.locator('a[href*="pricing"], a[href*="utm_content=buy"]').count()).toBe(0);
   } finally { await page.close(); }
   // Connected: the balance, Shotviva's own top-up page, and 断开 asked twice.
   ({ page } = await open('connected', 1280));
@@ -210,12 +219,64 @@ it('the four states: what the connection says and offers, and which one action i
     // A disconnect that failed is said, in words that can be read.
     await ui(dialog.getByRole('alert')).toHaveText('断开没有成功，请稍后再试。');
     for (const line of await words(page)) expect(line.contrast, `"${line.text}" cannot be read`).toBeGreaterThanOrEqual(4.5);
-    expect(await ground(page, '去购买')).toBe(DARK);
+    expect(await ground(page, '去查看')).toBe(DARK);
+    expect(await foot(page)).toEqual([['去查看', '_blank', '/zh', VIEW]]);
   } finally { await page.close(); }
 }, 60000);
 
+const SAMPLES = ['sneaker-phone', 'sneaker-lifestyle', 'sneaker-listing', 'menu-fish-dark', 'room-staged'];
+for (const width of [1280, 390, 360]) {
+  it(`${width}px: the introduction is Shotviva's sample pictures first: a phone photo and what a template made of it, then one per use`, async () => {
+    const { page, errors } = await open('ready', width, width === 1280 ? 900 : 780);
+    try {
+      const dialog = page.getByRole('dialog');
+      // The pictures load as they come near (loading="lazy"): bring each into view, as a reader scrolling does.
+      for (const name of SAMPLES) {
+        const picture = dialog.locator(`img[src="/integrations/shotviva/${name}.webp"]`);
+        await picture.scrollIntoViewIfNeeded();
+        await page.waitForFunction(image => (image as HTMLImageElement).complete, await picture.elementHandle());
+        expect(await picture.evaluate((image: HTMLImageElement) => [image.naturalWidth, image.naturalHeight, image.alt.length > 8]), name).toEqual([480, 600, true]);
+      }
+      const place = (name: string) => box(page, `[role=dialog] img[src="/integrations/shotviva/${name}.webp"]`);
+      const column = await box(page, '[role=dialog] header + div');
+      // 能做什么: the photo, an arrow, the result, side by side and the same size, each named under it.
+      await dialog.getByRole('heading', { name: '能做什么' }).scrollIntoViewIfNeeded();
+      if (shots) await page.screenshot({ path: `${shots}/pictures-turn-${width}.png` });
+      const [before, after] = [await place('sneaker-phone'), await place('sneaker-lifestyle')];
+      expect([after.top, after.height, after.right - after.left]).toEqual([before.top, before.height, before.right - before.left]);
+      expect(after.left).toBeGreaterThan(before.right);
+      expect(before.right - before.left, 'the two pictures are large enough to see').toBeGreaterThanOrEqual(140);
+      expect(Math.abs(before.height / (before.right - before.left) - 1.25)).toBeLessThan(.02);
+      const arrow = await box(page, '[role=dialog] figure + svg');
+      expect([arrow.left >= before.right, arrow.right <= after.left, arrow.top > before.top, arrow.bottom < before.bottom]).toEqual([true, true, true, true]);
+      expect(await dialog.locator('figure').evaluateAll(list => list.map(figure => (figure.querySelector('figcaption')?.textContent ?? ''))))
+        .toEqual(['手机拍的照片', '选一个模板后', '商品图开店', '菜品图做餐饮', '房源图做民宿']);
+      // What the pictures show is said once, under them; the two pictures come before any of the row's words.
+      const lead = await box(page, '[role=dialog] figure ~ p, [role=dialog] div:has(> figure) + p');
+      expect(lead.top).toBeGreaterThan(before.bottom);
+      // 什么时候适合用: three square pictures in one row, inside the column.
+      await dialog.getByRole('heading', { name: '什么时候适合用' }).scrollIntoViewIfNeeded();
+      if (shots) await page.screenshot({ path: `${shots}/pictures-uses-${width}.png` });
+      const uses = [await place('sneaker-listing'), await place('menu-fish-dark'), await place('room-staged')];
+      expect(new Set(uses.map(use => use.top)).size).toBe(1);
+      for (const use of uses) {
+        expect(Math.abs(use.height - (use.right - use.left))).toBeLessThanOrEqual(1);
+        expect(use.right - use.left).toBeGreaterThanOrEqual(96);
+        expect([use.left >= column.left, use.right <= column.right]).toEqual([true, true]);
+      }
+      expect(uses[1]!.left).toBeGreaterThan(uses[0]!.right);
+      // Fewer words than pictures' worth: the rows have seven lines between them, where there were nine.
+      expect(await dialog.locator('section li, section p').count()).toBe(7);
+      for (const line of await words(page)) expect(line.contrast, `"${line.text}" cannot be read`).toBeGreaterThanOrEqual(4.5);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0);
+      expect(await dialog.locator('header + div').evaluate(element => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(0);
+      expect(errors).toEqual([]);
+    } finally { await page.close(); }
+  }, 30000);
+}
+
 for (const width of [390, 360]) {
-  it(`${width}px: a sheet on the bottom edge; its head and its two links stay where they are while the middle scrolls`, async () => {
+  it(`${width}px: a sheet on the bottom edge; its head and its link stay where they are while the middle scrolls`, async () => {
     const { page, errors } = await open('connected', width, 700);
     try {
       const dialog = await box(page, '[role=dialog]');
@@ -229,11 +290,10 @@ for (const width of [390, 360]) {
       await middle.evaluate(element => { element.scrollTop = element.scrollHeight; });
       if (shots) await page.screenshot({ path: `${shots}/connected-${width}-end.png` });
       expect([await box(page, '[role=dialog] header'), await box(page, '[role=dialog] footer')]).toEqual(before);
-      // The two links: one row of 48px buttons, 去购买 wider and on the thumb side, clear of the bottom edge.
-      const [view, buy] = [await box(page, '[role=dialog] footer a:first-child'), await box(page, '[role=dialog] footer a:last-child')];
-      expect([view.top, view.height, buy.height]).toEqual([buy.top, 48, 48]);
-      expect(buy.right - buy.left).toBeGreaterThan((view.right - view.left) * 1.6);
-      expect(700 - buy.bottom).toBe(16);
+      // The link: one 48px button as wide as the sheet's content, clear of the bottom edge.
+      expect(await foot(page)).toEqual([['去查看', '_blank', '/zh', VIEW]]);
+      const view = await box(page, '[role=dialog] footer a');
+      expect([view.left, view.right, view.height, 700 - view.bottom]).toEqual([16, width - 16, 48, 16]);
       // What is pressed inside the sheet is thumb-sized too.
       for (const name of ['去 Shotviva 充值', '断开']) {
         const target = await page.getByRole('dialog').getByText(name, { exact: true }).boundingBox();
