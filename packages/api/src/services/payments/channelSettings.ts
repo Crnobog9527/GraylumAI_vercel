@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createSafeServiceUnavailableError } from '../../lib/publicError';
 import { newPurchaseChannel, readPaymentMethodRoutes } from './methodRouting';
+import { assertNoDisputePurchaseBlock } from './disputePurchaseBlock';
 
 export const PAYMENT_CHANNEL_KEY = 'payment_new_purchase_channel';
 export const paymentChannelSettingSchema = z.object({
@@ -33,7 +34,9 @@ export async function readEffectiveLegacyChannel(db: Pick<SupabaseClient, 'from'
 }
 
 // Preflight before any provider call. The SQL transaction remains authoritative against saves racing this read.
+// CHARGEBACK G4: the legacy checkout entry also refuses an account with an open or lost dispute here.
 export async function assertCheckoutChannel(db: Pick<SupabaseClient, 'from'>, userId: string, itemType: string) {
+  await assertNoDisputePurchaseBlock(db, userId);
   const pending = await db.from('payment_orders').select('payment_channel')
     .eq('user_id', userId).eq('item_type', itemType).eq('purchase_action', 'checkout')
     .is('purchase_closed_at', null).is('fulfilled_at', null).order('created_at').limit(1).maybeSingle()
