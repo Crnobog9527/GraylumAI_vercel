@@ -3,7 +3,7 @@ import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { protectedProcedure, router } from '../trpc';
 import { generateVoiceProfile } from '../services/voice/generation';
-import { confirmInput, enabledInput, generateInput, voiceService } from '../services/voice/state';
+import { confirmInput, enabledInput, generateInput, labelInput, voiceService } from '../services/voice/state';
 
 // VOICE (Owner 2026-10-23 "我的文风这个功能是核心功能，必须一起上线。"): the library page's "我的文风".
 const procedure = protectedProcedure.use(async ({ ctx, next }) => {
@@ -18,4 +18,6 @@ export const voiceRouter = router({
   setEnabled: procedure.input(enabledInput).mutation(({ ctx, input }) => ctx.voice.setEnabled(input)),
   delete: procedure.input(z.object({ versionId: z.string().uuid() }).strict())
     .mutation(({ ctx, input }) => ctx.voice.remove(input.versionId)),
+  // VOICE-2 PR-4: correct one document's type or topics (used to pick the writing examples).
+  setLabel: procedure.input(labelInput).mutation(({ ctx, input }) => ctx.voice.setLabel(input)),
 });

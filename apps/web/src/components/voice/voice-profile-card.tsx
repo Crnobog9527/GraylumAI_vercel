@@ -2,15 +2,18 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { useState } from 'react';
 import { DisplayHeading } from '@/components/chat-display/display-heading';
-import { fromForm, LIST_FIELDS, TEXT_FIELDS, toForm, type VoiceForm, type VoiceProfile, type VoiceVersion } from '@/lib/voice/format';
+import { fromForm, LIST_FIELDS, TEXT_FIELDS, toForm, type VoiceForm, type VoiceLabelType, type VoiceProfile, type VoiceVersion } from '@/lib/voice/format';
+import { VoiceLabels, VoiceStatsList } from './voice-writing-data';
 import styles from './my-voice.module.css';
 
 type Props = { version: VoiceVersion; title: string; busy: boolean;
   /** Draft: "确认使用"; confirmed: "保存修改" (a new confirmed version). Absent: read-only. */
-  onConfirm?: (profile: VoiceProfile) => void; onDelete?: () => void };
+  onConfirm?: (profile: VoiceProfile) => void; onDelete?: () => void;
+  /** VOICE-2 PR-4: correct one read document's type or topics; resolves true when saved. */
+  onSetLabel?: (documentId: string, type: VoiceLabelType, topics: string[]) => Promise<boolean> };
 
 /** One profile version: read view, or the form the user edits before confirming (5.3 step 3). */
-export function VoiceProfileCard({ version, title, busy, onConfirm, onDelete }: Props) {
+export function VoiceProfileCard({ version, title, busy, onConfirm, onDelete, onSetLabel }: Props) {
   const draft = version.status === 'draft';
   const [editing, setEditing] = useState(draft);
   const [form, setForm] = useState<VoiceForm | null>(version.profile ? toForm(version.profile) : null);
@@ -39,7 +42,7 @@ export function VoiceProfileCard({ version, title, busy, onConfirm, onDelete }: 
         <textarea rows={2} maxLength={300} value={form[key]} onChange={event => set(key, event.target.value)} /></label>)}
       {LIST_FIELDS.map(([key, label]) => <label key={key}><span>{label}<small>每行一条</small></span>
         <textarea rows={3} value={form[key]} onChange={event => set(key, event.target.value)} /></label>)}
-      <fieldset><legend>最能代表你的原文<small>写稿时会参考这几段</small></legend>
+      <fieldset><legend>最能代表你的原文<small>用来帮你核对这份画像像不像你</small></legend>
         {form.samples.map((sample, index) => <textarea key={index} rows={3} maxLength={400} value={sample}
           aria-label={`原文片段 ${index + 1}`}
           onChange={event => setForm(current => current && { ...current,
@@ -59,6 +62,8 @@ export function VoiceProfileCard({ version, title, busy, onConfirm, onDelete }: 
           <div key={key}><dt>{label}</dt><dd>{profile[key].join('、')}</dd></div>)}
       </dl>
       <div className={styles.samples}>{profile.samples.map((sample, index) => <blockquote key={index}>{sample}</blockquote>)}</div>
+      {version.stats && <VoiceStatsList stats={version.stats} />}
+      <VoiceLabels version={version} busy={busy} {...(onSetLabel ? { onSetLabel } : {})} />
       {(onConfirm || onDelete) && <div className={styles.actions}>
         {onConfirm && <button type="button" disabled={busy} onClick={() => setEditing(true)}>修改</button>}
         {onDelete && <button type="button" className={styles.danger} disabled={busy} onClick={onDelete}>删除</button>}

@@ -164,6 +164,20 @@ describe('ENTITLEMENTS APIs with real tRPC authentication middleware', () => {
     expect(f.writes.length).toBe(writes);
     expect(f.rows.system_settings![0]!.value).toBe(8);
   });
+  // VOICE-2 PR-4: the 文风 2.0 switch is a plain boolean; anything else would read as "on" and is refused before any write.
+  it.each(['single', 'bulk'] as const)('the voice_examples switch takes only true or false in %s writes', async mode => {
+    const f = fixture(); f.rows.profiles![0]!.role = 'admin';
+    const caller = settingsRouter.createCaller(f.context);
+    const save = (value: unknown) => {
+      const input = { key: 'voice_examples', value };
+      return mode === 'single' ? caller.updateSystemSettings(input) : caller.updateSystemSettingsBulk([input]);
+    };
+    const writes = f.writes.length;
+    for (const value of ['false', 0, null, {}, 'off']) await expect(save(value)).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect(f.writes.length).toBe(writes);
+    await save(false);
+    expect(f.writes.length).toBeGreaterThan(writes);
+  });
   it.each(['single', 'bulk'] as const)('refuses D3 below the compare minimum or default tick count in %s writes (Owner 2026-10-03)', async mode => {
     const f = fixture(); f.rows.profiles![0]!.role = 'admin';
     const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;

@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { canClearRequestId, fromForm, generationJustEnded, toForm, voiceErrorMessage, type VoiceState, type VoiceVersion } from '@/lib/voice/format';
+import { canClearRequestId, fromForm, generationJustEnded, toForm, topicsFromText, voiceErrorMessage, type VoiceState, type VoiceVersion } from '@/lib/voice/format';
 import { MyVoiceView, type MyVoiceViewProps } from './my-voice-view';
 
 const profile = { tone: '像跟朋友唠嗑', sentenceLength: '短句多', openings: '先吐槽', stance: '', phrases: ['咋整'], avoid: ['家人们'],
@@ -86,5 +86,32 @@ describe('balance refresh after learning', () => {
     expect(generationJustEnded('generating', 'generating')).toBe(false);
     expect(generationJustEnded(undefined, 'draft')).toBe(false);
     expect(generationJustEnded('draft', 'confirmed')).toBe(false);
+  });
+});
+
+// VOICE-2 PR-4: the writing stats (by code, free) and each document's type and topics, which the user may correct.
+describe('MyVoiceView: 文风 2.0 data', () => {
+  const stats = { documents: 3, sentences: 40, avgSentenceChars: 14, shortSentenceShare: 30, longSentenceShare: 10,
+    openings: { question: 25, number: 5, firstPerson: 40 }, perThousandChars: { exclamation: 3.5, question: 2, ellipsis: 1, emoji: 0.5 },
+    avgParagraphsPerDocument: 3, avgParagraphChars: 60, listShare: 10 };
+  const labelled = version('confirmed', { stats, documents: [{ documentId: 'd1', type: 'post', topics: ['做饭', '下班'], edited: true }] });
+  it('shows the stats as numbers, said to cost nothing', () => {
+    const html = render({ confirmed: labelled });
+    expect(html).toContain('写作数据');expect(html).toContain('平均每句 14 字');expect(html).toContain('问句 25%');
+    expect(html).toContain('不扣积分');
+  });
+  it('lists each read document with its type and topics; 修改 only when the page can save', () => {
+    const html = render({ confirmed: labelled }, { onSetLabel: async () => true });
+    expect(html).toContain('旧笔记.md');expect(html).toContain('社媒短帖 · 做饭、下班（已修改）');expect(html).toContain('>修改</button>');
+    expect(render({ confirmed: labelled })).not.toContain('社媒短帖 · 做饭、下班（已修改）</span><button');
+  });
+  it('a version made before 文风 2.0 shows neither', () => {
+    const html = render({ confirmed: version('confirmed') });
+    expect(html).not.toContain('写作数据');expect(html).not.toContain('每篇文章的类型和话题');
+  });
+  it('topics as typed: commas, 顿号 or spaces; at most five of at most twenty characters', () => {
+    expect(topicsFromText(' 做饭，下班、 健身,做饭 ')).toEqual(['做饭', '下班', '健身']);
+    expect(topicsFromText('a b c d e f')).toEqual(['a', 'b', 'c', 'd', 'e']);
+    expect(topicsFromText('话'.repeat(30))).toEqual(['话'.repeat(20)]);
   });
 });
