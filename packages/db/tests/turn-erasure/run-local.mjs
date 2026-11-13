@@ -259,7 +259,8 @@ try{
   assert.deepEqual(after.calls,before.calls,'receipts keep their billing fields');
   report.checks.push('account erasure: scrub_runtime leaves a session with an open turn until it closes (the close still works), scrub_turns empties messages and closed-turn bodies, an open turn is counted remaining until it closes erased; body_remaining counts what is left; receipts keep billing');
  }
- // 9. Voice source revocation (Owner 10-23): replies written with a deleted version leave the history; others stay.
+ // 9. Voice source revocation (Owner 10-23, D7; VOICE-ABORT-FIX 0529): deleting a version voids only the turns still running with
+ // it; replies already shown stay in the conversation, whichever version wrote them.
  {
   const a=await account(),version=randomUUID(),kept=randomUUID();
   for(const [id,n] of [[version,1],[kept,2]])
@@ -277,10 +278,11 @@ try{
   assert.ok((await visible(a.session)).every(r=>r.visible));
   await c.query('begin');await c.query('set local role service_role');
   await c.query('select voice_profile_delete($1,$2)',[a.actor,version]);await c.query('commit');
-  assert.deepEqual((await visible(a.session)).map(r=>[Number(r.turn_id),r.visible]),[[voiced,false],[voiced,false],[plain,true],[plain,true]]);
+  assert.deepEqual((await visible(a.session)).map(r=>[Number(r.turn_id),r.visible]),[[voiced,true],[voiced,true],[plain,true],[plain,true]],
+   'a closed reply written with the deleted version stays (the conversation is not emptied)');
   assert.ok((await visible(other)).every(r=>r.visible),'a reply written with another version stays');
-  assert.deepEqual((await open(a)).history.map(h=>h.content),['PRIVATE_Q','PRIVATE_A'],'the next turn reads only the plain turn');
-  report.checks.push('voice revocation: deleting a version hides the replies written with it (both messages), keeps plain replies and those of another version; the next turn reads only what is left');
+  assert.deepEqual((await open(a)).history.map(h=>h.content),['PRIVATE_Q','PRIVATE_A','PRIVATE_Q','PRIVATE_A'],'the next turn reads the whole conversation');
+  report.checks.push('voice revocation: deleting a version keeps every closed reply visible (the one written with it, plain ones and those of another version); the next turn reads the whole conversation');
  }
  // 10. Voice revocation racing a closing turn, both orders, and a receipt holding the turn row.
  {
@@ -305,7 +307,7 @@ try{
      assert.equal((await closing).closeKind,'erased');
     }
    }finally{await p.end();await d.end();}
-   assert.equal((await content(a.session)).visible,0,closeFirst?'committed messages hidden by the deletion':'nothing saved');
+   assert.equal((await content(a.session)).visible,closeFirst?2:1,closeFirst?'a reply committed before the deletion stays':'only the user\'s message is kept');
   }
   // A receipt holding the turn row (call writes lock only their turn): the deletion waits for it (no deadlock: the
   // receipt needs nothing the deletion holds), then deletes; the turn then closes erased.
@@ -326,9 +328,32 @@ try{
    }finally{await p.end();await d.end();}
    assert.equal(await one('select count(*)::int v from voice_profile_versions where id=$1',[version]),0);
    assert.equal((await close(a,o.turnId)).closeKind,'erased');
-   assert.equal((await content(a.session)).total,0);
+   assert.equal((await content(a.session)).total,1,'only the user\'s message is kept');
+   assert.equal(await one('select role v from session_messages where session_id=$1',[a.session]),'user');
   }
-  report.checks.push('voice revocation vs a closing turn (real functions): close first -> the deletion waits (account row) and hides its committed messages; deletion first -> the close waits, closes erased and saves nothing; a receipt holding its turn -> the deletion waits, then deletes, the turn closes erased');
+  // The app's own erased close (a call write found the deletion first, chat.ts): handed the user's message, it keeps that and
+  // nothing else; the same close of a deleted conversation keeps nothing (0529). The charge is the deletion abort's, unchanged.
+  {
+   const a=await account(),version=randomUUID();
+   await c.query(`insert into voice_profile_versions(id,actor_id,request_id,version,status,profile,confirmed_at)
+    values($1,$2,$3,1,'confirmed','{"tone":"x"}',now())`,[version,a.actor,randomUUID()]);
+   await c.query('insert into voice_profiles(actor_id,confirmed_version_id,enabled) values($1,$2,true)',[a.actor,version]);
+   const o=await open(a,{pol:policy({voiceVersionId:version})});await begin(a,o.turnId);await record(a,o.turnId);
+   await c.query('begin');await c.query('set local role service_role');
+   await c.query('select voice_profile_delete($1,$2)',[a.actor,version]);await c.query('commit');
+   const both=JSON.stringify([{role:'user',content:'PRIVATE_Q'},{role:'assistant',content:'PRIVATE_A'}]);
+   const erased=(x,t)=>one("select turn_close($1,$2,'erased',$3,false,false,'turn_tombstoned') v",[x.actor,t,both]);
+   const r=await erased(a,o.turnId);
+   assert.equal(r.closeKind,'erased');assert.equal(r.voiceSourceRevoked,true);assert.equal(r.sessionTombstoned,false);
+   assert.ok(r.chargedCredits>0,'what was sent is still charged (Owner 2026-11-14: the voided round keeps its charge)');
+   assert.deepEqual((await c.query('select role,content,visible from session_messages where session_id=$1',[a.session])).rows,
+    [{role:'user',content:'PRIVATE_Q',visible:true}]);
+   const b=await account(),ob=await open(b);await begin(b,ob.turnId);await record(b,ob.turnId);
+   await c.query('update runtime_sessions set content_deleted_at=now() where id=$1',[b.session]);
+   assert.equal((await erased(b,ob.turnId)).closeKind,'erased');
+   assert.equal((await content(b.session)).total,0,'a deleted conversation keeps nothing');
+  }
+  report.checks.push('voice revocation vs a closing turn (real functions): close first -> the deletion waits (account row) and the committed reply stays; deletion first -> the close waits, closes erased and keeps only the user message; a receipt holding its turn -> the deletion waits, then deletes, the turn closes erased keeping only the user message');
  }
  // 11. content_erasure_turn_check (replaces content_erasure_runtime_check): allow and every deny.
  {
