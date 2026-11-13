@@ -74,14 +74,15 @@ describe('image tools', () => {
     expect(JSON.parse(await tools({ calls: listFails }).list.execute({}, 'c'))).toMatchObject({ status: 'failed', code: 'unavailable' });
   });
 
-  it('the template list is short: id, name, category, credits, text fields and ratios only', async () => {
+  it('the template list is short: id, name, category, credits, photo, text fields and ratios only', async () => {
     const template = { id: 'poster', name: 'Poster', category: 'ads', category_path: ['ads'], series: null,
       cover_before_url: 'https://x/a.png', cover_after_url: null,
       credits_cost: 2, fields: { images: { min: 0, max: 0 }, copy: [{ key: 'title', label: 'Title', required: true, max_length: 40 }],
         aspect_ratios: ['3:4'] } };
     const c = calls({ listTemplates: vi.fn(async () => ({ ok: true as const, templates: [template] })) });
     expect(JSON.parse(await tools({ calls: c }).list.execute({}, 'c'))).toEqual({ status: 'ok', items: [{ id: 'poster', name: 'Poster',
-      category: 'ads', credits: 2, fields: [{ key: 'title', label: 'Title', required: true, maxLength: 40 }], aspectRatios: ['3:4'] }] });
+      category: 'ads', credits: 2, photo: 'none', fields: [{ key: 'title', label: 'Title', required: true, maxLength: 40 }],
+      aspectRatios: ['3:4'] }], photos: [] });
   });
 
   it('results say plainly what happened; definitions have a fixed size', () => {
@@ -147,3 +148,55 @@ describe('image tools', () => {
       link: '/app/integrations' });
   });
 });
+
+// Owner 2026-11-13: a photo the user sent in the conversation, now or earlier, can be a template's photo.
+describe('photos', () => {
+  const template = (id: string, min: number, max: number) => ({ id, name: id, category: 'c', category_path: ['c'], series: null,
+    cover_before_url: null, cover_after_url: null, credits_cost: 3, fields: { images: { min, max }, copy: [], aspect_ratios: ['1:1'] } });
+  const photo = (turnId: number, index: number) => ({ path: `me/s.${turnId}.${index}.x.jpg`, turnId, index });
+  const conversation = { photos: [photo(3, 0), photo(3, 1), photo(8, 0)], currentTurnId: 8 };
+
+  it('the list says which templates take a photo and numbers the conversation\'s photos, oldest first, this message\'s marked', async () => {
+    const c = calls({ listTemplates: vi.fn(async () => ({ ok: true as const, templates: [template('product', 1, 1), template('poster', 0, 1),
+      template('freeform', 0, 0)] })), photos: vi.fn(async () => conversation) });
+    const listed = JSON.parse(await tools({ calls: c }).list.execute({}, 'c'));
+    expect(listed.items.map((item: { id: string; photo: string }) => [item.id, item.photo]))
+      .toEqual([['product', 'required'], ['poster', 'optional'], ['freeform', 'none']]);
+    expect(listed.photos).toEqual([{ photo: 1, sentWith: 'an earlier message' }, { photo: 2, sentWith: 'an earlier message' },
+      { photo: 3, sentWith: 'this message' }]);
+    expect(JSON.stringify(listed)).not.toContain('.jpg');
+    const failing = calls({ listTemplates: vi.fn(async () => ({ ok: true as const, templates: [] })),
+      photos: vi.fn(async () => { throw new Error('down'); }) });
+    expect(JSON.parse(await tools({ calls: failing }).list.execute({}, 'c')).photos).toEqual([]);
+  });
+
+  it('generate takes the photo by its number, and the photo is part of the request\'s idempotency key', async () => {
+    const c = calls({ photos: vi.fn(async () => conversation) });
+    await tools({ calls: c }).generate.execute({ template_id: 'product', photo: 2 }, 'call-1');
+    expect(c.generate).toHaveBeenCalledWith(expect.objectContaining({ templateId: 'product', photoPath: photo(3, 1).path }));
+    const withPhoto = (c.generate as ReturnType<typeof vi.fn>).mock.calls[0]![0].idempotencyKey;
+    const plain = calls({ photos: vi.fn(async () => conversation) });
+    await tools({ calls: plain }).generate.execute({ template_id: 'product' }, 'call-1');
+    expect((plain.generate as ReturnType<typeof vi.fn>).mock.calls[0]![0]).not.toHaveProperty('photoPath');
+    expect((plain.generate as ReturnType<typeof vi.fn>).mock.calls[0]![0].idempotencyKey).not.toBe(withPhoto);
+  });
+
+  it('a number that is no photo of this conversation: asked to list them, Shotviva not asked, nothing counted', async () => {
+    const c = calls({ photos: vi.fn(async () => conversation) });
+    const t = tools({ calls: c });
+    expect(JSON.parse(await t.generate.execute({ template_id: 'product', photo: 4 }, 'c'))).toMatchObject({ status: 'failed',
+      code: 'invalid_input', note: expect.stringContaining('list_image_templates') });
+    expect(c.generate).not.toHaveBeenCalled();
+    expect(t.onCall).not.toHaveBeenCalled();
+    expect(t.generate.enabled?.()).toBe(true);
+    const none = calls({ photos: undefined });
+    expect(JSON.parse(await tools({ calls: none }).generate.execute({ template_id: 'product', photo: 1 }, 'c')))
+      .toMatchObject({ code: 'invalid_input' });
+  });
+
+  it('the instructions and descriptions tell the model how to use a photo sent earlier', () => {
+    expect(IMAGE_TOOLS_INSTRUCTIONS).toMatch(/in this message or an earlier one/);
+    expect(IMAGE_TOOLS_INSTRUCTIONS).toMatch(/call list_image_templates first and pass the photo's number/);
+  });
+});
+

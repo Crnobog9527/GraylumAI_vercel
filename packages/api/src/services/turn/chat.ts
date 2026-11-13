@@ -374,7 +374,7 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
     const built = tools ? await tools.build({ db, actorId: input.actorId, turnId: opened.turnId, nextSeq: () => ++seq },
       { slots: deps.slots, currentMessage: input.text, deadline: started + TURN_BUDGET_MS,
         callGate, onStop: stop => { stopped ??= stop; }, gated, onCall: { emit, q: quote.q },
-        announce: event => { stepLog.set(event.id, event); emit(event); }, ...(replay ? { replay } : {}) }) : null;
+        announce: event => { stepLog.set(event.id, event); emit(event); }, ...(photos ? { photos } : {}), ...(replay ? { replay } : {}) }) : null;
     const output = await runRuntime({
       model: quote.model, instructions, input: current, session: turnSession(history),
       maxOutputTokens: quote.outputLimit, maxTurns: 1 + (built?.maxToolCalls ?? 0), reasoning: quote.reasoning,

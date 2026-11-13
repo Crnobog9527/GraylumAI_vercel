@@ -17,14 +17,19 @@ import { prepareSkills, withPinnedSkill } from './tools/skills';
 import { memberCatalog } from './skills/coachGate';
 import { readShotvivaRouteEnv } from '../../lib/envValidator';
 import { loadShotvivaClient, readProfile } from '../connectors/shotviva/connect';
-import { generateImage, listImageTemplates } from '../connectors/shotviva/images';
+import { generateImage, listImageTemplates, type ImageOutcome } from '../connectors/shotviva/images';
+import { sessionPhotos } from '../chatPhotos/photos';
+import { photoGrantUrl } from '../chatPhotos/grant';
+import type { ConversationPhoto } from './tools/imageTools';
 
 /*
  * CORE-PATH-V2 V2-6: what POST /api/turn gives a free chat for its tools. All of it runs before turn_open: the Skill catalog with
  * each entry's load result (cached by package hash), the catalog voice and the accounts social_account may look up. The list holds
  * the social Skills too: whether this account may see them is known at turn_open, and chat.ts drops them there.
  */
-export function chatToolDeps(admin: SupabaseClient, user: () => SupabaseClient): ChatToolDeps {
+/** `appOrigin`: this request's own origin (https://www.graylum.com, https://auth-staging.graylum.com), where Shotviva fetches a chat
+ * photo from (its image allowlist is exact Graylum hosts). */
+export function chatToolDeps(admin: SupabaseClient, user: () => SupabaseClient, appOrigin?: string): ChatToolDeps {
   // One plan read per request (this object is made for one request): the Skill list and the workspace both ask for it.
   let ownTier: ReturnType<typeof readOwnDataTier> | undefined;
   const tierOf = (actorId: string) => (ownTier ??= readOwnDataTier(admin, actorId));
@@ -41,11 +46,27 @@ export function chatToolDeps(admin: SupabaseClient, user: () => SupabaseClient):
         if (!tier || (tier.level !== 'pro' && tier.level !== 'gold')) return 'not_entitled' as const;
         return profile.shotviva_account_id ? true as const : 'not_linked' as const;
       },
-      calls: (actorId: string, sessionId: string) => ({ sessionId,
+      calls: (actorId: string, sessionId: string, current?: { turnId: number; kept: Promise<readonly ConversationPhoto[]> | null }) => ({
+        sessionId,
         listTemplates: () => listImageTemplates({ ...shotvivaDeps, profileId: actorId }),
-        generate: (input: { idempotencyKey: string; templateId: string; copy: Record<string, string>; aspectRatio?: string }) =>
-          generateImage({ ...shotvivaDeps, profileId: actorId, callId: input.idempotencyKey, templateId: input.templateId,
-            copy: input.copy, ...(input.aspectRatio ? { aspectRatio: input.aspectRatio } : {}) }) }),
+        // Owner 2026-11-13: the conversation's chat photos, this message's once kept (they upload while the model answers).
+        photos: async () => {
+          const kept = current?.kept ? await current.kept : [];
+          const listed = await sessionPhotos(admin, actorId, sessionId);
+          const all = [...listed, ...kept.filter(photo => !listed.some(item => item.path === photo.path))]
+            .sort((a, b) => a.turnId - b.turnId || a.index - b.index);
+          return { photos: all, currentTurnId: current?.turnId ?? null };
+        },
+        generate: async (input: { idempotencyKey: string; templateId: string; copy: Record<string, string>; aspectRatio?: string;
+          photoPath?: string }): Promise<ImageOutcome> => {
+          // The photo goes to Shotviva as a Graylum address valid a few minutes (chatPhotos/grant.ts); one that cannot be signed
+          // makes no image rather than one without the photo the user asked for.
+          const image = input.photoPath && appOrigin
+            ? await photoGrantUrl({ client: admin, appOrigin, profileId: actorId, sessionId, path: input.photoPath }) : null;
+          if (input.photoPath && !image) return { status: 'failed', code: 'unavailable', topUpUrl: null, jobId: null, refunded: false };
+          return generateImage({ ...shotvivaDeps, profileId: actorId, callId: input.idempotencyKey, templateId: input.templateId,
+            copy: input.copy, ...(input.aspectRatio ? { aspectRatio: input.aspectRatio } : {}), ...(image ? { image } : {}) });
+        } }),
     } } : {}),
     async skills(actorId, pin) {
       const client = user();
