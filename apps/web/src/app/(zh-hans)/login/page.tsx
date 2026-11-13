@@ -17,6 +17,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { trpc } from '@/trpc/client';
 import { invisibleCaptchaOptions } from '@/lib/invisibleCaptcha';
+import { signUpAfterRegistration } from '@/lib/signupRequest';
 import { AuthStatusBanner, type AuthStatus } from '@/components/auth/AuthStatusBanner';
 import { AuthRedirectNotice } from '@/components/auth/AuthRedirectNotice';
 import {
@@ -157,8 +158,9 @@ export function LoginPageContent() {
       return;
     }
 
-    const { data, error } = await supabase.auth.signUp({
-      email,
+    // BOT-GUARD: register with our server first; Supabase's Before User Created hook refuses sign-ups that skipped it.
+    const attempt = await signUpAfterRegistration(email, address => supabase.auth.signUp({
+      email: address,
       password,
       options: {
         emailRedirectTo,
@@ -168,7 +170,13 @@ export function LoginPageContent() {
           display_name: nickname.trim() || undefined,
         },
       },
-    });
+    }));
+    if ('refused' in attempt) {
+      setStatus({ tone: 'error', message: attempt.refused });
+      setPendingAction(null);
+      return;
+    }
+    const { error } = attempt.result;
 
     if (error) {
       setStatus({

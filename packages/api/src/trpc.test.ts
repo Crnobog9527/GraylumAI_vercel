@@ -386,6 +386,7 @@ describe('protectedProcedure profile bootstrap', () => {
       hasSupabaseAdminPrivileges?: boolean;
       isEmailVerified?: boolean;
       userOverride?: unknown;
+      headers?: Headers;
     } = {},
   ) {
     const { router, protectedProcedure } = await import('./trpc');
@@ -399,7 +400,7 @@ describe('protectedProcedure profile bootstrap', () => {
     });
 
     const caller = testRouter.createCaller({
-      headers: new Headers(),
+      headers: options.headers ?? new Headers(),
       supabase: supabaseMocks.userSupabase as any,
       supabasePublic: supabaseMocks.userSupabase as any,
       supabaseAdmin: supabaseMocks.adminSupabase as any,
@@ -412,6 +413,15 @@ describe('protectedProcedure profile bootstrap', () => {
 
     return caller.readProfileContext();
   }
+
+  it('BOT-GUARD: passes the visitor IP (first forwarded address) to the opening grant for the same-IP rule, never a non-address', async () => {
+    const withIp = createProfilesSupabase();
+    await callProtectedProcedure(withIp, { headers: new Headers({ 'x-forwarded-for': '203.0.113.9, 10.0.0.1' }) });
+    expect(withIp.rpc).toHaveBeenCalledWith('opening_grant_claim', expect.objectContaining({ p_ip: '203.0.113.9' }));
+    const spoofed = createProfilesSupabase();
+    await callProtectedProcedure(spoofed, { headers: new Headers({ 'x-forwarded-for': 'not-an-ip' }) });
+    expect(spoofed.rpc).toHaveBeenCalledWith('opening_grant_claim', expect.objectContaining({ p_ip: null }));
+  });
 
   it('writes an opening grant ledger entry after creating a new user profile', async () => {
     const supabaseMocks = createProfilesSupabase();
@@ -431,7 +441,7 @@ describe('protectedProcedure profile bootstrap', () => {
     ]);
     expect(supabaseMocks.userProfileInserts).toEqual([]);
     expect(supabaseMocks.rpc).toHaveBeenCalledWith('opening_grant_claim', {
-      p_profile_id: user.id, p_digests: openingGrantDigests(user as unknown as User),
+      p_profile_id: user.id, p_digests: openingGrantDigests(user as unknown as User), p_ip: null,
     });
     expect(result).toEqual({
       profileId: user.id,
@@ -526,7 +536,7 @@ describe('protectedProcedure profile bootstrap', () => {
     const digests = openingGrantDigests(phoneUser as unknown as User);
     expect(digests.map(digest => digest.kind)).toEqual(['oauth']);
     expect(supabaseMocks.rpc).toHaveBeenCalledTimes(1);
-    expect(supabaseMocks.rpc).toHaveBeenCalledWith('opening_grant_claim', { p_profile_id: user.id, p_digests: digests });
+    expect(supabaseMocks.rpc).toHaveBeenCalledWith('opening_grant_claim', { p_profile_id: user.id, p_digests: digests, p_ip: null });
     expect(supabaseMocks.creditTransactions).toHaveLength(1);
   });
 

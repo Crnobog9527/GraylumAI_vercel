@@ -47,6 +47,8 @@ export const APP_SEGMENTS = new Set(['about', 'acceptable-use', 'accessibility',
   'dev', 'owner-edits',
   // PHONE-OTP: /api/auth/phone/send and the Supabase Send SMS hook /api/auth/sms-hook.
   'phone', 'send', 'sms-hook',
+  // BOT-GUARD: /api/auth/signup/request, the email sign-up registration.
+  'signup', 'request',
   '_next', 'static', 'chunks', 'app', 'pages', 'css', 'media']);
 const OWN_HOST = /(^|\.)graylum\.com$|\.vercel\.app$|^localhost$|^127\.0\.0\.1$/;
 

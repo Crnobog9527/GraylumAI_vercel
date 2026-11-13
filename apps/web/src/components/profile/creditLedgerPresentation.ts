@@ -185,6 +185,10 @@ const INTERNAL_RECORD_NOTES: Record<string, string> = {
   // Credits arriving.
   'Opening grant for new user profile bootstrap': '新用户赠送',
   'Opening grant already claimed by this identity': '新用户赠送已经领过',
+  // BOT-GUARD (0526): the grant was refused for good; these rows carry 0 credits.
+  'Opening grant refused: paused': '新用户赠送暂停中，这个账号没有赠送',
+  'Opening grant refused: same IP': '同一网络近期已领过新用户赠送，这个账号没有赠送',
+  'Opening grant refused: daily cap': '当天的新用户赠送已经送完，这个账号没有赠送',
   'Paid credit package': '购买积分包',
   'Membership paid period': '会员积分',
   // Refunds and payment disputes.

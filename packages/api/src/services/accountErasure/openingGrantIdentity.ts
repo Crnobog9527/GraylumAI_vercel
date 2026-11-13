@@ -1,8 +1,10 @@
 // Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved.
 import { createHmac } from 'node:crypto';
+import { isIP } from 'node:net';
 import type { SupabaseClient, User } from '@supabase/supabase-js';
 import { readOpeningGrantKeyring } from '../../lib/openingGrantKeyring';
 import { verifiedPhoneDigits } from '../../lib/auth';
+import { getClientIp } from '../clientIp';
 
 export type OpeningGrantDigest = { kind: 'email' | 'oauth'; key_version: string; digest: string };
 
@@ -55,4 +57,10 @@ export async function loadOpeningGrantDigests(admin: SupabaseClient, userId: str
   const { data, error } = await admin.auth.admin.getUserById(userId);
   if (error || !data.user || data.user.id !== userId) throw new Error('OPENING_GRANT_IDENTITY_UNAVAILABLE');
   return openingGrantDigests(data.user);
+}
+
+/** BOT-GUARD: the visitor's address for the opening grant's same-IP rule; null when the proxy header is not an IP. */
+export function openingGrantIp(headers: Headers | undefined): string | null {
+  const ip = headers ? getClientIp(headers) : null;
+  return ip && isIP(ip) ? ip : null;
 }

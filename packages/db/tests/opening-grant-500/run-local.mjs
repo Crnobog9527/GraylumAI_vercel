@@ -3,6 +3,7 @@
 // Synthetic profiles and digests only; no Auth, no network beyond the local container.
 import assert from 'node:assert/strict';
 import { randomBytes, randomUUID } from 'node:crypto';
+import { readdirSync } from 'node:fs';
 import pg from 'pg';
 import { localDb, read } from '../runtime-view-perf/local-db.mjs';
 
@@ -34,7 +35,22 @@ const signature = () => v("SELECT jsonb_agg(jsonb_build_object('fn',p.oid::regpr
   + "'definer',p.prosecdef,'acl',coalesce(p.proacl::text,''),'config',p.proconfig) ORDER BY p.oid::regprocedure::text) v"
   + " FROM pg_proc p WHERE p.pronamespace='public'::regnamespace AND p.proname IN ('opening_grant_remember','opening_grant_claim')");
 
+// BOT-GUARD (a later migration) replaced both functions by versions with a trailing p_ip. This suite checks 0230 in its own
+// era: it first steps back to the 0230 shape (drop the p_ip versions, re-run 0230 and the 0151 claim), and at the end
+// re-applies the later migrations that redefine the pair, which must give back the complete catalog of the full chain.
+const later = readdirSync(new URL('../../migrations/', import.meta.url)).filter(name => name > '0230_opening_grant_500.sql').sort()
+  .filter(name => /FUNCTION (IF EXISTS )?public\.opening_grant_(remember|claim)\(/.test(read(`packages/db/migrations/${name}`)));
+const claim0151 = old0151.slice(old0151.indexOf('CREATE OR REPLACE FUNCTION public.opening_grant_claim('),
+  old0151.indexOf('-- Preserve the PR-A body'));
+
 try {
+  const fullChain = await catalog();
+  if (later.length) {
+    await c.query('DROP FUNCTION IF EXISTS public.opening_grant_claim(uuid,jsonb,inet);'
+      + ' DROP FUNCTION IF EXISTS public.opening_grant_remember(uuid,jsonb,boolean,inet)');
+    await c.query(read(migrationPath));
+    await c.query(claim0151);
+  }
   // Full chain already applied 0230 once; a second run must leave the complete catalog unchanged.
   const after = await catalog(), shape = await signature();
   await c.query(read(migrationPath));
@@ -110,5 +126,9 @@ try {
   assert.equal(await v("SELECT has_function_privilege('service_role','opening_grant_claim(uuid,jsonb)','execute') v"), true);
   assert.equal(await v("SELECT has_function_privilege('service_role','opening_grant_remember(uuid,jsonb,boolean)','execute') v"), false);
   report.checks.push('clients cannot call either function; service_role only through opening_grant_claim');
+
+  for (const name of later) await c.query(read(`packages/db/migrations/${name}`));
+  assert.deepEqual(await catalog(), fullChain);
+  if (later.length) report.checks.push(`re-applying ${later.join(', ')} after the 0230-era checks gives back the full-chain catalog`);
 } catch (error) { report.failed = String(error.stack ?? error); process.exitCode = 1; }
 finally { await db.close(); console.log(JSON.stringify(report, null, 2)); }

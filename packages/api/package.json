@@ -53,6 +53,8 @@
     "./src/shared/publishMonitorManual": "./src/shared/publishMonitorManual.ts",
     "./src/services/phoneAuth": "./src/services/phoneAuth/index.ts",
     "./src/services/phoneAuth/phoneErrors": "./src/services/phoneAuth/phoneErrors.ts",
+    "./src/services/signupGuard": "./src/services/signupGuard/index.ts",
+    "./src/services/signupGuard/signupRequest": "./src/services/signupGuard/signupRequest.ts",
     "./src/shared/contentSourceMessages": "./src/shared/contentSourceMessages.ts",
     "./src/shared/opcQuestions": "./src/shared/opcQuestions.ts",
     "./src/shared/opcMethodPolicy": "./src/shared/opcMethodPolicy.ts",
