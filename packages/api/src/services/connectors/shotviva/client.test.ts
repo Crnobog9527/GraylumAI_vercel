@@ -87,6 +87,8 @@ describe('INTEGRATION-SHOTVIVA PR B: templates, generate and jobs', () => {
     const send = reply(404, { code: 'not_found', message: 'x' });
     await failure(client(send).job(ACCOUNT, '../account'));
     expect((send.mock.calls[0] as unknown as [URL])[0].pathname).toBe('/api/partner/jobs/..%2Faccount');
+  });
+});
 
 describe('shotvivaPageUrl (the top-up link the page opens)', () => {
   it('only https on Shotviva\'s own domain or a subdomain of it', () => {
