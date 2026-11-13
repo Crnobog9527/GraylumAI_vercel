@@ -116,8 +116,10 @@ export async function readImageJob(deps: ShotvivaDeps & { profileId: string; job
   }
 }
 
-/** Image bytes are fetched only from Shotviva's own origin or its R2 storage (the signed address), never elsewhere. */
-const R2_HOST = /^[a-z0-9-]+\.r2\.cloudflarestorage\.com$/i;
+/** Image bytes are fetched only from Shotviva's own origin or its R2 storage (the signed address), never elsewhere. R2 signs
+ * virtual-host addresses (`<bucket>.<account>.r2.cloudflarestorage.com`, Shotviva's S3 client without path style) as well as
+ * `<account>.r2.cloudflarestorage.com`: one or two labels before the R2 domain, no more. */
+const R2_HOST = /^(?:[a-z0-9-]+\.){1,2}r2\.cloudflarestorage\.com$/i;
 const IMAGE_TYPES: ReadonlySet<string> = new Set(['image/jpeg', 'image/png', 'image/webp']);
 export const IMAGE_MAX_BYTES = 20 * 1024 * 1024;
 
