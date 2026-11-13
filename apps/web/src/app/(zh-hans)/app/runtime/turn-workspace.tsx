@@ -13,6 +13,7 @@ import { useChatImages } from '@/components/opc/composer-image';
 import { WorkspaceFrame } from '@/components/opc/workspace-frame';
 import { SaveReplyButton, SessionResultsPanel } from '@/components/opc/session-results';
 import { offersSave } from '@/lib/session-results';
+import { PHOTO_MARK, photosOfTurns } from '@/lib/chat-photos';
 import composerStyles from '@/components/opc/work-composer.module.css';
 import { trpc } from '@/trpc/client';
 import { RUNTIME_CHOICES_STALE_MS } from '@/lib/runtime-choices';
@@ -129,6 +130,12 @@ export function TurnWorkspace({ sessionId }: { sessionId: string }) {
   }, [sessionId, signature, chat.live?.text.length]);
 
   const workRows = useMemo(() => workRowsOf(chat.view?.calls ?? []), [chat.view?.calls]);
+  // Chat photos (Owner 2026-11-13): a message sent with images shows them; read again when a reply is added (its photos are kept).
+  const photoMarked = messages.some(m => m.role === 'user' && m.content.startsWith(PHOTO_MARK));
+  const photos = trpc.chatPhotos.list.useQuery({ sessionId }, { enabled: photoMarked, staleTime: 30_000, retry: 1 });
+  const photosByTurn = useMemo(() => photosOfTurns(photos.data ?? []), [photos.data]);
+  const refetchPhotos = photos.refetch;
+  useEffect(() => { if (photoMarked) void refetchPhotos(); }, [photoMarked, turns.length, refetchPhotos]);
   const paused = chat.paused && !chat.sending;
   // The guide card's first button depends on whether a positioning is already under way: read only once the card shows.
   const gated = chat.notice?.text === POSITIONING_REQUIRED_NOTICE;
@@ -156,7 +163,8 @@ export function TurnWorkspace({ sessionId }: { sessionId: string }) {
         {!messages.length && !outgoing && <RuntimeEmptyState text="输入一条消息，发送后可刷新查看记录。"/>}
         <section className={workStyles.transcript}>
           {turns.map(reply => { const steps = reply.turnId === null ? [] : chat.stepsByTurn.get(reply.turnId) ?? reply.steps ?? [];
-            return <RuntimeTurnView key={reply.seq} userText={asked(reply.turnId)}>
+            return <RuntimeTurnView key={reply.seq} userText={asked(reply.turnId)}
+              photos={reply.turnId === null ? undefined : photosByTurn.get(reply.turnId)}>
             {reply.turnId !== null && <TurnStepList steps={steps}/>}
             {reply.turnId !== null && <AgentWorkStatus items={workRows.get(reply.turnId) ?? []}/>}
             <RuntimeReply text={reply.content}/>

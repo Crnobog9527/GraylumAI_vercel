@@ -6,6 +6,7 @@ import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { protectedProcedure, router } from '../trpc';
 import { confirmAccountErasure, loadAccountErasurePreview } from '../services/accountErasure/service';
+import { removeSessionPhotos } from '../services/chatPhotos/photos';
 
 function requireServiceRole(hasSupabaseAdminPrivileges: boolean) {
   if (!hasSupabaseAdminPrivileges) {
@@ -25,9 +26,13 @@ export const accountRouter = router({
     return confirmContentErasure(ctx.supabaseAdmin, ctx.profileId, input);
   }),
   /** One click deletes one whole conversation; the server decides the scope (Owner 2026-10-13). */
-  conversationErasure: protectedProcedure.input(conversationTarget).mutation(({ ctx, input }) => {
+  conversationErasure: protectedProcedure.input(conversationTarget).mutation(async ({ ctx, input }) => {
     requireServiceRole(ctx.hasSupabaseAdminPrivileges);
-    return eraseConversation(ctx.supabaseAdmin, ctx.profileId, input);
+    const erased = await eraseConversation(ctx.supabaseAdmin, ctx.profileId, input);
+    // The conversation's photos go with it (Owner 2026-11-13). Best effort, never fails the deletion: the 5-minute cron deletes
+    // whatever is left of a deleted conversation (cleanOrphanPhotos).
+    await removeSessionPhotos(ctx.supabaseAdmin, ctx.profileId, erased.id);
+    return erased;
   }),
   /** Background cleanup after conversationErasure; the cron sweep is the backstop. */
   conversationErasureCleanup: protectedProcedure.input(conversationTarget).mutation(({ ctx, input }) => {

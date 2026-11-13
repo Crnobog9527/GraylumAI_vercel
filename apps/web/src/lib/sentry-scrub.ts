@@ -30,6 +30,7 @@ export const APP_SEGMENTS = new Set(['about', 'acceptable-use', 'accessibility',
   'advance', 'fusion', 'connect', 'contact', 'cookies', 'costs', 'cron', 'diagnostics', 'expert-consult', 'f', 'faq', 'features', 'finance', 'founders',
   'chats', 'cleanup', 'compare', 'estimate', 'tools',
   'connectors', 'shotviva', 'integrations', 'image', // INTEGRATION-SHOTVIVA
+  'chat-photos', 'view', 'shared', // chat photos (Owner 2026-11-13)
   'forgot-password', 'fusion-recovery', 'graylum-vs-chatgpt', 'ig-jingying', 'landing',
   'library', 'library-cleanup', 'login', 'maintenance', 'marketplace', 'models', 'orders', 'packages', 'payment-notices', 'performance',
   'plan', 'positioning', 'postforme', 'preview', 'publish', 'publish-monitor', 'publish-schedule', 'pricing', 'privacy', 'profile', 'prompts',

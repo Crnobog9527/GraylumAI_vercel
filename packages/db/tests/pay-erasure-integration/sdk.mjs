@@ -24,6 +24,10 @@ export function syntheticSdk(createClient,profileId){
   if(target.pathname==='/storage/v1/object/list/profile-avatars'){
    assert.equal(method,'POST');assert.equal(body.prefix,profileId);assert.equal(body.limit,100);return response([]);
   }
+  // Chat photo erasure lists <profile id>/ in its bucket after the avatar; this account holds none.
+  if(target.pathname==='/storage/v1/object/list/chat-photos'){
+   assert.equal(method,'POST');assert.equal(body.prefix,profileId);assert.equal(body.limit,100);return response([]);
+  }
   if(target.pathname==='/storage/v1/object/list-v2/ticket-attachments'){
    assert.ok(body.limit>=1&&body.limit<=1000);assert.equal(body.with_delimiter,false);assert.equal(body.offset,undefined);
    if(mode==='page_failure'&&body.cursor)return response({},403);

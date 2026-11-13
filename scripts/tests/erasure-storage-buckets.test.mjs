@@ -16,6 +16,8 @@ const ERASED_BUCKETS = {
   'library-documents': 'packages/api/src/services/library/erasure.ts',
   // PROFILE-AVATAR: everything under <profile id>/ is deleted after the library, before Auth deletion.
   'profile-avatars': 'packages/api/src/services/profileAvatar/erasure.ts',
+  // Chat photos (Owner 2026-11-13): everything under <profile id>/ (also deleted with each conversation).
+  'chat-photos': 'packages/api/src/services/chatPhotos/photos.ts',
 };
 // Reviewed call sites -> argument passed to storage.from -> where that argument is defined.
 // A string literal needs no definition; an identifier must resolve to `const NAME = '<bucket>'` in that file.
@@ -26,6 +28,8 @@ const CALL_SITES = {
   'packages/api/src/services/library/storage.ts': { BUCKET: 'packages/api/src/services/library/content.ts' },
   'packages/api/src/services/profileAvatar/erasure.ts': { AVATAR_BUCKET: 'packages/api/src/services/profileAvatar/storage.ts' },
   'packages/api/src/services/profileAvatar/storage.ts': { AVATAR_BUCKET: 'packages/api/src/services/profileAvatar/storage.ts' },
+  'packages/api/src/services/chatPhotos/photos.ts': { CHAT_PHOTO_BUCKET: 'packages/api/src/services/chatPhotos/photos.ts' },
+  'packages/api/src/services/chatPhotos/grant.ts': { CHAT_PHOTO_BUCKET: 'packages/api/src/services/chatPhotos/photos.ts' },
   // Daily cleanup only removes ticket attachments that nothing refers to (ARCH-FIX B2).
   'packages/api/src/services/ticketAttachmentCleanup.ts': { TICKET_ATTACHMENT_BUCKET: 'packages/api/src/lib/ticketAttachments.ts' },
 };
@@ -58,7 +62,9 @@ test('every storage.from call opens a bucket that account erasure clears', () =>
   assert.match(read(ERASED_BUCKETS['ticket-attachments']), /'ticket-attachments'/);
   assert.match(read(ERASED_BUCKETS['library-documents']), /library_erasure_proof/);
   assert.match(read(ERASED_BUCKETS['profile-avatars']), /createAvatarErasureAdapter/);
+  assert.match(read(ERASED_BUCKETS['chat-photos']), /createChatPhotoErasureAdapter/);
   assert.match(read('packages/api/src/services/accountErasure/executor.ts'), /createAvatarErasureAdapter\(client\)/);
+  assert.match(read('packages/api/src/services/accountErasure/executor.ts'), /createChatPhotoErasureAdapter\(client\)/);
 });
 
 test('a call in a reviewed file that opens another bucket is caught', () => {

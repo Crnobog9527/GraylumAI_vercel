@@ -3,7 +3,7 @@
  * PUBLISH-MONITOR B2: screenshots for one free chat message, each made a JPEG in the browser within LIB-2d's limits (the server checks
  * them again, chatImage.ts): at most 2048 px a side, the short side at least 64 px, at most 4:1, and a data URL of at most 819,223
  * bytes (a 614,400-byte JPEG). A taller screenshot is padded with white to 4:1 rather than refused. The data URLs live only in the
- * page until they are sent; nothing stores them.
+ * page until they are sent; the server then keeps them with the message as chat photos (Owner 2026-11-13).
  */
 export const CHAT_IMAGE_MAX_EDGE = 2048;
 export const CHAT_IMAGE_MIN_EDGE = 64;

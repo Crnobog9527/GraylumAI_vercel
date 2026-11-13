@@ -257,7 +257,9 @@ it('erases the profile avatar after the library, in the same storage pass that g
   const list = vi.fn().mockResolvedValueOnce({ data: [{ name: '00000000-0000-4000-8000-0000000000aa.webp', id: 'o1' }], error: null })
     .mockResolvedValueOnce({ data: [], error: null });
   const remove = vi.fn().mockResolvedValue({ data: [], error: null });
-  const from = vi.fn().mockReturnValue({ list, remove });
+  // The chat photo bucket comes last and holds nothing for this account.
+  const photos = { list: vi.fn().mockResolvedValue({ data: [], error: null }), remove: vi.fn() };
+  const from = vi.fn((bucket: string) => bucket === 'chat-photos' ? photos : { list, remove });
   await runAccountErasureExecutor({ ...database, storage: { from } } as never);
   const storage = mocks.create.mock.calls[0]![0].additionalStorage;
   // The library is not done yet: the avatar bucket is not touched and the pass is not complete.
@@ -269,4 +271,25 @@ it('erases the profile avatar after the library, in the same storage pass that g
   expect(from).toHaveBeenCalledWith('profile-avatars');
   expect(list).toHaveBeenCalledWith(actor, expect.objectContaining({ limit: 100 }));
   expect(remove).toHaveBeenCalledWith([`${actor}/00000000-0000-4000-8000-0000000000aa.webp`]);
+});
+
+it('erases the chat photos after the avatar, in the same storage pass that gates Auth deletion (Owner 2026-11-13)', async () => {
+  const database = client();
+  const session = '00000000-0000-4000-8000-0000000000b1';
+  const photo = `${session}.7.0.00000000-0000-4000-8000-0000000000b2.jpg`;
+  const empty = { list: vi.fn().mockResolvedValue({ data: [], error: null }), remove: vi.fn() };
+  const photos = { list: vi.fn().mockResolvedValueOnce({ data: [{ name: photo, id: 'p1' }], error: null })
+    .mockResolvedValueOnce({ data: [], error: null }), remove: vi.fn().mockResolvedValue({ data: [], error: null }) };
+  const from = vi.fn((bucket: string) => bucket === 'chat-photos' ? photos : empty);
+  await runAccountErasureExecutor({ ...database, storage: { from } } as never);
+  const storage = mocks.create.mock.calls[0]![0].additionalStorage;
+  mocks.library.mockResolvedValueOnce({ complete: true, remaining: 0, manualReview: 0 });
+  expect(await storage.cleanSubject(actor)).toEqual({ complete: true, remaining: 0, manualReview: 0 });
+  expect(from.mock.calls.map(call => call[0])).toEqual(['profile-avatars', 'chat-photos']);
+  expect(photos.remove).toHaveBeenCalledWith([`${actor}/${photo}`]);
+  // A photo that could not be deleted keeps the pass incomplete, so Auth is not deleted yet.
+  photos.list.mockResolvedValue({ data: [{ name: photo, id: 'p1' }], error: null });
+  photos.remove.mockResolvedValue({ data: null, error: new Error('down') });
+  mocks.library.mockResolvedValueOnce({ complete: true, remaining: 0, manualReview: 0 });
+  expect(await storage.cleanSubject(actor)).toMatchObject({ complete: false, errorCode: 'ERASURE_CHAT_PHOTO_UNKNOWN' });
 });

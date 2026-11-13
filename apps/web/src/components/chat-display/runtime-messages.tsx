@@ -5,6 +5,7 @@ import { Bot } from 'lucide-react';
 import { MessageMarkdown } from '@/components/chat/MessageMarkdown';
 import { ChatPendingStatus } from '@/components/chat/ChatInlineNotice';
 import workStyles from '@/app/(zh-hans)/app/runtime/runtime-work.module.css';
+import photoStyles from './chat-photos.module.css';
 import { DisplayHeading } from './display-heading';
 
 /**
@@ -45,15 +46,20 @@ export function RuntimeEmptyState({ text }: { text: string }) {
  * One turn: optional date line, the user's message, then the coach's message. `children` is the
  * body of the coach's message (reply, proposal, buttons, notices).
  */
-export function RuntimeTurnView({ dateLabel, userText, completed = false, children }: {
+export function RuntimeTurnView({ dateLabel, userText, photos, completed = false, children }: {
   dateLabel?: string | null;
   userText?: string | null;
+  /** The images the user sent with this message (chat photos, Owner 2026-11-13), as addresses of the signed-in view route. */
+  photos?: readonly string[];
   /** Shows "已完成本轮建议" next to the coach's name. */
   completed?: boolean;
   children?: ReactNode;
 }) {
   return (
     <div>{dateLabel&&<p className={workStyles.dateMarker}>{dateLabel}</p>}<article className={workStyles.turn}>
+      {photos?.length ? <div className={photoStyles.photos} role="group" aria-label="你发的图片">{photos.map((src, index) =>
+        <a key={src} className={photoStyles.photo} href={src} target="_blank" rel="noopener noreferrer">
+          <img src={src} alt={`你发的第 ${index + 1} 张图片`} loading="lazy" decoding="async"/></a>)}</div> : null}
       {userText!=null&&<p className={workStyles.userMessage}>{userText}</p>}
       <div className={workStyles.agentMessage}><div className={workStyles.agentIdentity}><img src="/graylum-logo.png" alt=""/>
         <span>Graylum · AI 自媒体陪跑教练</span>{completed&&<span className="ml-2 text-xs opacity-70">已完成本轮建议</span>}</div><div>

@@ -42,6 +42,7 @@ import { fusionSettingsRouter } from './routers/fusionSettings';
 import { fusionReviewRouter } from './routers/fusionReview';
 import { fusionCompareRouter } from './routers/fusionCompare';
 import { connectorsRouter } from './routers/connectors';
+import { chatPhotosRouter } from './routers/chatPhotos';
 
 /**
  * 主路由器
@@ -92,6 +93,7 @@ export const appRouter = router({
   voiceFlag: voiceFlagRouter,
   // INTEGRATION-SHOTVIVA: the user's own connector state.
   connectors: connectorsRouter,
+  chatPhotos: chatPhotosRouter,
 });
 
 /**
