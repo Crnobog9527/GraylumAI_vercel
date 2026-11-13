@@ -5,7 +5,7 @@ import { readOwnDataTier } from '../membershipEntitlements';
 /**
  * INTEGRATION-BASE PR B1: connectors that need a credential of the user's own (the first is the Feishu Base, plan B of
  * 2026-11-14). The credential lives only in Vault, reached through four service-role functions (migration
- * 0534_user_connections.sql); the user_connections row keeps the target it is for, a label, its last four characters and
+ * 0529_user_connections.sql); the user_connections row keeps the target it is for, a label, its last four characters and
  * when the provider last rejected it. Shotviva does not use this: it has no per-user credential.
  *
  * Nothing here returns the credential to a caller other than the provider client on the server.

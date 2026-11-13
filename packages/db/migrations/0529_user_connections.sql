@@ -1,7 +1,7 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC.
 -- All rights reserved. This code is proprietary and confidential.
 -- INTEGRATION-BASE PR B1 (Owner 2026-11-14: Feishu connector before launch, plan B "作品一键写入飞书多维表格", per-table
--- authorization code, Pro/Gold only). Number 0534 assigned by the controller.
+-- authorization code, Pro/Gold only). Number 0529 assigned by the controller.
 --   * user_connections: one row per (profile, provider) for connectors that need a credential of the user's own (Shotviva does
 --     not: it keeps profiles.shotviva_account_id and the partner key). The credential itself is never in this table: it is a
 --     Vault secret named graylum.user.<profile>.<provider>; the row keeps its id, its last four characters, the target the
