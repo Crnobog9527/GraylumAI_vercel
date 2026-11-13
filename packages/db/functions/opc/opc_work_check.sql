@@ -8,7 +8,7 @@ CREATE OR REPLACE FUNCTION public.opc_work_check(p_actor_id uuid, p_session_id u
  STABLE SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-DECLARE s runtime_sessions;item uuid;work jsonb;m runtime_scope_material;binding opc_video_material_bindings;
+DECLARE s runtime_sessions;item uuid;work jsonb;m runtime_scope_material;binding opc_video_material_bindings;sources jsonb:='[]'::jsonb;pick jsonb;k text;
 BEGIN
  SELECT * INTO s FROM runtime_sessions WHERE id=p_session_id AND actor_id=p_actor_id;
  IF s.id IS NULL OR s.scope->>'kind' IS DISTINCT FROM 'work_item' THEN RETURN jsonb_build_object('work',NULL); END IF; -- turn_open refuses another account's conversation
@@ -38,6 +38,17 @@ BEGIN
   SELECT * INTO m FROM runtime_scope_material
    WHERE session_id=s.id AND NOT revoked AND erased_at IS NULL ORDER BY revision DESC LIMIT 1;
  END IF;
- RETURN jsonb_build_object('work',work||jsonb_build_object('brief',m.content->'brief','material',m.content->'material',
+ -- CONTENT-CONVERSATION-2 (0532): a video item's conversation is given its current final script and that script's newest storyboard on
+ -- every turn, so a writing Skill the model loads during the turn can write a storyboard or editing advice from them and the reply can
+ -- be saved as one (opc_content_from_turn reads the kind it needs from policy.workSources). Not for a turn that claimed video material
+ -- (the old package flow keeps its own source); a storyboard of an older script is not given (opc_content_source_pick's STALE refusal).
+ IF binding.request_id IS NULL AND opc_item_content_type(item)='video' THEN
+  FOREACH k IN ARRAY ARRAY['script','storyboard'] LOOP
+   pick:=opc_content_source_pick(p_actor_id,item,k,NULL,false);
+   EXIT WHEN pick->>'status' IS DISTINCT FROM 'ready';
+   sources:=sources||jsonb_build_array(pick-'status');
+  END LOOP;
+ END IF;
+ RETURN jsonb_build_object('work',work||jsonb_build_object('brief',m.content->'brief','material',m.content->'material','sources',sources,
   'videoPackage',binding.request_id IS NOT NULL,'materialRevision',m.revision,'materialHash',m.content_hash));
 END $function$;

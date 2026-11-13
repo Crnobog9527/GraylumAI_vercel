@@ -26,6 +26,10 @@ BEGIN
  -- A storyboard reads the script, editing the storyboard, as supplied to the turn that wrote it (policy.workSource).
  IF p_kind IN ('storyboard','editing') THEN
   frozen:=CASE WHEN t.policy#>>'{workSource,kind}'=CASE p_kind WHEN 'storyboard' THEN 'script' ELSE 'storyboard' END THEN (t.policy#>>'{workSource,contentId}')::uuid END;
+  -- CONTENT-CONVERSATION-2 (0532): a topic-window turn was given its sources as a list (opc_work_check); the one of the kind this
+  -- save needs is the frozen source. The single workSource of a turn that chose a derived method is read as before.
+  frozen:=coalesce((SELECT (e->>'contentId')::uuid FROM jsonb_array_elements(CASE WHEN jsonb_typeof(t.policy->'workSources')='array' THEN t.policy->'workSources' ELSE '[]'::jsonb END) e
+   WHERE e->>'kind'=CASE p_kind WHEN 'storyboard' THEN 'script' ELSE 'storyboard' END LIMIT 1),frozen);
   IF p_source_content_id IS NULL THEN p_source_content_id:=frozen;
   ELSIF p_source_content_id IS DISTINCT FROM frozen THEN RAISE EXCEPTION 'OPC_CONTENT_SOURCE';
   END IF;

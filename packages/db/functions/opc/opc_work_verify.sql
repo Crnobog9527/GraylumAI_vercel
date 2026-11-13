@@ -13,6 +13,9 @@ BEGIN
  SELECT * INTO t FROM turns WHERE actor_id=p_actor_id AND id=p_turn_id;
  IF t.id IS NULL THEN RETURN false; END IF;
  IF t.policy ? 'workSource' AND NOT opc_content_allowed(p_actor_id,(t.policy#>>'{workSource,contentId}')::uuid) THEN RETURN false; END IF;
+ -- CONTENT-CONVERSATION-2 (0532): every source a topic-window turn was given must still be allowed.
+ IF EXISTS(SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(t.policy->'workSources')='array' THEN t.policy->'workSources' ELSE '[]'::jsonb END) e
+   WHERE NOT opc_content_allowed(p_actor_id,(e->>'contentId')::uuid)) THEN RETURN false; END IF;
  IF t.policy ? 'workMaterial' THEN
   SELECT * INTO m FROM runtime_scope_material WHERE session_id=t.session_id AND revision=(t.policy#>>'{workMaterial,revision}')::bigint;
   IF m.session_id IS NULL OR m.revoked OR m.erased_at IS NOT NULL OR m.content_hash IS DISTINCT FROM t.policy#>>'{workMaterial,hash}' THEN RETURN false; END IF;
