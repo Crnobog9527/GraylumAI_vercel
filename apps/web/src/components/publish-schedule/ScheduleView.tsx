@@ -10,6 +10,7 @@ import {
 import { hasOpenEntries, scheduleErrorMessage, zoneLabel, type ScheduleEntry } from '@/lib/publish-schedule/schedule-view';
 import { existingPositioning, type ExistingPositioning } from '@/app/(zh-hans)/app/runtime/positioning-required';
 import { useProfileBusinesses } from '@/components/opc/profile-archive/profile-archive-api';
+import { isNewUser } from '@/lib/confirmed-positioning';
 import { trpc } from '@/trpc/client';
 import { MiniMonth, MonthGrid } from './MonthGrid';
 import { ScheduleChangeDialog } from './ScheduleChangeDialog';
@@ -28,13 +29,9 @@ import styles from './schedule-calendar.module.css';
  * An empty page tells a new user (no confirmed positioning yet, by `opc.list`) to finish positioning first; while that
  * list is read or cannot be read, the user is treated as an existing one (the ordinary empty page). "继续定位" opens the
  * same positioning as the guide card's 继续我的定位 (`existingPositioning`, #1890): the newest profile not archived.
+ * The rule itself is shared with the other pages that ask it (lib/confirmed-positioning.ts).
  */
-export function isNewUser(drafts: { isPending: boolean; error: unknown; data?: unknown }): boolean {
-  if (drafts.isPending || drafts.error) return false;
-  const list = (drafts.data as { drafts?: Array<{ state?: string; currentVersion?: number }> } | undefined)?.drafts;
-  // Confirmed as the positioning page counts it: published, or a revision of one that was published before.
-  return Array.isArray(list) && !list.some(draft => draft.state === 'published' || (draft.currentVersion ?? 0) > 0);
-}
+export { isNewUser };
 export function positioningHref(existing: ExistingPositioning): string {
   return existing.state === 'draft' ? `/app/positioning/${existing.draftId}` : '/app/positioning';
 }
