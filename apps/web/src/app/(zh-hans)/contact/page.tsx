@@ -63,7 +63,8 @@ export default async function ContactPage() {
             </p>
             <a
               href={`mailto:${supportEmail}`}
-              className="mt-6 inline-flex items-center gap-2 text-base font-semibold text-[#FFD700] transition-colors hover:text-[#FFE48A]"
+              className={'mt-6 inline-flex items-center gap-2 text-base font-semibold text-[#FFD700] transition-colors hover:text-[#FFE48A] '
+                + 'max-sm:mt-3 max-sm:min-h-12 max-sm:break-all'}
             >
               {supportEmail}
               <ArrowRight className="h-4 w-4" />
