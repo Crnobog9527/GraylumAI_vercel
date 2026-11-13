@@ -27,6 +27,12 @@ try {
   const applied = await v(catalogSql);
   await c.query(read(migrationPath));
   await c.query(read(migrationPath));
+  // A later migration that redefines this one's erasure functions (INTEGRATION-SHOTVIVA adds its column to them) is applied
+  // again after it, as on a database built in order: the catalog must be the one the whole chain built.
+  const redefines = /FUNCTION public\.account_erasure_local_(cleanup|remaining)\(/;
+  for (const later of readdirSync(new URL('../../migrations/', import.meta.url)).filter(name => name > migration).sort()) {
+    if (redefines.test(read(`packages/db/migrations/${later}`))) await c.query(read(`packages/db/migrations/${later}`));
+  }
   assert.deepEqual(await v(catalogSql), applied);
   report.checks.push('applying the migration again (twice) leaves the catalog unchanged');
 

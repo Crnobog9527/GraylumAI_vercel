@@ -4,7 +4,8 @@
 -- "打通再上线"). Number 0524 assigned by the controller.
 --   * profiles.shotviva_account_id: the one thing Graylum stores about a connected Shotviva account (no token: the
 --     partner key in the admin Vault proves "Graylum is calling", this id says for whom; Shotviva checks the pair against
---     its own partner_links). One Graylum profile per Shotviva account (partial unique index). Clients never write it;
+--     its own partner_links). No index: one more index on profiles is one more lock on every turn (check-turn-budget), and
+--     two Graylum accounts linked to one Shotviva account only spend that Shotviva user's own credits with their consent. Clients never write it;
 --     the server sets it after the one-time code exchange and clears it on disconnect or a revoked link.
 --     Account erasure clears it with the other profile fields: account_erasure_local_cleanup, _local_remaining and the
 --     identity guard trigger are whole definitions copied from packages/db/functions/erasure and changed only by this column.
@@ -17,8 +18,6 @@
 BEGIN;
 
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS shotviva_account_id uuid;
-CREATE UNIQUE INDEX IF NOT EXISTS profiles_shotviva_account_unique ON public.profiles(shotviva_account_id)
-  WHERE shotviva_account_id IS NOT NULL;
 -- Clients never write it; the server sets and clears it.
 REVOKE INSERT (shotviva_account_id), UPDATE (shotviva_account_id), REFERENCES (shotviva_account_id)
   ON TABLE public.profiles FROM PUBLIC, anon, authenticated;

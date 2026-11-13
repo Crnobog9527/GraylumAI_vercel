@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-/** INTEGRATION-SHOTVIVA PR A migration: profiles.shotviva_account_id (service-written, unique, erased with the account)
+/** INTEGRATION-SHOTVIVA PR A migration: profiles.shotviva_account_id (service-written, erased with the account)
  * and the 'shotviva' partner-key slot. In this suite because it is a CI suite that builds the whole schema; the connect
  * flow itself is unit-tested (packages/api/src/services/connectors/shotviva). */
 export async function shotvivaConnectorCases({ admin, service, connect }) {
@@ -26,8 +26,11 @@ export async function shotvivaConnectorCases({ admin, service, connect }) {
   const account = randomUUID();
   const link = (id, value) => service.query('UPDATE profiles SET shotviva_account_id=$2 WHERE id=$1 RETURNING id', [id, value]);
   assert.equal((await link(a, account)).rowCount, 1);
-  await assert.rejects(() => link(b, account), e => e.code === '23505', 'one Shotviva account, one Graylum account');
   assert.equal((await link(a, account)).rowCount, 1, 'linking the same account again is fine');
+  assert.equal((await link(b, account)).rowCount, 1, 'two Graylum accounts may share one Shotviva account (its own credits, its own consent)');
+  // No index on the column (no extra lock on profiles for every turn, check-turn-budget).
+  assert.equal((await admin.query(`SELECT count(*)::int n FROM pg_index i JOIN pg_attribute a ON a.attrelid=i.indrelid
+    AND a.attnum=ANY(i.indkey) WHERE i.indrelid='public.profiles'::regclass AND a.attname='shotviva_account_id'`)).rows[0].n, 0);
 
   // A signed-in user cannot set it, not even on their own row.
   const self = await connect();
@@ -48,7 +51,6 @@ export async function shotvivaConnectorCases({ admin, service, connect }) {
   await admin.query('SELECT account_erasure_local_cleanup($1,true)', [a]);
   assert.equal((await admin.query('SELECT shotviva_account_id FROM profiles WHERE id=$1', [a])).rows[0].shotviva_account_id, null);
   await assert.rejects(() => link(a, account), /ACCOUNT_ERASURE_IDENTITY_REFILL/);
-  assert.equal((await link(b, account)).rowCount, 1, 'the erased account no longer holds the Shotviva account');
 
   // The partner-key slot: listed, empty until the Owner enters it, unknown slots still refused.
   const slots = (await service.query('SELECT platform_secret_status() v')).rows[0].v.map(row => row.slot);
@@ -62,7 +64,7 @@ export async function shotvivaConnectorCases({ admin, service, connect }) {
   await admin.query(readFileSync(resolve(migrations, file), 'utf8'));
   assert.equal(await privilege('authenticated', 'UPDATE'), false);
   assert.equal((await admin.query('SELECT shotviva_account_id FROM profiles WHERE id=$1', [b])).rows[0].shotviva_account_id, account);
-  return ['shotviva-id-service-write-only', 'shotviva-id-unique', 'shotviva-id-user-direct-write-denied',
+  return ['shotviva-id-service-write-only', 'shotviva-id-no-index', 'shotviva-id-user-direct-write-denied',
     'shotviva-id-erasure-remaining', 'shotviva-id-erasure-cleared', 'shotviva-id-erasure-refill-denied',
     'shotviva-secret-slot', 'shotviva-migration-rerun'];
 }
