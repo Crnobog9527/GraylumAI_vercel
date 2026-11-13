@@ -18,10 +18,6 @@
 .mentorChat [role=log]{height:clamp(250px,calc(100dvh - 371px),650px);max-height:650px!important;margin-top:0}
 .mentorChat .composerZone{margin-top:8px}
 @media(max-width:639px){.workspaceContent>section[aria-label="当前定位步骤"]{padding-top:0}.mentorChat [role=log]{height:clamp(210px,calc(100dvh - 360px),550px)}}
-/* A phone's positioning conversation fills the screen (workspace-frame.module.css): 48px of top row where the site bar and the
-   announcement took 96px, so the log is 48px taller; and it gives way to the on-screen keyboard (--keyboard-inset), down to
-   120px, so the message box under it stays in view while typing. */
-@media(max-width:639px){.mentorChat [role=log]{height:clamp(120px,calc(100dvh - 312px - var(--keyboard-inset, 0px)),550px);min-height:120px}}
 .agentIdentity{display:flex;align-items:center;gap:8px;color:#6b6b6b;font-size:12px;line-height:20px}
 .agentIdentity img{width:22px;height:22px;object-fit:contain;border-radius:6px}
 .mentorChat .messageBody{font-family:var(--font-primary);font-size:15px;font-weight:400;line-height:1.75;color:#444}
@@ -125,3 +121,11 @@
 .conversationPage .stepTabs{flex:none}
 /* Phone: the full title always shows (it wraps to a second line instead of ending in an ellipsis); a tab stays at least 44px tall. */
 @media(max-width:639px){.stepTabs{padding:0 12px;align-items:stretch}.stepTab{min-height:44px;font-size:12px;white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere}.stepTab:not([data-near]){display:none}}
+/* A phone with the on-screen keyboard up (use-keyboard-inset.ts marks the document with data-keyboard): the conversation page is
+   only as tall as what the keyboard leaves (measured at 390x780 with a 300px keyboard: 432px for the page's own rows). The bar of
+   final actions and the small print under the box step aside while typing, and the step scrolls if the box and a docked card still
+   do not fit, so the box being typed in is in view. They are back when the keyboard goes. */
+@media(max-width:639px){
+ :root[data-keyboard] .conversationPage .publishBar,:root[data-keyboard] .conversationPage .mentorChat>p:last-child{display:none}
+ :root[data-keyboard] .conversationPage .workspaceContent>section[aria-label="当前定位步骤"]{overflow-y:auto;overscroll-behavior:contain}
+}

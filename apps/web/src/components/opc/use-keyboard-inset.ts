@@ -15,7 +15,7 @@ export function keyboardInset(layoutHeight: number, visibleHeight: number, scale
 }
 
 /**
- * Keeps `--keyboard-inset` on the document while `active`: the height the on-screen keyboard covers. A phone's keyboard does
+ * Keeps `--keyboard-inset` (and the `data-keyboard` mark) on the document while `active`: the height the on-screen keyboard covers. A phone's keyboard does
  * not make the page shorter (iOS Safari never did; Chrome on Android stopped in version 108), so a message box at the foot of
  * a full-height page would sit under it. The conversation pages subtract this from their height on a phone
  * (workspace-frame.module.css), which puts the box right above the keyboard. When the browser has also slid the page up to
@@ -31,6 +31,8 @@ export function useKeyboardInset(active = true): void {
     const update = () => {
       const inset = phone.matches ? keyboardInset(window.innerHeight, viewport.height, viewport.scale) : 0;
       root.style.setProperty('--keyboard-inset', `${inset}px`);
+      // For what has to step aside while typing (positioning-result.module.css), not only get shorter.
+      root.toggleAttribute('data-keyboard', inset > 0);
       if (inset && (viewport.offsetTop > 0 || window.scrollY > 0)) window.scrollTo(0, 0);
     };
     update();
@@ -40,6 +42,7 @@ export function useKeyboardInset(active = true): void {
       viewport.removeEventListener('resize', update);
       viewport.removeEventListener('scroll', update);
       root.style.removeProperty('--keyboard-inset');
+      root.removeAttribute('data-keyboard');
     };
   }, [active]);
 }
