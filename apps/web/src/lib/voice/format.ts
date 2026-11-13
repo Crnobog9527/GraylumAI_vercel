@@ -5,7 +5,22 @@ export type VoiceProfile = { tone: string; sentenceLength: string; openings: str
 export type VoiceVersion = { id: string; version: number;
   status: 'generating' | 'draft' | 'confirmed' | 'superseded' | 'stale' | 'failed';
   profile: VoiceProfile | null; failure: string | null; createdAt: string; confirmedAt: string | null;
-  sources: Array<{ documentId: string; filename: string | null }> };
+  sources: Array<{ documentId: string; filename: string | null }>;
+  /** VOICE-2 (0539): code-computed writing stats and each read document's type and topics; absent on older versions. */
+  stats?: VoiceStats | null; documents?: VoiceLabel[] };
+export type VoiceLabelType = 'post' | 'article' | 'script' | 'other';
+export type VoiceLabel = { documentId: string; type: VoiceLabelType; topics: string[]; edited?: boolean };
+export type VoiceStats = { documents: number; sentences: number; avgSentenceChars: number; shortSentenceShare: number;
+  longSentenceShare: number; openings: { question: number; number: number; firstPerson: number };
+  perThousandChars: { exclamation: number; question: number; ellipsis: number; emoji: number };
+  avgParagraphsPerDocument: number; avgParagraphChars: number; listShare: number };
+export const LABEL_TYPES: ReadonlyArray<readonly [VoiceLabelType, string]> = [
+  ['post', '社媒短帖'], ['article', '长文'], ['script', '视频口播稿'], ['other', '其他'],
+];
+/** Topics as typed: split on commas (either width), 顿号 or spaces; at most five of at most twenty characters. */
+export function topicsFromText(text: string): string[] {
+  return [...new Set(text.split(/[,，、\s]+/).map(item => [...item.trim()].slice(0, 20).join('')).filter(Boolean))].slice(0, 5);
+}
 export type VoiceDocument = { id: string; filename: string | null; textBytes: number; preferred: boolean };
 export type VoiceState = { enabled: boolean; revision: number; needsUpdate: boolean; confirmed: VoiceVersion | null;
   latest: VoiceVersion | null; documents: VoiceDocument[] };

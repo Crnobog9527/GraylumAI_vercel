@@ -3,7 +3,7 @@ import { PAYMENT_METHOD_ROUTES_KEY, paymentMethodRoutesSchema, readPaymentMethod
 import { FUSION_SETTINGS_KEY, readFusionSwitches } from '../services/fusion/settings';
 import { validateCompareLimit } from '../services/fusion/compareLimit';
 import { PAYMENT_CHANNEL_KEY, paymentChannelSettingSchema, readPaymentChannel } from '../services/payments/channelSettings';
-import { validatePaygAdminSetting } from '../services/adminSettings'; import { validateSignupGiftSetting } from '../services/signupGuard/settings';
+import { validatePaygAdminSetting } from '../services/adminSettings'; import { validateSettingRules } from '../services/settingRules';
 import {
   entitlementRowShape, FUSION_COMPARE_SETTING, fusionCompareLimitSchema,
 } from '../services/membershipEntitlementConfig';
@@ -125,7 +125,7 @@ const systemSettingInputSchema = z.object({
   if (setting.key === 'v3_summary_max_tokens' && !z.coerce.number().int().min(128).max(4096).safeParse(setting.value).success) {
     ctx.addIssue({ code: 'custom', path: ['value'], message: '整理输出上限须为128至4096的整数' });
   }
-  validateSignupGiftSetting(setting, ctx);
+  validateSettingRules(setting, ctx);
   if (setting.key !== LAUNCH_BASELINE_SETTING_KEY) return;
   if (parseLaunchBaselineAt(setting.value).status === 'BLOCKED') {
     ctx.addIssue({

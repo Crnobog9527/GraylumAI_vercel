@@ -2,14 +2,16 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { DisplayHeading } from '@/components/chat-display/display-heading';
 import { formatBytes } from '@/lib/library-documents/format';
-import { MAX_PREFERRED, voiceErrorMessage, type VoiceProfile, type VoiceState } from '@/lib/voice/format';
+import { MAX_PREFERRED, voiceErrorMessage, type VoiceLabelType, type VoiceProfile, type VoiceState } from '@/lib/voice/format';
 import { VoiceProfileCard } from './voice-profile-card';
 import styles from './my-voice.module.css';
 
 export type MyVoiceViewProps = { state: VoiceState; preferred: string[]; busy: boolean; generating: boolean;
   onTogglePreferred: (documentId: string) => void; onGenerate: () => void; onToggleEnabled: (enabled: boolean) => void;
   onConfirm: (versionId: string, profile: VoiceProfile) => void; onDelete: (versionId: string) => void;
-  onOpenDocuments: () => void };
+  onOpenDocuments: () => void;
+  /** VOICE-2 PR-4: correct one document's type or topics on a version; resolves true when saved. */
+  onSetLabel?: (versionId: string, documentId: string, type: VoiceLabelType, topics: string[]) => Promise<boolean> };
 
 /** 资料库「我的文风」(VOICE, Master Plan 5.3). No estimated charge is shown (Owner rule): only that it is billed by use. */
 export function MyVoiceView(props: MyVoiceViewProps) {
@@ -42,7 +44,8 @@ export function MyVoiceView(props: MyVoiceViewProps) {
       <p className={styles.working}>正在读你的文章、总结文风，一般需要一两分钟，完成后会显示在这里，你可以先去做别的。</p>
     </section>}
     {!running && latest?.status === 'draft' && <VoiceProfileCard key={latest.id} version={latest} title="新的文风画像" busy={busy}
-      onConfirm={profile => props.onConfirm(latest.id, profile)} onDelete={() => props.onDelete(latest.id)} />}
+      onConfirm={profile => props.onConfirm(latest.id, profile)} onDelete={() => props.onDelete(latest.id)}
+      {...(props.onSetLabel ? { onSetLabel: (doc, type, topics) => props.onSetLabel!(latest.id, doc, type, topics) } : {})} />}
     {!running && (latest?.status === 'stale' || latest?.status === 'failed') && <section className={styles.panel}>
       <p className={styles.warn} role="status">
         {latest.status === 'stale' ? voiceErrorMessage('VOICE_STALE') : voiceErrorMessage(latest.failure)}</p>
@@ -50,6 +53,7 @@ export function MyVoiceView(props: MyVoiceViewProps) {
     </section>}
     {state.confirmed && <VoiceProfileCard key={state.confirmed.id + ':' + state.confirmed.version} version={state.confirmed}
       title="当前使用的文风画像" busy={busy} onDelete={() => props.onDelete(state.confirmed!.id)}
+      {...(props.onSetLabel ? { onSetLabel: (doc, type, topics) => props.onSetLabel!(state.confirmed!.id, doc, type, topics) } : {})}
       onConfirm={editLocked ? undefined : profile => props.onConfirm(state.confirmed!.id, profile)} />}
     {state.confirmed && editLocked && <p className={styles.hint}>
       有一份新的文风画像{running ? '正在生成' : '等你确认'}，先处理它，再修改当前这份。</p>}
