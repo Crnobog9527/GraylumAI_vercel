@@ -1,5 +1,7 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC.
 -- All rights reserved. This code is proprietary and confidential.
+-- Based on turn_open and turn_close as of migration 0535 (VOICE-ABORT-FIX: a voice deleted mid-turn keeps only the user's
+-- message); that branch is kept unchanged.
 -- CONTENT-CONVERSATION-2 PR3 (Owner 2026-11-14: "整理聊天纪要" before launch; the first version only copies and exports). Number
 -- 0542 assigned by the controller. Minutes on the CORE-PATH-V2 turn path, no new table:
 --   * turns_kind_check gains 'minutes': one call on the organizer model, metered by usage as an ordinary turn, refunded in full
@@ -13,7 +15,7 @@
 --     turn or the next minutes; conversation, content and account deletion clear them as any other message.
 --   * turn_session_minutes(p_actor_id, p_session_id): new read, the conversation's minutes turns newest first (service_role).
 -- Compatibility: old code never opens kind 'minutes'; every other kind reads and closes exactly as before.
--- Repeatable: constraint dropped and re-added, CREATE OR REPLACE only. Recovery: re-apply the 0532-or-earlier definitions of
+-- Repeatable: constraint dropped and re-added, CREATE OR REPLACE only. Recovery: re-apply the 0535 definitions of
 -- turn_open and turn_close (packages/db/functions at the parent commit), drop turn_session_minutes; minutes rows stay invisible.
 BEGIN;
 SET LOCAL lock_timeout='5s';
@@ -200,7 +202,7 @@ BEGIN
     'kindContext', CASE p_kind WHEN 'mentor' THEN public.turn_mentor_context(p_actor_id, p_session_id, p_policy->'mentor')
       WHEN 'plan' THEN public.turn_plan_context(p_actor_id, p_session_id, p_policy)
       WHEN 'voice' THEN public.turn_voice_context(p_actor_id, p_policy) END);
-END $function$;;
+END $function$;
 
 CREATE OR REPLACE FUNCTION public.turn_close(p_actor_id uuid, p_turn_id bigint, p_close_kind text, p_messages jsonb DEFAULT '[]'::jsonb, p_delivered boolean DEFAULT false, p_refund_all boolean DEFAULT false, p_failure_code text DEFAULT NULL::text, p_kind_result jsonb DEFAULT NULL::jsonb)
  RETURNS jsonb
@@ -211,7 +213,7 @@ AS $function$
 DECLARE
   t turns; s runtime_sessions; q numeric; n_total numeric; pending_upper numeric; credits integer; charge integer; h integer;
   v_kind text := p_close_kind; tomb jsonb; next_seq integer; msg jsonb; pending boolean; user_pending boolean;
-  marker timestamptz; kind_result jsonb;
+  marker timestamptz; kind_result jsonb; voice_only boolean;
 BEGIN
   IF p_close_kind NOT IN ('completed','stopped','failed','interrupted','expired','erased') THEN
     RAISE EXCEPTION 'TURN_CLOSE_INVALID' USING ERRCODE='22023';
@@ -268,6 +270,10 @@ BEGIN
   tomb := turn_tombstones(p_actor_id, t.session_id, t.policy);
   IF v_kind IN ('completed','stopped') AND ((tomb->>'sessionTombstoned')::boolean OR (tomb->>'accountErasing')::boolean
     OR (tomb->>'voiceSourceRevoked')::boolean) THEN v_kind := 'erased'; END IF;
+  -- VOICE-ABORT-FIX (0535): erased only because the writing voice it used was deleted (the conversation and the account are
+  -- still there). Only this round's reply is void: the user's own message is kept below, so the conversation is not emptied.
+  voice_only := v_kind = 'erased' AND t.session_id IS NOT NULL AND (tomb->>'voiceSourceRevoked')::boolean
+    AND NOT (tomb->>'sessionTombstoned')::boolean AND NOT (tomb->>'accountErasing')::boolean;
   -- The per-kind hook: what a kind keeps from its result (a draft, a report, a verdict) is written in the same transaction as the
   -- close, by that kind's own function (e.g. turn_mentor_apply(t, v_kind, p_kind_result)), one branch per kind:
   --   IF t.kind = '<kind>' THEN PERFORM public.turn_<kind>_apply(...); ELSE ... END IF;
@@ -387,9 +393,10 @@ BEGIN
   IF t.state = 'paused' THEN DELETE FROM session_messages WHERE session_id = t.session_id AND turn_id = p_turn_id AND NOT visible; END IF;
 
   -- The messages of a delivered turn, appended in order.
-  IF v_kind IN ('completed','stopped') AND t.session_id IS NOT NULL AND jsonb_typeof(p_messages) = 'array' THEN
+  -- A round voided by a deleted voice keeps only the user's message (voice_only above).
+  IF (v_kind IN ('completed','stopped') OR voice_only) AND t.session_id IS NOT NULL AND jsonb_typeof(p_messages) = 'array' THEN
     SELECT coalesce(max(seq), 0) INTO next_seq FROM session_messages WHERE session_id = t.session_id;
-    FOR msg IN SELECT value FROM jsonb_array_elements(p_messages) LOOP
+    FOR msg IN SELECT value FROM jsonb_array_elements(p_messages) WHERE NOT voice_only OR value->>'role' = 'user' LOOP
       next_seq := next_seq + 1;
       INSERT INTO session_messages (session_id, seq, role, turn_id, content, content_hash)
         VALUES (t.session_id, next_seq, msg->>'role', p_turn_id, msg->>'content', encode(sha256(convert_to(msg->>'content', 'UTF8')), 'hex'));
@@ -408,7 +415,7 @@ BEGIN
   IF s.id IS NOT NULL AND s.active_turn_id = p_turn_id THEN UPDATE runtime_sessions SET active_turn_id = NULL WHERE id = s.id; END IF;
   RETURN jsonb_build_object('turnId', t.id, 'closeKind', t.close_kind, 'chargedCredits', t.charged_credits,
     'absorbedCredits', t.absorbed_credits, 'settlement', t.settlement, 'replay', false, 'kindResult', kind_result) || tomb;
-END $function$;;
+END $function$;
 
 CREATE OR REPLACE FUNCTION public.turn_session_minutes(p_actor_id uuid, p_session_id uuid)
  RETURNS jsonb

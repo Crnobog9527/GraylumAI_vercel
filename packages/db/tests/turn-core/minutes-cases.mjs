@@ -10,7 +10,8 @@ export async function minutesCases(t){
  const pol=()=>policy({gCredits:30,minCredits:10,limits:{model:1,paidTools:0,freeTools:0}});
  const closeMinutes=(a,turn,{kind='completed',minutes='## 纪要\n- 定了做帐篷测评',delivered=true,refundAll=false,result}={})=>
   one('select turn_close($1,$2,$3,$4,$5,$6,null,$7) v',[a.actor,turn,kind,'[]',delivered,refundAll,
-   JSON.stringify(result===undefined?(kind==='completed'?{minutes}:null):result)]);
+   // No result is SQL NULL, as Node sends it (never the JSON value null).
+   result===undefined?(kind==='completed'?JSON.stringify({minutes}):null):JSON.stringify(result)]);
  const list=a=>{const run=async()=>{await c.query('set role service_role');try{return await one('select turn_session_minutes($1,$2) v',[a.actor,a.session]);}
   finally{await c.query('reset role');}};return run();};
  {
@@ -58,10 +59,14 @@ export async function minutesCases(t){
   // Another account reads nothing.
   const other=await account(100);
   assert.match(await refusal(one('select turn_session_minutes($1,$2) v',[other.actor,a.session])),/TURN_SESSION_DENIED|permission denied/);
-  // Deleting the conversation clears the minutes with every other message.
+  // Deleting the conversation marks the minutes deleted at once with every other message (nothing lists or reads them), and the
+  // cleanup that clears the conversation's text clears theirs too.
   await one('select content_erasure_mark_session($1,$2) v',[a.actor,a.session]);
+  assert.equal(await one("select count(*)::int v from session_messages where session_id=$1 and deleted_at is null",[a.session]),0,'every row marked deleted');
+  assert.match(await refusal(list(a)),/TURN_SESSION_ERASED/,'the minutes list reads nothing');
+  await one("select content_erasure_confirm($1,'session',$2,null) v",[a.actor,a.session]);
   const cleared=await one("select count(*)::int v from session_messages where session_id=$1 and content like '%帐篷测评%'",[a.session]);
-  assert.equal(cleared,0,'no copy of the minutes stays');
+  assert.equal(cleared,0,'no copy of the minutes stays after the cleanup');
  }
  {
   // Only a free conversation or a topic window.
