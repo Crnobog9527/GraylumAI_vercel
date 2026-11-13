@@ -28,8 +28,10 @@ export function PricingCreditPacks({ packages, plans, failed }: {
       ) : (
         <div className="grid gap-3 sm:grid-cols-3">
           {priced.map(pkg => (
-            <div key={pkg.id} className="grid gap-1 rounded-[var(--pub-radius-card,18px)] border p-4 text-center" style={card}>
-              <b className="text-2xl" style={{ color: 'var(--text-primary)' }}>
+            // On a phone the three packs are three rows (amount on the left, price on the right), not three tall centred cards.
+            <div key={pkg.id} className={'grid gap-1 rounded-[var(--pub-radius-card,18px)] border p-4 text-center '
+              + 'max-sm:flex max-sm:items-baseline max-sm:justify-between max-sm:gap-3 max-sm:text-left'} style={card}>
+              <b className="text-2xl max-sm:text-lg" style={{ color: 'var(--text-primary)' }}>
                 {(pkg.credits + Math.max(0, pkg.bonus_credits)).toLocaleString('en-US')} 积分</b>
               <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>{formatUsd(pkg.price)}</span>
             </div>
@@ -49,7 +51,7 @@ export function PricingStudio() {
         <h2 className="text-xl font-semibold" style={{ color: 'var(--text-primary)' }}>{COPY.studioTitle}</h2>
         <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>{COPY.studioLede}</p>
       </div>
-      <Link href="/contact" className="rounded-lg border px-4 py-2 text-center text-sm font-medium"
+      <Link href="/contact" className="rounded-lg border px-4 py-2 text-center text-sm font-medium max-sm:py-3 max-sm:text-base"
         style={{ borderColor: 'var(--border-primary)', color: 'var(--text-primary)' }}>{COPY.contactCta}</Link>
     </section>
   );
@@ -60,9 +62,10 @@ export function PricingFaq() {
     <section data-testid="pricing-faq" className="grid gap-3">
       <h2 className="text-xl font-semibold" style={{ color: 'var(--text-primary)' }}>{COPY.faqTitle}</h2>
       {pricingFaqItems.map(item => (
-        <details key={item.question} className="rounded-[var(--pub-radius-card,18px)] border p-4" style={card}>
-          <summary className="cursor-pointer font-medium" style={{ color: 'var(--text-primary)' }}>{item.question}</summary>
-          <p className="mt-3 text-sm leading-7" style={{ color: 'var(--text-secondary)' }}>{item.answer}</p>
+        // On a phone the whole head of the card opens it (the padding belongs to the question), not only its line of words.
+        <details key={item.question} className="rounded-[var(--pub-radius-card,18px)] border p-4 max-sm:p-0" style={card}>
+          <summary className="cursor-pointer font-medium max-sm:p-4" style={{ color: 'var(--text-primary)' }}>{item.question}</summary>
+          <p className="mt-3 text-sm leading-7 max-sm:mt-0 max-sm:px-4 max-sm:pb-4" style={{ color: 'var(--text-secondary)' }}>{item.answer}</p>
         </details>
       ))}
     </section>
