@@ -30,6 +30,11 @@ describe('the integrations page', () => {
     expect(html).toContain('已连接 Shotviva');
     mocks.status.mockReturnValue({ data: { available: true, eligible: true, connected: true, balance: null }, isLoading: false });
     expect(renderToStaticMarkup(<IntegrationsView result={{ error: 'SHOTVIVA_CODE_INVALID' }}/>)).toContain('授权已过期');
+    // A state that could not be read is not "未连接".
+    mocks.status.mockReturnValue({ data: undefined, isLoading: false, isError: true });
+    const failed = renderToStaticMarkup(<IntegrationsView result={{}}/>);
+    expect(failed).toContain('状态读取失败');
+    expect(failed).not.toContain('未连接');
   });
 
   it('the detail: what it does, when to use it, and 去查看 / 去购买 with the tracking, opening Shotviva in a new tab', () => {
@@ -59,6 +64,8 @@ describe('the integrations page', () => {
     expect(html).toContain('>断开<');
     expect(html).not.toContain('>连接 Shotviva<');
     expect(body(state({ available: true, eligible: true, connected: true, balance: null }))).toContain('剩余积分暂时读取不了');
+    expect(body(state({ available: true, eligible: true, connected: true,
+      balance: { credits: 1, freeCredits: 0, paidUntil: null, topUpUrl: null } }))).not.toContain('去 Shotviva 充值');
   });
 
   it('a failed connect start says why in words', () => {

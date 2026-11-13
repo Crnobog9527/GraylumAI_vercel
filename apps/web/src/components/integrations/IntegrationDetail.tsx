@@ -53,7 +53,7 @@ function ShotvivaConnection({ shotviva }: { shotviva: ShotvivaState }) {
         <p><b>已连接</b>{data.balance ? `：剩余 ${data.balance.credits} 积分${data.balance.freeCredits ? `，另有 ${data.balance.freeCredits} 免费积分` : ''}`
           : '：剩余积分暂时读取不了'}</p>
         <div className={styles.connectionActions}>
-          {data.balance && <a className={styles.secondary} href={data.balance.topUpUrl} target="_blank" rel="noopener noreferrer">去 Shotviva 充值</a>}
+          {data.balance?.topUpUrl && <a className={styles.secondary} href={data.balance.topUpUrl} target="_blank" rel="noopener noreferrer">去 Shotviva 充值</a>}
           {confirming
             ? <>
               <span className={styles.confirmText}>断开后，对话里就不能再用 Shotviva 出图了。</span>

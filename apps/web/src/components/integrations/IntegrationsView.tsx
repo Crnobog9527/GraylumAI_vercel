@@ -40,6 +40,7 @@ export function IntegrationsView({ result }: { result: { connected?: string | nu
 function StatusChip({ module, shotviva }: { module: IntegrationModule; shotviva: ShotvivaState }) {
   if (module.connector !== 'shotviva') return null;
   const data = shotviva.status.data;
-  const text = shotviva.status.isLoading ? '读取中' : data?.connected ? '已连接' : '未连接';
+  // An unreadable state is said as such (the detail says the same), never "未连接".
+  const text = shotviva.status.isLoading ? '读取中' : !data ? '状态读取失败' : data.connected ? '已连接' : '未连接';
   return <small className={styles.chip} data-connected={data?.connected ? 'true' : 'false'}>{text}</small>;
 }
