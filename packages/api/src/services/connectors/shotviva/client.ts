@@ -1,8 +1,10 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { z } from 'zod';
 import {
-  PARTNER_ACCOUNT_HEADER, accountResponseSchema, linkResponseSchema, partnerErrorSchema,
-  type AccountResponse, type LinkResponse, type PartnerErrorCode,
+  PARTNER_ACCOUNT_HEADER, PARTNER_IDEMPOTENCY_HEADER, accountResponseSchema, generateResponseSchema, jobResponseSchema,
+  linkResponseSchema, partnerErrorSchema, templatesResponseSchema,
+  type AccountResponse, type GenerateRequest, type GenerateResponse, type JobResponse, type LinkResponse, type PartnerErrorCode,
+  type TemplatesResponse,
 } from './contract';
 
 /** INTEGRATION-SHOTVIVA: the server-side Shotviva partner client. One fixed origin from configuration, the partner key
@@ -10,7 +12,7 @@ import {
  * contract and anything else is "unavailable", never trusted. */
 export class ShotvivaError extends Error {
   constructor(readonly code: PartnerErrorCode | 'unavailable', readonly status: number | null,
-    readonly topUpUrl: string | null = null) { super(`SHOTVIVA_${code.toUpperCase()}`); }
+    readonly topUpUrl: string | null = null, readonly jobId: string | null = null) { super(`SHOTVIVA_${code.toUpperCase()}`); }
 }
 
 export type ShotvivaClientOptions = {
@@ -68,16 +70,17 @@ export function createShotvivaClient(options: ShotvivaClientOptions) {
   const limit = options.maxResponseBytes ?? DEFAULT_MAX_BYTES;
 
   async function call<T>(schema: z.ZodType<T>, path: string, init: { method: 'GET' | 'POST'; account?: string; body?: unknown;
-    query?: Record<string, string | undefined> }): Promise<T> {
+    query?: Record<string, string | undefined>; idempotencyKey?: string; timeoutMs?: number }): Promise<T> {
     const url = new URL(path, origin);
     for (const [key, value] of Object.entries(init.query ?? {})) if (value !== undefined) url.searchParams.set(key, value);
     const headers: Record<string, string> = { Authorization: `Bearer ${options.partnerKey}`, Accept: 'application/json' };
     if (init.account) headers[PARTNER_ACCOUNT_HEADER] = init.account;
+    if (init.idempotencyKey) headers[PARTNER_IDEMPOTENCY_HEADER] = init.idempotencyKey;
     if (init.body !== undefined) headers['Content-Type'] = 'application/json';
     let response: Response;
     try {
       response = await send(url, { method: init.method, headers, redirect: 'error', cache: 'no-store',
-        body: init.body === undefined ? undefined : JSON.stringify(init.body), signal: AbortSignal.timeout(timeoutMs) });
+        body: init.body === undefined ? undefined : JSON.stringify(init.body), signal: AbortSignal.timeout(init.timeoutMs ?? timeoutMs) });
     } catch { throw new ShotvivaError('unavailable', null); }
     const text = await readBounded(response, limit);
     let json: unknown;
@@ -85,7 +88,7 @@ export function createShotvivaClient(options: ShotvivaClientOptions) {
     if (!response.ok) {
       const error = partnerErrorSchema.safeParse(json);
       throw new ShotvivaError(error.success ? error.data.code : 'unavailable', response.status,
-        error.success ? error.data.top_up_url ?? null : null);
+        error.success ? error.data.top_up_url ?? null : null, error.success ? error.data.job_id ?? null : null);
     }
     const parsed = schema.safeParse(json);
     if (!parsed.success) throw new ShotvivaError('unavailable', response.status);
@@ -99,6 +102,16 @@ export function createShotvivaClient(options: ShotvivaClientOptions) {
     /** Credits of a linked account; top_up_url remembers where to come back to. */
     account: (accountId: string, returnTo?: string): Promise<AccountResponse> =>
       call(accountResponseSchema, '/api/partner/account', { method: 'GET', account: accountId, query: { return_to: returnTo } }),
+    /** The templates the account may use (`freeform` is the free-text one). */
+    templates: (accountId: string): Promise<TemplatesResponse> =>
+      call(templatesResponseSchema, '/api/partner/templates', { method: 'GET', account: accountId }),
+    /** One image, synchronously. The same idempotency key is the same job, charged once: a replay answers its current state. */
+    generate: (accountId: string, request: GenerateRequest, options: { idempotencyKey: string; timeoutMs: number }):
+      Promise<GenerateResponse> => call(generateResponseSchema, '/api/partner/generate', { method: 'POST', account: accountId,
+      body: request, idempotencyKey: options.idempotencyKey, timeoutMs: options.timeoutMs }),
+    /** A job's state, for the timeout fallback. */
+    job: (accountId: string, jobId: string): Promise<JobResponse> =>
+      call(jobResponseSchema, `/api/partner/jobs/${encodeURIComponent(jobId)}`, { method: 'GET', account: accountId }),
   };
 }
 export type ShotvivaClient = ReturnType<typeof createShotvivaClient>;

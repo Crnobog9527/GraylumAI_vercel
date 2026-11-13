@@ -28,6 +28,7 @@ import { NO_ACCESS, sourceDescription, workspaceTurnReader, type WorkspaceAccess
 import { planTurnTools, READ_SOURCE_CALLS, RESEARCH_INPUT_BYTES, type ResearchSetup } from './plan';
 import { researchInstructions, READ_SOURCE_DESCRIPTION, turnTools, type SourceReader } from './index';
 import type { PreparedSkills } from './skills';
+import { IMAGE_TOOL_NAMES, IMAGE_TOOLS_INSTRUCTIONS, imageToolBytes, type ImageToolCalls } from './imageTools';
 import type { ToolCallDeps, ToolPlan, TurnToolName } from './types';
 
 /*
@@ -50,6 +51,10 @@ export type ChatToolDeps = {
   benchmarkAccounts?: (actorId: string, sessionId: string) => Promise<CanonicalAccount[]>;
   /** Tests and the load-test stub only; production reads the admin Vault and calls the real suppliers. */
   readKey?: SecretReader; vendors?: VendorCalls;
+  /** INTEGRATION-SHOTVIVA: present when this deployment has the Shotviva connector configured (then the image tools are offered on
+   *  every turn); `ready` says whether this account may use them this turn, `calls` makes them. */
+  images?: { ready: (actorId: string) => Promise<true | 'not_entitled' | 'not_linked' | 'disabled'>;
+    calls: (actorId: string, sessionId: string) => ImageToolCalls };
 };
 
 export type ChatToolsSetup = {
@@ -67,7 +72,8 @@ export type ChatToolsSetup = {
   /** What the user chose for this message, as a line for the model, or the code that refuses it before anything opens. */
   selection(chosen: ChatSelection): { note: string; skill?: WorkSkill; social?: true; contentSource?: 'script' | 'storyboard' } | { refused: string };
   /** Context fields of the request format (providerRequest.ts): the tools it may carry. */
-  context: { tools: string[]; research?: { freeChat: string }; skillCatalog?: SkillCatalogEntry[]; libraryRetrieval?: boolean; workspaceContext?: boolean };
+  context: { tools: string[]; research?: { freeChat: string }; skillCatalog?: SkillCatalogEntry[]; libraryRetrieval?: boolean; workspaceContext?: boolean;
+    imageGeneration?: boolean };
   build(calls: ToolCallDeps, extra: { slots: CounterStore; currentMessage: string; deadline: number; callGate: (subcalls: number) => Promise<void>;
     onStop: (stop: TurnStop) => void; gated: boolean; onCall: NonNullable<Parameters<typeof turnTools>[0]['onCall']>;
     /** Told when each tool starts and ends (toolStage.ts), so the page can list the steps of the reply. */
@@ -95,25 +101,28 @@ export async function prepareChatTools(input: { admin: SupabaseClient; read: Tur
   maxTools: number }): Promise<ChatToolsSetup> {
   // The Skill list, the research switch, the library switch and the workspace access need nothing from each other, so they are read
   // together (each already answers its own failure); the rest below follows in the order it always did.
-  const [skills, researchOn, library, access] = await Promise.all([
+  const [skills, researchOn, library, access, imagesReady] = await Promise.all([
     input.tools.skills ? swallow('turn_tools_skills_unavailable', input.tools.skills(input.actorId, input.pin), null) : null,
     swallow('turn_tools_research_switch_unavailable', chatResearchEnabled(input.admin, input.configuration), false),
     input.tools.library === true ? swallow('turn_tools_library_switch_unavailable',
       admitLibraryRetrieval(input.admin, true, 'ordinary', [], input.configuration), false) : Boolean(input.tools.library),
     input.tools.workspace ? swallow('turn_tools_workspace_unavailable', input.tools.workspace(input.actorId, input.configuration), NO_ACCESS)
       : NO_ACCESS,
+    input.tools.images ? swallow('turn_tools_images_unavailable', input.tools.images.ready(input.actorId), 'disabled' as const) : null,
   ]);
   // Whole groups in this order, each only if it still fits the profile's ceiling; the result depends on configuration only,
   // so it is the same on every turn of the session (2.9 rule 2).
   const offered: TurnToolName[] = [];
   const workspaceOn = Boolean(input.tools.workspace);
   for (const group of [library || workspaceOn ? ['read_source' as const] : [], skills?.catalog.length ? ['load_skill' as const] : [],
-    researchOn ? [...GENERAL_RESEARCH_TOOLS] as TurnToolName[] : []]) if (offered.length + group.length <= input.maxTools) offered.push(...group);
+    researchOn ? [...GENERAL_RESEARCH_TOOLS] as TurnToolName[] : [], input.tools.images ? [...IMAGE_TOOL_NAMES] as TurnToolName[] : []])
+    if (offered.length + group.length <= input.maxTools) offered.push(...group);
+  const imagesOffered = offered.includes('generate_image');
   const research = offered.filter(name => (GENERAL_RESEARCH_TOOLS as readonly string[]).includes(name)) as typeof GENERAL_RESEARCH_TOOLS[number][];
   const skillOffered = offered.includes('load_skill'), sourceOffered = offered.includes('read_source');
   const description = workspaceOn ? sourceDescription(Boolean(library)) : READ_SOURCE_DESCRIPTION;
   const definitionBytes = (research.length ? researchToolBytes(research, false, true) : 0) + (skillOffered ? loadSkillToolBytes() : 0)
-    + (sourceOffered ? Buffer.byteLength(description) + 256 : 0);
+    + (sourceOffered ? Buffer.byteLength(description) + 256 : 0) + (imagesOffered ? imageToolBytes() : 0);
   const catalog = skillOffered ? skills!.catalog : [];
   const catalogText = skillCatalogInstructions(catalog);
   const libraryText = libraryAddendum(false, sourceOffered && Boolean(library));
@@ -129,7 +138,8 @@ export async function prepareChatTools(input: { admin: SupabaseClient; read: Tur
       ...(access.posts ? { posts: access.posts.windowDays > 0 ? { bytes: OWN_POSTS_RESERVE, calls: OWN_POSTS_READS }
         : { bytes: 1200, calls: READ_SOURCE_CALLS } } : {}) } } : {}),
     requiredBytes: input.requiredBytes + definitionBytes + Buffer.byteLength(catalogText + libraryText + (voice?.text ?? '')
-      + workspaceText + WORKSPACE_STRATEGY_INSTRUCTIONS + postsText),
+      + workspaceText + WORKSPACE_STRATEGY_INSTRUCTIONS + postsText + (imagesOffered ? IMAGE_TOOLS_INSTRUCTIONS : '')),
+    ...(imagesOffered && imagesReady !== null ? { imagesReady } : {}),
     // A turn whose research is usable may use the research ceiling; otherwise the interactive one (Owner 10-17 / 10-27).
     inputBytes: Math.min(input.quotedBytes, input.interactiveBytes),
     researchInputBytes: Math.min(input.quotedBytes, RESEARCH_INPUT_BYTES), modelMultiplier: input.modelMultiplier,
@@ -142,7 +152,8 @@ export async function prepareChatTools(input: { admin: SupabaseClient; read: Tur
   return {
     plan, research: setup, inputLimit, definitionBytes,
     coachCapture: Boolean(plan.sourceRoom?.posts && access.posts?.coach && access.posts.windowDays > 0),
-    sharedInstructions: gated => researchInstructions(plan) + libraryText + skillCatalogInstructions(allowedSkills(catalog, gated)),
+    sharedInstructions: gated => researchInstructions(plan) + libraryText + skillCatalogInstructions(allowedSkills(catalog, gated))
+      + (imagesOffered ? IMAGE_TOOLS_INSTRUCTIONS : ''),
     userInstructions: (voice?.text ?? '') + workspaceText + (plan.sourceRoom?.strategy ? WORKSPACE_STRATEGY_INSTRUCTIONS : '')
       + (plan.sourceRoom?.posts ? postsText : ''), ...(voice?.versionId ? { voiceVersionId: voice.versionId } : {}),
     selection(chosen) {
@@ -165,7 +176,8 @@ export async function prepareChatTools(input: { admin: SupabaseClient; read: Tur
     },
     context: { tools: [...plan.offered], ...(research.length ? { research: { freeChat: FREE_CHAT_RESEARCH } } : {}),
       ...(skillOffered ? { skillCatalog: skills!.catalog } : {}),
-      ...(sourceOffered && library ? { libraryRetrieval: true } : {}), ...(workspaceRead ? { workspaceContext: true } : {}) },
+      ...(sourceOffered && library ? { libraryRetrieval: true } : {}), ...(workspaceRead ? { workspaceContext: true } : {}),
+      ...(imagesOffered ? { imageGeneration: true } : {}) },
     async build(calls, extra) {
       const chatReader = () => {
         const shelf = !library ? undefined : typeof input.tools.library === 'function' ? input.tools.library(input.actorId, input.sessionId)
@@ -182,7 +194,8 @@ export async function prepareChatTools(input: { admin: SupabaseClient; read: Tur
           const prepared = skills!.prepared.get(entry.name);
           return prepared === undefined ? [] : [[entry.name, prepared] as const];
         })) } : {}),
-        ...(sourceOffered ? { sourceDescription: description, readSource: chatReader() } : {}) });
+        ...(sourceOffered ? { sourceDescription: description, readSource: chatReader() } : {}),
+        ...(imagesOffered && input.tools.images ? { images: input.tools.images.calls(input.actorId, input.sessionId) } : {}) });
       // A stop raised inside a tool (paused for credits, a tombstone) reaches the turn, not the SDK's error wrapper.
       const skillNames: ReadonlySet<string> = new Set(allowedSkills(catalog, extra.gated).map(entry => entry.name));
       const tools = withStepEvents(built.tools, extra.announce, skillNames, extra.onStop);

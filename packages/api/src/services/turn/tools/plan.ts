@@ -13,6 +13,7 @@ import type { ConfigurationRows } from '../settings/settingsRows';
 import type { StagingPolicy } from '../settings/stagingPolicy';
 import type { ResearchToolsConfig } from '../../research/vendors/config';
 import type { ResearchVendor } from '../../research/vendors/types';
+import { GENERATE_IMAGE_CALLS, IMAGE_RESULT_RESERVE_BYTES, IMAGE_TOOL_NAMES, LIST_IMAGE_TEMPLATES_CALLS } from './imageTools';
 import type { GeneralResearchToolName, ToolPlan, TrimReason, TurnToolName } from './types';
 
 /*
@@ -41,6 +42,8 @@ export type PlanInput = {
   offered: readonly TurnToolName[];
   /** Whether a free tool has anything to serve this turn (a Skill catalog, a readable library); absent: yes. */
   freeReady?: Partial<Record<'read_source' | 'load_skill', boolean>>;
+  /** INTEGRATION-SHOTVIVA: whether this account may make images this turn; absent: yes. The reason trims both image tools. */
+  imagesReady?: true | 'not_entitled' | 'not_linked' | 'disabled';
   /** Workspace results bigger than the free reserve: kept only when they fit, and own posts raise the read limit (the old path's 5). */
   source?: { strategyBytes?: number; posts?: { bytes: number; calls: number } };
   /** Bytes the turn needs without any tool result (instructions, current message, tool definitions), and its input ceiling. */
@@ -100,6 +103,18 @@ export async function planTurnTools(input: PlanInput): Promise<{ plan: ToolPlan;
     freeTools += name === 'load_skill' ? LOAD_SKILL_CALLS : readCalls;
   }
   if (available.some(name => name === 'read_source' || name === 'load_skill')) used += FREE_RESULT_RESERVE_BYTES;
+  // INTEGRATION-SHOTVIVA: both image tools or neither; their results are short (a template list, a status).
+  const images = IMAGE_TOOL_NAMES.filter(name => offered.includes(name));
+  if (images.length) {
+    const ready = input.imagesReady ?? true;
+    const reason: TrimReason | null = ready !== true ? ready : fits(IMAGE_RESULT_RESERVE_BYTES) ? null : 'capacity';
+    for (const name of images) {
+      if (reason) { trim(name, reason); continue; }
+      available.push(name);
+      freeTools += name === 'generate_image' ? GENERATE_IMAGE_CALLS : LIST_IMAGE_TEMPLATES_CALLS;
+    }
+    if (!reason) used += IMAGE_RESULT_RESERVE_BYTES;
+  }
   const sourceRoom = { strategy: false, posts: false };
   if (postsFit && available.includes('read_source')) { used += input.source!.posts!.bytes; sourceRoom.posts = true; }
   // read_skill_file reads the turn's frozen Skill package from the process cache: no row, no model call of its own (2.5.3).

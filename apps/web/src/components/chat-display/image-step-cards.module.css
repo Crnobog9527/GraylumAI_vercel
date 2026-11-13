@@ -1,0 +1,10 @@
+.cards { display: flex; flex-direction: column; gap: 8px; margin: 8px 0; }
+.card { max-width: 420px; border: 1px solid var(--border-primary, #e5e5e5); border-radius: 12px; overflow: hidden;
+  background: var(--gl-surface, #fff); margin: 0; font-size: 13px; color: var(--text-secondary, #555); }
+.card[data-image-card="notice"], .card[data-image-card="loading"] { padding: 12px 14px; }
+.image { display: block; width: 100%; height: auto; background: var(--bg-tertiary, #f4f4f4); }
+.caption { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; padding: 8px 12px; font-size: 12px; }
+.caption a, .action { color: var(--color-primary, #1f6feb); text-decoration: none; font-weight: 500; }
+.caption a:hover, .action:hover { text-decoration: underline; }
+.text { margin: 0 0 6px; line-height: 1.5; }
+.action { display: inline-block; }

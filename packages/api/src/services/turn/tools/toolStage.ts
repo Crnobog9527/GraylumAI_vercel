@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { GENERAL_RESEARCH_TOOLS, POSITIONING_RESEARCH_TOOLS } from '../../research/tools/names';
 import { COACH_REVIEW_ID } from './coachReview';
-import type { StepEvent, StepKind, StepState } from '../sse';
+import { IMAGE_STEP_REASONS, type ImageStepReason, type StepEvent, type StepKind, type StepState } from '../sse';
 import type { ToolStatus } from '../../research/tools/envelope';
 
 /*
@@ -39,6 +39,7 @@ export function stepStart(name: string, args: Record<string, unknown>, skillName
   }
   // The method's own file (the mentor's references) is part of reading the method.
   if (name === 'read_skill_file') return { tool: 'load_skill' };
+  if (name === 'generate_image') return { tool: 'image' };
   return { tool: 'other' };
 }
 
@@ -59,10 +60,24 @@ const NO_ACCOUNT = new Set(['no_brand', 'not_connected']);
 /** An unavailable read whose reason is a limit of this reply, not a broken source. */
 const LIMIT_REASONS = new Set(['read_limit', 'read_room', 'TOOL_UNAVAILABLE_THIS_TURN', 'SKILL_FILE_NOT_DECLARED']);
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** Not made because it was not available to this account this reply (not an error of the image itself). */
+const IMAGE_SKIPPED: ReadonlySet<string> = new Set(['not_linked', 'membership_required', 'unavailable']);
+/** An image's end (imageTools.ts imageToolResult): made, still being made, or not made with a reason. */
+function imageEnd(body: Record<string, unknown> | null): Pick<StepEvent, 'state' | 'reason' | 'job'> {
+  const job = typeof body?.jobId === 'string' && UUID.test(body.jobId) ? { job: body.jobId } : {};
+  if (body?.status === 'succeeded') return { state: 'done', ...job };
+  if (body?.status === 'running') return { state: 'done', reason: 'running', ...job };
+  const code = typeof body?.code === 'string' && (IMAGE_STEP_REASONS as readonly string[]).includes(body.code)
+    ? body.code as ImageStepReason : 'unavailable';
+  return { state: IMAGE_SKIPPED.has(code) ? 'skipped' : 'failed', reason: code, ...job };
+}
+
 /** How a tool's result ended its step. A thrown error is the caller's `failed`. */
-export function stepEnd(tool: StepKind, result: string): Pick<StepEvent, 'state' | 'count' | 'reason'> {
+export function stepEnd(tool: StepKind, result: string): Pick<StepEvent, 'state' | 'count' | 'reason' | 'job'> {
   let parsed: unknown;
   try { parsed = JSON.parse(result); } catch { parsed = null; }
+  if (tool === 'image') return imageEnd(parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null);
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     // A Skill's refusal and the trimmed-tool answer are plain text.
     return /cannot be loaded|cannot be used in this reply/.test(result) ? { state: 'skipped' } : { state: 'done' };
@@ -90,7 +105,8 @@ export function savedSteps(events: Iterable<StepEvent>) {
   const first = [...events].slice(0, 16);
   const build = (names: boolean) => first.map(event => ({ id: event.id, tool: event.tool, state: event.state === 'running' ? 'failed' : event.state,
     ...(names && event.label ? { label: Array.from(event.label).slice(0, SAVED_LABEL_CHARS).join('') } : {}),
-    ...(event.count !== undefined ? { count: event.count } : {}), ...(event.reason ? { reason: event.reason } : {}) }));
+    ...(event.count !== undefined ? { count: event.count } : {}), ...(event.reason ? { reason: event.reason } : {}),
+    ...(event.job ? { job: event.job } : {}) }));
   // The column holds at most 4096 bytes (turn_chat_steps_apply refuses the whole list above it): names are the only long part, so drop
   // them before dropping the list.
   const kept = build(true);

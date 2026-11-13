@@ -18,7 +18,7 @@ export const resumeRead = z.object({ kind: z.string(),
 export type ResumeRead = z.infer<typeof resumeRead>;
 
 /** Tools that run without a receipt (no row, no cost): a request for one is never "waiting for its result" at a pause. */
-const FREE_TOOLS = new Set(['load_skill', 'read_source', 'read_skill_file', 'ask_question']);
+const FREE_TOOLS = new Set(['load_skill', 'read_source', 'read_skill_file', 'ask_question', 'list_image_templates', 'generate_image']);
 const requestedPaidTool = (completion: string): boolean => {
   try {
     const calls = (JSON.parse(completion) as { choices?: Array<{ message?: { tool_calls?: Array<{ function?: { name?: string } }> } }> })

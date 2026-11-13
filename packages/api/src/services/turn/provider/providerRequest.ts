@@ -6,7 +6,7 @@ import {openRouterBound} from './openRouterPolicy';
 import type {frozenCallPolicy} from './frozenRun';
 import {normalizeOpenRouterHistory} from './openRouterHistory';
 import {matchesFrozenReasoning,reasoningPolicy,type ReasoningPolicy} from '../admission/reasoningPolicy';
-import {AGENT_TOOL_NAMES,FREE_CHAT_TOOL_NAMES,SOURCE_TOOL_NAMES} from '../agent/agentTools';
+import {AGENT_TOOL_NAMES,FREE_CHAT_IMAGE_TOOL_NAMES,FREE_CHAT_TOOL_NAMES,SOURCE_TOOL_NAMES} from '../agent/agentTools';
 
 /** The request formats a frozen Runtime context may carry. */
 export const PROVIDER_REQUEST_FORMATS=['serial-tools-v1','serial-tools-v2','serial-tools-v3-stream',
@@ -46,6 +46,7 @@ type FrozenCallPolicy=z.infer<typeof frozenCallPolicy>;
 export type RequestContext={providerRequestFormat?:ProviderRequestFormat;textStream?:string;tools:readonly string[];workspaceContext?:boolean;
  hostTurnContext?:{opening:boolean};
  libraryReferences?:readonly unknown[];libraryRetrieval?:boolean;research?:{freeChat?:string};skillCatalog?:readonly unknown[];
+ imageGeneration?:boolean;
  promptCache?:PromptCachePolicy;network?:string;reasoning?:ReasoningPolicy;attachedOrganizer?:{reasoning?:ReasoningPolicy}};
 
 /** Fail closed for reasoning attached to an older, unmarked request format. */
@@ -77,7 +78,9 @@ export function openRouterRequestBody(request:string,options:{context:RequestCon
  // CHAT-AUTO-CONTEXT C: a v6 free chat that froze research tools may also use exactly the ones its context lists.
  const freeChatResearch=format===FREE_CHAT_REQUEST_FORMAT&&Boolean(context.research?.freeChat);
  // CONTENT-CONVERSATION-DRIVEN: load_skill only where admission froze a Skill catalog.
+ // INTEGRATION-SHOTVIVA: the image tools only in a v6 free chat whose admission froze imageGeneration.
  const olderToolAllowed=(name:string)=>name==='read_source'?ownedRead:name==='load_skill'?Boolean(context.skillCatalog?.length):
+  FREE_CHAT_IMAGE_TOOL_NAMES.has(name)?format===FREE_CHAT_REQUEST_FORMAT&&context.imageGeneration===true:
   freeChatResearch&&FREE_CHAT_TOOL_NAMES.has(name);
  const toolsDenied=format===AGENT_TURN_REQUEST_FORMAT
   ?context.tools.some(name=>!AGENT_TOOL_NAMES.has(name))||Boolean(context.workspaceContext)||

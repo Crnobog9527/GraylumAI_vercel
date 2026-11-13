@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
+import { IMAGE_STEP_REASONS } from './sse';
 import type { TurnClients } from './db';
 
 /*
@@ -20,9 +21,10 @@ const turnView = z.object({
     /** The request a resumed turn continues. */ rootRequestId: z.string().uuid().nullable().optional(),
     /** The steps the reply showed while it was written (turn_chat_steps_apply); absent for a reply written before they were kept. Steps of
      *  another shape are left out, never the whole conversation. */
-    steps: z.array(z.object({ id: z.string().max(8), tool: z.enum(['load_skill', 'research', 'read_source', 'coach_review', 'other']),
+    steps: z.array(z.object({ id: z.string().max(8), tool: z.enum(['load_skill', 'research', 'read_source', 'coach_review', 'image', 'other']),
       state: z.enum(['done', 'failed', 'skipped']), label: z.string().max(80).optional(), count: z.number().int().min(0).optional(),
-      reason: z.literal('no_brand').optional() })).nullable().optional().catch(null) })),
+      reason: z.enum(['no_brand', ...IMAGE_STEP_REASONS]).optional(), job: z.string().uuid().optional() }))
+      .nullable().optional().catch(null) })),
   // The paid tool calls behind these replies, for the work rows after a reload. Absent until migration 0441.
   calls: z.array(z.object({ turnId: z.number().int(), seq: z.number().int(), toolName: z.string().nullable(), status: z.string(),
     usage: z.unknown(), q: z.unknown(), multiplier: z.unknown(), arguments: z.string().nullable() })).default([]),

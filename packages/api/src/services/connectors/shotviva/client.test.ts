@@ -65,6 +65,31 @@ describe('Shotviva partner client', () => {
   });
 });
 
+describe('INTEGRATION-SHOTVIVA PR B: templates, generate and jobs', () => {
+  const JOB = '00000000-0000-4000-8000-0000000000bb';
+  it('generate sends the idempotency key and the account, with its own timeout', async () => {
+    const send = reply(200, { job_id: JOB, status: 'succeeded', image_url: 'https://abc.r2.cloudflarestorage.com/x', credits_charged: 2,
+      credits_remaining: 8, free_credits_remaining: 0 });
+    const timeout = vi.spyOn(AbortSignal, 'timeout');
+    await client(send).generate(ACCOUNT, { template_id: 'freeform', inputs: { copy: { prompt: 'a cup' } } },
+      { idempotencyKey: 'graylum:s:call-1:abc', timeoutMs: 120_000 });
+    const [url, init] = send.mock.calls[0] as unknown as [URL, RequestInit];
+    expect(url.pathname).toBe('/api/partner/generate');
+    expect(init.headers).toMatchObject({ 'Idempotency-Key': 'graylum:s:call-1:abc', 'X-Shotviva-Account': ACCOUNT });
+    expect(timeout).toHaveBeenCalledWith(120_000);
+    timeout.mockRestore();
+  });
+
+  it('a failed job\'s error carries its job id; a job id is put in the path safely', async () => {
+    const failed = await failure(client(reply(500, { code: 'generation_failed', message: 'x', job_id: JOB, refunded: true }))
+      .generate(ACCOUNT, { template_id: 'freeform' }, { idempotencyKey: 'k', timeoutMs: 1000 }));
+    expect([failed?.code, failed?.jobId]).toEqual(['generation_failed', JOB]);
+    const send = reply(404, { code: 'not_found', message: 'x' });
+    await failure(client(send).job(ACCOUNT, '../account'));
+    expect((send.mock.calls[0] as unknown as [URL])[0].pathname).toBe('/api/partner/jobs/..%2Faccount');
+  });
+});
+
 describe('shotvivaPageUrl (the top-up link the page opens)', () => {
   it('only https on Shotviva\'s own domain or a subdomain of it', () => {
     const origin = 'https://shotviva.com';

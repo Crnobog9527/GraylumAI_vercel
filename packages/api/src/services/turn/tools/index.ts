@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { TurnReplay } from '../resume';
+import { IMAGE_TOOL_NAMES, imageTools, type ImageToolCalls } from './imageTools';
 import type { CanonicalAccount } from '../../research/tools/accountLinks';
 import { GENERAL_RESEARCH_TOOLS } from '../../research/tools/names';
 import { FREE_CHAT_RESEARCH_INSTRUCTIONS } from '../research/freeChatResearch';
@@ -46,6 +47,8 @@ export type TurnToolsInput = {
   accounts?: { benchmark: readonly CanonicalAccount[]; currentMessage: string };
   skills?: PreparedSkills; skillFiles?: PreparedSkillFiles; readSource?: SourceReader; sourceDescription?: string;
   onCall?: ResearchToolsInput['onCall'];
+  /** INTEGRATION-SHOTVIVA: the account's image calls (absent: the image tools answer unavailable). */
+  images?: ImageToolCalls;
 };
 
 /** The extra instructions of a turn whose research tools are usable (frozen with the tools, so stable within a session). */
@@ -90,6 +93,14 @@ export function turnTools(input: TurnToolsInput): TurnTools {
     }
     if (name === 'read_skill_file') {
       tools.push(input.skillFiles ? turnSkillFileTool(input.skillFiles) : skillFileTool(async () => TOOL_UNAVAILABLE));
+      continue;
+    }
+    if ((IMAGE_TOOL_NAMES as readonly string[]).includes(name)) {
+      // Built once for the pair, in offer order (list_image_templates, generate_image).
+      if (name === IMAGE_TOOL_NAMES[0] || !plan.offered.includes(IMAGE_TOOL_NAMES[0])) {
+        const pair = imageTools({ usable, calls: input.images, onCall: () => { freeCalls++; } });
+        tools.push(...pair.filter(tool => plan.offered.includes(tool.name as never)));
+      }
       continue;
     }
     // read_source

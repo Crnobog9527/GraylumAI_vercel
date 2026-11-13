@@ -141,10 +141,10 @@ const admit = async () => ({ ok: true as const });
 type NewWork = Parameters<typeof runChatTurn>[0]['newWork'];
 async function turn(f: { actor: string; session: string }, transport: typeof fetch, vendors: VendorCalls, library = false,
   newWork: NewWork = { message: admit, calls: admit }, text = 'How should a coffee shop position itself?', resumeOf?: number,
-  workspace?: ChatToolDeps['workspace']) {
+  workspace?: ChatToolDeps['workspace'], images?: ChatToolDeps['images']) {
   const { admin, calls } = countingAdmin(), events: TurnEvent[] = [];
   const deps = { admin, clients: turnClients(admin), slots, transport, gate: { classify: allowGate }, newWork,
-    tools: { readKey: async () => 'SYNTHETIC_VENDOR_KEY', vendors, library, ...(workspace ? { workspace } : {}) } };
+    tools: { readKey: async () => 'SYNTHETIC_VENDOR_KEY', vendors, library, ...(workspace ? { workspace } : {}), ...(images ? { images } : {}) } };
   const ids = { actorId: f.actor, sessionId: f.session, requestId: randomUUID() };
   await withCatalogRequest(() => resumeOf ? runResumedTurn(deps, { ...ids, resumeOf }, e => events.push(e))
     : runChatTurn(deps, { ...ids, text }, e => events.push(e)));
@@ -582,4 +582,67 @@ it('RUNTIME: TURN-STEPS: a search shows its steps, and after the close the steps
   expect(await own([{ id: '1', tool: 'other', state: 'done' }])).toBe(false);
   expect((await db.query('select steps from turns where actor_id=$1 and id=$2', [second.actor, plain.turnId])).rows[0].steps)
     .toEqual([{ id: '1', tool: 'load_skill', state: 'skipped', label: 'Hooks' }]);
+});
+
+it('RUNTIME: INTEGRATION-SHOTVIVA: an image is made through the linked account as a free tool, shown and kept as an image step', async () => {
+  const f = await setup(), bodies: string[] = [];
+  const job = randomUUID();
+  const generate = vi.fn(async () => ({ status: 'succeeded' as const, jobId: job, imageUrl: 'https://cdn.shotviva.test/signed/a.webp',
+    viewUrl: `https://shotviva.test/photos/${job}`, creditsCharged: 2, creditsRemaining: 8, freeCreditsRemaining: 0 }));
+  const images: ChatToolDeps['images'] = { ready: async () => true,
+    calls: (_actor, sessionId) => ({ sessionId, listTemplates: vi.fn(), generate }) };
+  const out = await turn(f, searchingModel(bodies, { name: 'generate_image', args: { template_id: 'freeform', prompt: 'a red cup' } }),
+    suppliers(vi.fn()), false, undefined, 'Draw a red cup', undefined, undefined, images);
+  const result = out.events.at(-1) as Extract<TurnEvent, { type: 'result' }>;
+  expect(result.type).toBe('result');
+  const opened = out.events[0] as Extract<TurnEvent, { type: 'opened' }>;
+  expect(opened.tools?.available).toEqual(expect.arrayContaining(['list_image_templates', 'generate_image']));
+  // Shotviva was asked once, under a key bound to this session, this call and this request (a resume asks for the same job).
+  expect(generate).toHaveBeenCalledTimes(1);
+  expect((generate.mock.calls[0] as unknown as [{ idempotencyKey: string; templateId: string; copy: unknown }])[0])
+    .toMatchObject({ templateId: 'freeform', copy: { prompt: 'a red cup' },
+      idempotencyKey: expect.stringMatching(new RegExp(`^graylum:${f.session}:call-1:[0-9a-f]{24}$`)) });
+  // The model reads the outcome, never the image address; the page gets an image step with the job.
+  expect(bodies[1]).toContain(job);
+  expect(bodies[1]).not.toContain('cdn.shotviva.test');
+  expect(out.events.filter(e => e.type === 'step')).toEqual([
+    { type: 'step', id: '1', tool: 'image', state: 'running' },
+    { type: 'step', id: '1', tool: 'image', state: 'done', job }]);
+  // Free: no tool row, no Graylum charge for the image; kept with the reply.
+  expect((await rows(f.actor)).filter(row => row.call_kind === 'tool')).toEqual([]);
+  expect((await db.query('select steps from turns where actor_id=$1 and id=$2', [f.actor, result.turnId])).rows[0].steps)
+    .toEqual([{ id: '1', tool: 'image', state: 'done', job }]);
+});
+
+it('RUNTIME: INTEGRATION-SHOTVIVA: a free member or an unlinked account gets the image tools trimmed with the reason, Shotviva not asked', async () => {
+  for (const ready of ['not_entitled', 'not_linked'] as const) {
+    const f = await setup();
+    const generate = vi.fn();
+    const out = await turn(f, searchingModel([], { name: 'generate_image', args: { template_id: 'freeform', prompt: 'a cup' } }),
+      suppliers(vi.fn()), false, undefined, 'Draw a cup', undefined, undefined,
+      { ready: async () => ready, calls: (_actor, sessionId) => ({ sessionId, listTemplates: vi.fn(), generate }) });
+    const opened = out.events[0] as Extract<TurnEvent, { type: 'opened' }>;
+    expect(opened.tools?.trimmed).toEqual(expect.arrayContaining([{ name: 'generate_image', reason: ready },
+      { name: 'list_image_templates', reason: ready }]));
+    expect(generate).not.toHaveBeenCalled();
+  }
+});
+
+it('RUNTIME: INTEGRATION-SHOTVIVA: turn_chat_steps_apply keeps an image step with its job or reason, and nothing else', async () => {
+  const f = await setup();
+  const fresh = await turn(f, async () => respond('gen-img-steps', frame('gen-img-steps', { choices: [{ index: 0, delta: { role: 'assistant',
+    content: 'Plain.' }, finish_reason: null }] }) + frame('gen-img-steps', { choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] })
+    + usage('gen-img-steps')), suppliers(vi.fn()));
+  const plain = fresh.events.at(-1) as Extract<TurnEvent, { type: 'result' }>;
+  const own = async (steps: unknown) => (await db.query('select turn_chat_steps_apply($1,$2,$3) v', [f.actor, plain.turnId, JSON.stringify(steps)])).rows[0].v;
+  const job = randomUUID();
+  for (const bad of [[{ id: '1', tool: 'research', state: 'done', job }], [{ id: '1', tool: 'image', state: 'done', job: 'not-a-uuid' }],
+    [{ id: '1', tool: 'image', state: 'done', job: 'https://cdn.shotviva.test/a.webp' }],
+    [{ id: '1', tool: 'research', state: 'failed', reason: 'quota_exhausted' }], [{ id: '1', tool: 'image', state: 'failed', reason: 'other' }],
+    [{ id: '1', tool: 'image', state: 'done', imageUrl: 'https://cdn.shotviva.test/a.webp' }]])
+    expect(await own(bad), JSON.stringify(bad)).toBe(false);
+  const kept = [{ id: '1', tool: 'image', state: 'done', job }, { id: '2', tool: 'image', state: 'failed', reason: 'IDENTITY_SWAP_REFUSED' },
+    { id: '3', tool: 'image', state: 'done', reason: 'running' }];
+  expect(await own(kept)).toBe(true);
+  expect((await db.query('select steps from turns where actor_id=$1 and id=$2', [f.actor, plain.turnId])).rows[0].steps).toEqual(kept);
 });

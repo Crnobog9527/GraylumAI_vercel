@@ -149,3 +149,33 @@ describe('a free chat\'s tools from the route\'s dependencies (CORE-PATH-V2 V2-6
     expect(broken.plan.available).toContain('load_skill');
   });
 });
+
+describe('INTEGRATION-SHOTVIVA: the image tools of a free chat', () => {
+  const images = (ready: true | 'not_entitled' | 'not_linked' | 'disabled', generate = vi.fn()) => ({ ready: vi.fn(async () => ready),
+    calls: vi.fn((_actor: string, session: string) => ({ sessionId: session, listTemplates: vi.fn(), generate })) });
+
+  it('offered only where the deployment has the connector; the same definitions whether or not this account may use them', async () => {
+    expect((await prepare({ skills })).plan.offered).not.toContain('generate_image');
+    const usable = await prepare({ skills, images: images(true) });
+    const free = await prepare({ skills, images: images('not_entitled') });
+    expect(usable.plan.offered).toEqual(free.plan.offered);
+    expect(usable.plan.offered).toEqual(expect.arrayContaining(['list_image_templates', 'generate_image']));
+    expect(usable.context.imageGeneration).toBe(true);
+    expect(usable.definitionBytes).toBe(free.definitionBytes);
+    expect(usable.sharedInstructions(false)).toBe(free.sharedInstructions(false));
+    expect(usable.plan.available).toContain('generate_image');
+    expect(free.plan.trimmed).toContainEqual({ name: 'generate_image', reason: 'not_entitled' });
+  });
+
+  it('builds the image tools bound to this account and session; a failed readiness check trims them', async () => {
+    const generate = vi.fn(async () => ({ status: 'failed' as const, code: 'quota_exhausted' as const, topUpUrl: null, jobId: null, refunded: false }));
+    const deps = images(true, generate);
+    const setup = await prepare({ skills, images: deps });
+    const built = await build(setup, false);
+    const tool = built.tools.find(item => item.name === 'generate_image')!;
+    expect(JSON.parse(await tool.execute({ template_id: 'freeform', prompt: 'a cup' }, 'call-1'))).toMatchObject({ code: 'quota_exhausted' });
+    expect(deps.calls).toHaveBeenCalledWith(actorId, sessionId);
+    const broken = await prepare({ skills, images: { ready: vi.fn(async () => { throw new Error('down'); }), calls: vi.fn() } });
+    expect(broken.plan.trimmed).toContainEqual({ name: 'generate_image', reason: 'disabled' });
+  });
+});

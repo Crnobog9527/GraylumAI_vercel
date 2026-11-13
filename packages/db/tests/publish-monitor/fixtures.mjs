@@ -33,14 +33,15 @@ export const scheduleMigrationPath = () => `packages/db/migrations/${readdirSync
 // Every later publish-monitor migration after `from`, in order, so a reapplication check replays the chain
 // that really redefines its functions (MAINT-P1: the hand-written list had gone stale once CI ran this suite).
 // Also the cross-domain migration that rewrote the publish-job refusals to PT409 (its name is not publish_monitor_*), and the turn
-// steps history (0507), which redefines turn_close after the publish-monitor screenshot migration (0503) and so must replay after it.
+// steps history (0507), which redefines turn_close after the publish-monitor screenshot migration (0503) and so must replay after it,
+// and INTEGRATION-SHOTVIVA's image steps, which redefines 0507's turn_chat_steps_apply and so must replay after that.
 // A migration that still names an object batch F drops (the old run tables and functions) cannot be replayed on the finished database
 // (V2-12 F); the ones that only mention them in a comment still can.
 const OLD_OBJECTS = /^(?!\s*--).*\b(runtime_executions|bill2_prepare|bill2_runs|bill2_calls|bill2_claim|bill2_close|bill2_receipts|runtime_tool_calls|runtime_session_history|runtime_admit\w*|runtime_cancel|report_fees|fusion_billing_groups|fusion_review_fees)\b/m;
 const REFUSALS = /^\d{4}_refusals_no_postgrest_retry\.sql$/; // replays without its content_erasure_confirm copy (replaySql)
 const namesDroppedPrepare = file => !REFUSALS.test(file) && OLD_OBJECTS.test(readFileSync(resolve(import.meta.dirname, '../../migrations', file), 'utf8'));
 export const laterRedefinitions = from => readdirSync(resolve(import.meta.dirname, '../../migrations'))
-  .filter(file => /^\d{4}_(?:publish_monitor.*|turn_steps_history|mentor_turn_steps_history|refusals_no_postgrest_retry)\.sql$/.test(file) && file.slice(0, 4) > from && !namesDroppedPrepare(file)).sort()
+  .filter(file => /^\d{4}_(?:publish_monitor.*|turn_steps_history|mentor_turn_steps_history|shotviva_image_steps|refusals_no_postgrest_retry)\.sql$/.test(file) && file.slice(0, 4) > from && !namesDroppedPrepare(file)).sort()
   .map(file => `packages/db/migrations/${file}`);
 
 // The SQL to replay for one path laterRedefinitions returned.

@@ -142,3 +142,24 @@ describe('CHAT-AUTO-CONTEXT C: free chat research tools',()=>{
   expect(()=>body(requestBody,context,'ordinary')).toThrow('RUNTIME_REAL_TOOLS_DISABLED');
  });
 });
+
+describe('INTEGRATION-SHOTVIVA: the image tools',()=>{
+ const free=(patch:Partial<RequestContext>={}):RequestContext=>({...older('serial-tools-v6-reasoning'),libraryRetrieval:true,
+  tools:['read_source','list_image_templates','generate_image'],imageGeneration:true,...patch});
+ const request=(names:string[])=>JSON.stringify({model:'m/x',messages:[{content:'I',role:'system'},{role:'user',content:'hello'}],
+  tools:names.map(tool),max_tokens:100,stream:false,store:false,reasoning_effort:'none'});
+ it('sends them where the free chat froze imageGeneration (with or without research)',()=>{
+  const sent=JSON.parse(body(request(['read_source','list_image_templates','generate_image']),free(),'ordinary'));
+  expect(sent.tools.map((t:{function:{name:string}})=>t.function.name)).toEqual(['read_source','list_image_templates','generate_image']);
+ });
+ it.each([
+  ['image tools without the frozen marker',free({imageGeneration:undefined})],
+  ['image tools with research frozen but not images',free({imageGeneration:undefined,research:{freeChat:'free-chat-v1'}})],
+  ['image tools on another format',free({providerRequestFormat:'serial-tools-v4-stream'})],
+ ])('refuses %s',(_case,context)=>{
+  expect(()=>body(request(['read_source','generate_image']),context,'ordinary')).toThrow('RUNTIME_REAL_TOOLS_DISABLED');
+ });
+ it('refuses an image tool the context did not list',()=>{
+  expect(()=>body(request(['read_source','generate_image']),free({tools:['read_source']}),'ordinary')).toThrow('RUNTIME_REAL_TOOLS_DISABLED');
+ });
+});

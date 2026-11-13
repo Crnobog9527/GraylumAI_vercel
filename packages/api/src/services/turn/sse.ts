@@ -10,14 +10,20 @@ import type { ToolAvailability } from './tools/types';
  * a fixed code only; database and provider text never reach the client. A compare streams its columns; a jury answers once
  * (`review`, or `error`), because its groups run on the server after the response.
  */
-export type StepKind = 'load_skill' | 'research' | 'read_source' | 'coach_review' | 'other';
+export type StepKind = 'load_skill' | 'research' | 'read_source' | 'coach_review' | 'image' | 'other';
+/** INTEGRATION-SHOTVIVA: why an image was not made, or that it is still being made (the card says it in plain words). */
+export const IMAGE_STEP_REASONS = ['running', 'not_linked', 'membership_required', 'quota_exhausted', 'IDENTITY_SWAP_REFUSED',
+  'content_rejected', 'invalid_input', 'rate_limited', 'generation_failed', 'link_revoked', 'unavailable'] as const;
+export type ImageStepReason = typeof IMAGE_STEP_REASONS[number];
 /** running → done; or failed (the tool did not work) / skipped (it was not available this reply, which is not an error). */
 export type StepState = 'running' | 'done' | 'failed' | 'skipped';
 export type StepEvent = { type: 'step'; id: string; tool: StepKind; state: StepState;
   /** A Skill's public name. */ label?: string;
   /** A search's first words (about 20 characters), or a page's host; never the whole question. */ detail?: string;
   /** How many results came back, when the result says. */ count?: number;
-  /** Why a step was not used, when the page says it in its own words: the account has no brand connected yet. */ reason?: 'no_brand' };
+  /** Why a step was not used, when the page says it in its own words: the account has no brand connected yet; for an image, why it
+   *  was not made (or that it is still being made). */ reason?: 'no_brand' | ImageStepReason;
+  /** An image step: the Shotviva job, for the card to show it (never the signed image address, which expires). */ job?: string };
 export type TurnEvent =
   // tools: what this turn can use and what was trimmed and why (2.7, V2-6); absent for a turn without tools.
   | { type: 'opened'; turnId: number; reservedCredits: number; replay: boolean; tools?: ToolAvailability;
