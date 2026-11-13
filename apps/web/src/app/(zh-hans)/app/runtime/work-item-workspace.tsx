@@ -2,7 +2,7 @@
 'use client';
 import { TurnStepList } from '@/components/chat-display/turn-step-list';
 import Link from 'next/link';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { CHAT_ACTION, ChatInlineNotice, ChatNoticeList } from '@/components/chat/ChatInlineNotice';
 import { AgentWorkStatus } from '@/components/chat-display/agent-work-status';
 import {
@@ -24,6 +24,7 @@ import { RUNTIME_CHOICES_STALE_MS } from '@/lib/runtime-choices';
 import { trpc } from '@/trpc/client';
 import { clearForSend, forgetPending, markPendingRestored, openingDraftWithReferences, readPending, rememberPending, requestIdFor } from './send-input';
 import { TURN_CONTINUE, TURN_PAUSED_NOTICE } from './turn-notices';
+import { UNANSWERED_NOTE, unansweredByPlace } from './unanswered-turns';
 import { workRowsOf } from './turn-work-rows';
 import { useStoredSendCleanup } from './use-stored-send-cleanup';
 import { useTurnChat } from './use-turn-chat';
@@ -172,6 +173,12 @@ export function WorkItemWorkspace({ sessionId, workItemId }: { sessionId: string
   const messages = chat.view?.messages ?? [];
   const replies = messages.filter(m => m.role === 'assistant');
   const asked = (turnId: number | null) => messages.find(m => m.role === 'user' && m.turnId === turnId)?.content ?? null;
+  // VOICE-ABORT-FIX: a question whose round was voided (no saved reply) still shows where it was asked, as in the free chat.
+  const unanswered = unansweredByPlace(messages);
+  const unansweredAt = (place: number) => (unanswered.get(place) ?? []).filter(m => !m.content.startsWith(WORK_CONTINUE)).map(m =>
+    <RuntimeTurnView key={'unanswered-' + m.seq} userText={shownRuntimeInput(m.content)}>
+      <ChatInlineNotice tone="status">{UNANSWERED_NOTE}</ChatInlineNotice>
+    </RuntimeTurnView>);
   const signature = transcriptSignature(messages.map(m => m.seq).join('|'), outgoing ? { text: outgoing } : null);
   useEffect(() => {
     const node = scrollArea.current;
@@ -281,15 +288,15 @@ export function WorkItemWorkspace({ sessionId, workItemId }: { sessionId: string
             {workItem && contentType === 'unknown' && (
               <WorkTypeChoice disabled={busy || editPending || typePending} onChoose={value => void setType(value)} />
             )}
-            {replies.map(reply => {
+            {replies.map((reply, index) => {
               const question = asked(reply.turnId),
                 canSave = savable(question) && reply.turnId !== null && Boolean(reply.content),
                 text = displayReply(question, reply.content);
               const saved: Partial<Record<SaveKind, number>> = {};
               for (const v of versions) if (v.turnId === reply.turnId && reply.turnId !== null) saved[v.kind as SaveKind] = v.version;
-              return (
+              return (<Fragment key={reply.seq}>
+                {unansweredAt(index)}
                 <RuntimeTurnView
-                  key={reply.seq}
                   userText={question && !question.startsWith(WORK_CONTINUE) ? shownRuntimeInput(question) : null}
                   completed={canSave}
                 >
@@ -306,8 +313,9 @@ export function WorkItemWorkspace({ sessionId, workItemId }: { sessionId: string
                     />
                   )}
                 </RuntimeTurnView>
-              );
+              </Fragment>);
             })}
+            {unansweredAt(replies.length)}
             {showLive && (
               <>
                 {outgoing && <RuntimePendingMessage text={outgoing} sending={chat.sending} />}
