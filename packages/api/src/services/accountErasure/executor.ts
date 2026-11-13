@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { createLibraryErasureAdapter } from '../library/erasure';
 import { chainErasureStorage, createAvatarErasureAdapter } from '../profileAvatar/erasure';
+import { createChatPhotoErasureAdapter } from '../chatPhotos/photos';
 import { expireDataUseConsentAudit } from '../dataUse/consent';
 import { randomUUID } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -87,10 +88,11 @@ async function runOne(client: SupabaseClient, deadline: number, drainDeadline: n
     };
     const host = createAccountErasureHost({
       profileId: claim.profileId, requestId: claim.requestId, client, deadline,
-      // Library documents, then the profile avatar (PROFILE-AVATAR): both must be gone before Auth is deleted.
+      // Library documents, the profile avatar (PROFILE-AVATAR), then the chat photos (kept with their messages, Owner 2026-11-13):
+      // all must be gone before Auth is deleted.
       additionalStorage: chainErasureStorage(
         createLibraryErasureAdapter(client, { profileId: claim.profileId, requestId: claim.requestId, token }),
-        createAvatarErasureAdapter(client)),
+        createAvatarErasureAdapter(client), createChatPhotoErasureAdapter(client)),
       storage: createErasureStorageTransport(client, { boundedPrefix: true }), auth: createErasureAuthAdapter(client, claim.profileId),
       verifyRetainedHistory: proof, verifyQuiescence: proof, deferStorageProof: true, scopedManifest: true, executorToken: token,
     });

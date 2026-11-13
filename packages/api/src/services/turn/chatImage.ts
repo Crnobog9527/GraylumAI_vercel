@@ -4,9 +4,10 @@ import { CHAT_MAX_IMAGES, IMAGE_MAX_DATA_URL_BYTES, IMAGE_MAX_EDGE, measureImage
 /*
  * PUBLISH-MONITOR B2 (Owner 2026-11-03: a back-office screenshot is read by the model itself, as in any mainstream agent): a free chat
  * message may carry up to CHAT_MAX_IMAGES JPEGs, each within LIB-2d's limits (614,400 bytes, 2048 px a side). They go to the model
- * with that message only and are billed as its prompt tokens. Owner 10-27 "截图不长期保留": an image is never written anywhere: not to
- * Storage, not to session_messages (the conversation keeps imageMark(n) and the text), not to turn_call_raw (only the response body is
- * stored), not to a log. Nothing here logs, and no error carries the bytes.
+ * with that message only and are billed as its prompt tokens. Owner 2026-11-13 (replacing 10-27 "截图不长期保留"): the images are kept
+ * with their message as chat photos (services/chatPhotos, a private Storage bucket, deleted with the conversation or the account),
+ * and written nowhere else: not to session_messages (the conversation keeps imageMark(n) and the text), not to turn_call_raw (only
+ * the response body is stored), not to a log. Nothing here logs, and no error carries the bytes.
  */
 export type ChatImage = ImageQuote & { url: string };
 

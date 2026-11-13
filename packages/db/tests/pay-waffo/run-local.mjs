@@ -32,6 +32,7 @@ import { stripeMpWalletRefundCases } from './stripe-mp-wallet-refund.mjs';
 import { stripeTestClockCases } from './stripe-test-clock.mjs';
 import { profileAvatarCases } from './profile-avatar.mjs';
 import { shotvivaConnectorCases } from './shotviva-connector.mjs';
+import { chatPhotosCases } from './chat-photos.mjs';
 import { POSTGRES_IMAGE } from '../v3/images.mjs';
 import { buildFromFiles, installPgCronStub } from '../baseline/build-from-files.mjs';
 
@@ -160,6 +161,7 @@ try {
   cases.push(...await stripeTestClockCases({admin,service,connect}));
   cases.push(...await profileAvatarCases({admin,service,connect}));
   cases.push(...await shotvivaConnectorCases({admin,service,connect}));
+  cases.push(...await chatPhotosCases({admin,service,connect}));
   }
   console.log(JSON.stringify({result:'PASS',replay:report,
     cases:['event-idempotency','event-conflict','test-live-isolation','refund-event-not-payment-dedup',

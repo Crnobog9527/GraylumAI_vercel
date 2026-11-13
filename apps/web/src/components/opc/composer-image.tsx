@@ -6,8 +6,8 @@ import { CHAT_MAX_IMAGES, chatImageFromFile, imageFiles, type ChatImage } from '
 
 /**
  * PUBLISH-MONITOR B2 (Owner 11-03: "和主流 Agent 一样"): screenshots for the next free chat message, added from the composer's "+" menu,
- * dropped on the conversation or pasted into the box. The model reads them with that message only; the conversation keeps "[截图]" and
- * the text, never an image.
+ * dropped on the conversation or pasted into the box. The model reads them with that message; the message text keeps "[截图]", and the
+ * images are kept with the message as chat photos (Owner 2026-11-13), deleted with the conversation or the account.
  */
 export type ChatImages = {
   images: ChatImage[]; busy: boolean; error: string;
@@ -82,7 +82,7 @@ export function ComposerImages({ state, disabled = false }: { state: ChatImages;
         className="absolute -right-1.5 -top-1.5 rounded-full border border-[var(--border-primary)] bg-[var(--bg-primary)] p-0.5"><X size={12}/></button>
     </span>)}
     {state.busy && <span role="status">正在处理图片…</span>}
-    {state.images.length > 0 && !state.busy && <span>图片只随这条消息发给模型，不会保存</span>}
+    {state.images.length > 0 && !state.busy && <span>图片会跟着聊天记录保存，删除对话或注销时一起删除</span>}
     {state.error && <span role="alert" className="text-[var(--text-primary)]">{state.error}</span>}
   </div>;
 }

@@ -88,7 +88,7 @@ export function WorkComposer({value,onChange,onSend,disabled=false,sendDisabled=
  // Counter only near the limit, so ordinary messages stay uncluttered.
  const nearLimit=value.length>=maxLength*0.9;
  const imageHint=images
-  ?`图片（截图、PNG、JPG、WebP，最多 ${CHAT_MAX_IMAGES} 张）只随这条消息发给模型，不会保存；也可以直接拖进对话或粘贴。`:'';
+  ?`图片（截图、PNG、JPG、WebP，最多 ${CHAT_MAX_IMAGES} 张）随这条消息发给模型，并跟着聊天记录保存，删除对话或注销账号时一起删除；也可以直接拖进对话或粘贴。`:'';
  const attached=images?<>{attachment}<ComposerImages state={images} disabled={disabled}/></>:attachment;
  return <>{paywall&&<ReportPaywallDialog scene="coach" minLevel={paywall} onClose={()=>setPaywall(null)}/>}
  <ComposerView rootRef={root} attachment={attached} referenceMenu={referencePicker.menu} menu={menu} disabled={disabled} reading={reading} tools={tools}
