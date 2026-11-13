@@ -99,8 +99,12 @@ const when = (iso: string) => new Date(iso).toLocaleString('zh-CN', { month: 'nu
 export function SessionMinutesPanel({ minutes, title, children }: { minutes: SessionMinutes; title: string; children?: React.ReactNode }) {
   const done = minutes.items.filter(item => item.available && item.body);
   const [latest, ...older] = done;
+  // When a minutes turn starts, the panel comes into view: in a topic window it sits under the editor, out of sight
+  // (staging validation of #2009: a press showed no change).
+  const box = useRef<HTMLElement>(null);
+  useEffect(() => { if (minutes.running) box.current?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' }); }, [minutes.running]);
   if (!minutes.running && !done.length && !minutes.notice && !children) return null;
-  return <section aria-label={title} className="space-y-3 border-b border-[var(--border-primary)] p-4 text-sm">
+  return <section ref={box} aria-label={title} className="space-y-3 border-b border-[var(--border-primary)] p-4 text-sm">
     <header className="flex items-center justify-between gap-2"><h2 className="font-medium">{title}</h2>{children}</header>
     <p className="text-xs text-[var(--text-tertiary)]">点了才整理，按实际用量扣积分；纪要不会写进对话。可以复制或导出 Markdown。</p>
     {minutes.notice && <p role="status" className="text-xs text-[var(--text-warning,#b45309)]">{minutes.notice}</p>}
