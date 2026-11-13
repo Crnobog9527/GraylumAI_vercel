@@ -39,6 +39,7 @@ import { firstSendDone, useFirstSendWatch } from './first-send-watch';
 import workStyles from './runtime-work.module.css';
 import { READ_RETRY } from '@/trpc/read-retry';
 import { QueryNotice } from '@/components/opc/query-notice';
+import { MinutesButton, SessionMinutesPanel, useSessionMinutes } from '@/components/opc/session-minutes';
 
 /*
  * CORE-PATH-V2 V2-10: the free conversation on the turn path (core_path_v2.enabled). Each user message and the reply saved with it
@@ -56,6 +57,9 @@ export function TurnWorkspace({ sessionId }: { sessionId: string }) {
   const chat = useTurnChat(sessionId, () => { void utils.credits.getBalance.invalidate(); void utils.opc.conversations.invalidate(); });
   const [input, setInput] = useState(''), [outgoing, setOutgoing] = useState<string | null>(null);
   const [panelOpen, setPanelOpen] = useState(true), [reveal, setReveal] = useState(0);
+  // CONTENT-CONVERSATION-2: "整理纪要", only when pressed; its panel shows once there are minutes (or one is being written).
+  const minutes = useSessionMinutes(sessionId, () => { void utils.credits.getBalance.invalidate(); });
+  const minutesShown = minutes.running || Boolean(minutes.notice) || minutes.items.some(item => item.available && item.body);
   const scrollArea = useRef<HTMLDivElement>(null), scrollState = useRef({ key: '', follow: true, signature: '' });
   const [skillId, setSkillId] = useState(''), [references, setReferences] = useState<LibraryReference[]>([]);
   const images = useChatImages();
@@ -159,16 +163,22 @@ export function TurnWorkspace({ sessionId }: { sessionId: string }) {
     : chat.notice && !paused ? [{ id: 'turn-notice', tone: 'warning' as const, text: chat.notice.text }]
     : paused ? [{ id: 'turn-paused', tone: 'warning' as const, text: chat.notice?.text ?? TURN_PAUSED_NOTICE,
       actions: [{ label: TURN_CONTINUE, onClick: () => void chat.resume() }] }] : [];
-  const pendingText = outgoing ?? (chat.view?.activeTurn && !paused ? '' : null);
+  // A minutes turn holds the conversation too, but it writes no reply here: no pending reply for it.
+  const pendingText = outgoing ?? (chat.view?.activeTurn && chat.view.activeTurn.kind !== 'minutes' && !paused ? '' : null);
   return <WorkspaceFrame area="chat" revealRight={reveal} rightOpen={panelOpen}
     turnBusy={chat.creditsBusy}
     onToggleRight={() => setPanelOpen(open => !open)}
-    right={results.data?.length ? <SessionResultsPanel sessionId={sessionId} items={results.data}/> : undefined}>
+    right={results.data?.length || minutesShown ? <>
+      <SessionMinutesPanel minutes={minutes} title="纪要"/>
+      {results.data?.length ? <SessionResultsPanel sessionId={sessionId} items={results.data}/> : null}
+    </> : undefined}>
     <main className={`${workStyles.conversation} flex h-full min-h-0 flex-col bg-[var(--bg-primary)] text-[var(--text-primary)]`}
       // PUBLISH-MONITOR B2: screenshots dropped anywhere on the conversation join the next message.
       onDragOver={event => { if (event.dataTransfer.types.includes('Files')) event.preventDefault(); }}
       onDrop={event => { if (!event.dataTransfer.files.length) return; event.preventDefault(); void images.add(event.dataTransfer.files); }}>
-      <RuntimeHeader title="工作对话"/>
+      <RuntimeHeader title="工作对话" action={<MinutesButton minutes={minutes} label="整理纪要"
+        disabled={chat.sending || Boolean(chat.view?.activeTurn && chat.view.activeTurn.kind !== 'minutes') || !chat.view?.messages.length}
+        onStarted={() => { setPanelOpen(true); setReveal(n => n + 1); }}/>}/>
       <div ref={scrollArea} className={workStyles.scrollArea} aria-label="对话记录">
         {!messages.length && !outgoing && <RuntimeEmptyState text="输入一条消息，发送后可刷新查看记录。"/>}
         <section className={workStyles.transcript}>
