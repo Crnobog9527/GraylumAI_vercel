@@ -11,7 +11,7 @@ AS $function$
 DECLARE
   t turns; s runtime_sessions; q numeric; n_total numeric; pending_upper numeric; credits integer; charge integer; h integer;
   v_kind text := p_close_kind; tomb jsonb; next_seq integer; msg jsonb; pending boolean; user_pending boolean;
-  marker timestamptz; kind_result jsonb;
+  marker timestamptz; kind_result jsonb; voice_only boolean;
 BEGIN
   IF p_close_kind NOT IN ('completed','stopped','failed','interrupted','expired','erased') THEN
     RAISE EXCEPTION 'TURN_CLOSE_INVALID' USING ERRCODE='22023';
@@ -68,6 +68,10 @@ BEGIN
   tomb := turn_tombstones(p_actor_id, t.session_id, t.policy);
   IF v_kind IN ('completed','stopped') AND ((tomb->>'sessionTombstoned')::boolean OR (tomb->>'accountErasing')::boolean
     OR (tomb->>'voiceSourceRevoked')::boolean) THEN v_kind := 'erased'; END IF;
+  -- VOICE-ABORT-FIX (0535): erased only because the writing voice it used was deleted (the conversation and the account are
+  -- still there). Only this round's reply is void: the user's own message is kept below, so the conversation is not emptied.
+  voice_only := v_kind = 'erased' AND t.session_id IS NOT NULL AND (tomb->>'voiceSourceRevoked')::boolean
+    AND NOT (tomb->>'sessionTombstoned')::boolean AND NOT (tomb->>'accountErasing')::boolean;
   -- The per-kind hook: what a kind keeps from its result (a draft, a report, a verdict) is written in the same transaction as the
   -- close, by that kind's own function (e.g. turn_mentor_apply(t, v_kind, p_kind_result)), one branch per kind:
   --   IF t.kind = '<kind>' THEN PERFORM public.turn_<kind>_apply(...); ELSE ... END IF;
@@ -172,9 +176,10 @@ BEGIN
   IF t.state = 'paused' THEN DELETE FROM session_messages WHERE session_id = t.session_id AND turn_id = p_turn_id AND NOT visible; END IF;
 
   -- The messages of a delivered turn, appended in order.
-  IF v_kind IN ('completed','stopped') AND t.session_id IS NOT NULL AND jsonb_typeof(p_messages) = 'array' THEN
+  -- A round voided by a deleted voice keeps only the user's message (voice_only above).
+  IF (v_kind IN ('completed','stopped') OR voice_only) AND t.session_id IS NOT NULL AND jsonb_typeof(p_messages) = 'array' THEN
     SELECT coalesce(max(seq), 0) INTO next_seq FROM session_messages WHERE session_id = t.session_id;
-    FOR msg IN SELECT value FROM jsonb_array_elements(p_messages) LOOP
+    FOR msg IN SELECT value FROM jsonb_array_elements(p_messages) WHERE NOT voice_only OR value->>'role' = 'user' LOOP
       next_seq := next_seq + 1;
       INSERT INTO session_messages (session_id, seq, role, turn_id, content, content_hash)
         VALUES (t.session_id, next_seq, msg->>'role', p_turn_id, msg->>'content', encode(sha256(convert_to(msg->>'content', 'UTF8')), 'hex'));

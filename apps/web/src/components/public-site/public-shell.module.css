@@ -2,7 +2,7 @@
 /*
  * The public shell (PublicShell.tsx): header, footer and canvas of the public pages, with the home page's accepted values
  * (DESIGN.md "Public-page layer"; the numbers are those of preview-j/j.module.css and chrome-j.module.css). Server-rendered,
- * no client JS: the mobile menu is a <details>. `data-tone='dark'` is the transitional tone of the pages whose content is
+ * no client JS for the chrome: the mobile menu is a <details>; the light tone's backdrop is the only client island. `data-tone='dark'` is the transitional tone of the pages whose content is
  * still written for a dark canvas (articles, FAQ, legal, contact); each moves to the light tone when its own content is converted.
  */
 .root {
@@ -45,6 +45,11 @@
   backdrop-filter: saturate(1.4) blur(16px); -webkit-backdrop-filter: saturate(1.4) blur(16px);
 }
 .root[data-tone='dark'] .header { border-bottom-color: var(--ps-line); }
+/* The light tone is the home page's "晨光" look (dawn-l.module.css sets the --j-* values on the root, Owner 2026-11-14): a
+   lighter header over the backdrop's light, the dark gradient pill. The page and the footer sit above the fixed backdrop. */
+.root[data-tone='light'] .header { background: var(--j-header-bg, color-mix(in srgb, var(--ps-canvas) 94%, transparent)); }
+.root > main, .root > .footer, .footerZone { position: relative; z-index: 1; }
+.root[data-tone='light'] ::selection { background: #ffe8a8; color: var(--ps-ink); }
 .bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .brand {
   display: flex; align-items: center; gap: 9px; min-width: 0; color: var(--ps-ink); font-size: 21px; font-weight: 600;
@@ -68,6 +73,9 @@
 }
 .pillDark { background: var(--ps-action); color: var(--ps-action-text); }
 .pillDark:hover { background: var(--ps-action-hover); }
+.root[data-tone='light'] .pillDark { background: var(--j-pill-bg, var(--ps-action)); box-shadow: var(--j-pill-shadow, none); transition: background-color .2s, translate .25s, box-shadow .25s; }
+.root[data-tone='light'] .pillDark:hover { background: var(--j-pill-bg-hover, var(--ps-action-hover)); translate: 0 var(--j-pill-hover-y, 0); }
+@media (prefers-reduced-motion: reduce) { .root[data-tone='light'] .pillDark:hover { translate: none; } }
 .pillLight { border: 1px solid var(--ps-line); background: var(--ps-surface); color: var(--ps-ink); }
 .root[data-tone='dark'] .pillLight { background: transparent; }
 @media (max-width: 420px) { .brand { font-size: 18px; } .pill { min-height: 36px; padding: 0 12px; font-size: 13px; } }
@@ -109,4 +117,3 @@
 .base p { margin: 0; }
 .base a { color: var(--ps-muted); }
 .base a:hover { color: var(--ps-ink); }
-.underline { text-decoration: underline; text-underline-offset: 4px; }

@@ -97,7 +97,8 @@ describe.each(ARTICLES.map(content => [content.path, content] as const))('public
     expect(html).toContain(`>${SITE_CHROME[content.locale].authorLabel}</a>`);
     // The page language is on the document, set by the root layout of the page's section (app/zh-tw for Taiwan
     // pages, app/(zh-hans) for the rest), so the page carries no language wrapper of its own.
-    expect(html).not.toMatch(/lang="zh-H/);
+    // (The header's language menu names each language with its own lang attribute; that is not a wrapper.)
+    expect(html).not.toMatch(/<(?:div|main|article|section)\b[^>]*\blang="zh-H/);
     expect(content.path === '/zh-tw' || content.path.startsWith('/zh-tw/')).toBe(content.locale === 'zh-TW');
     const data = JSON.parse(html.match(/<script type="application\/ld\+json">(.*?)<\/script>/)![1]);
     const faq = data.find((item: { '@type': string }) => item['@type'] === 'FAQPage');
