@@ -1243,3 +1243,64 @@
     animation: none;
   }
 }
+
+/*
+ * A phone (under 640px; Owner 2026-11-12, phone plan A: "把它当成一个原生的网页 APP 界面来做"). This page was laid out for a
+ * narrow screen already (the block for 700px above: the works as cards, one chart to a row, the tabs sliding sideways). What
+ * it lacked beside the other pages of the phone: the page's name large, as on 资料库 and 功能广场; small print large enough
+ * to read; the account chips a thumb's height; and menus and text boxes typed at 16px, so the phone does not zoom the page
+ * in when one is touched. Nothing is added or removed and no word changes; a computer and a tablet see what they saw.
+ */
+@media (max-width: 639px) {
+  .head {
+    align-items: flex-end;
+    padding: 14px 16px 0;
+  }
+  .head h1 {
+    font-size: 26px;
+    font-weight: 700;
+    line-height: 1.2;
+    letter-spacing: -0.03em;
+  }
+  .head span {
+    font-size: 12.5px;
+  }
+  .intro {
+    padding-top: 6px;
+    font-size: 13px;
+    line-height: 1.6;
+  }
+  .sectionHead h2,
+  .subTitle {
+    font-size: 15.5px;
+  }
+  .kpiNote,
+  .metric dt,
+  .stateTag {
+    font-size: 12px;
+  }
+  .page .chip {
+    min-height: 40px;
+    padding: 4px 14px;
+  }
+  .page .select {
+    height: 44px;
+    border-radius: 12px;
+    font-size: 16px;
+  }
+  .page input:not([type='checkbox']):not([type='radio']):not([type='file']),
+  .page textarea {
+    font-size: 16px;
+  }
+  /* The small buttons and boxes of the shared kit (32 and 36px tall on a computer) are a thumb's height here. */
+  .page .postMore {
+    min-height: 40px;
+  }
+  .page .benchmarkForm input,
+  .page .benchmarkForm button,
+  .page .rowActions button,
+  .page .reviewHead button,
+  .page .reviewSideTitle button {
+    min-height: 44px;
+  }
+}
