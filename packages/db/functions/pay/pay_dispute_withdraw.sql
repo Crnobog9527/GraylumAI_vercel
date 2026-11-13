@@ -18,6 +18,8 @@ BEGIN
  SELECT * INTO u FROM profiles WHERE id=(SELECT user_id FROM payment_orders WHERE id=d.order_id) FOR UPDATE;
  SELECT * INTO d FROM payment_disputes WHERE id=p_dispute FOR UPDATE;
  SET CONSTRAINTS pay_dispute_source_sync IMMEDIATE; SET CONSTRAINTS pay_dispute_source_sync DEFERRED;
+ -- CHARGEBACK G1: a dispute the admin confirmed as lost is final; its hold can never be released.
+ IF d.lost_confirmed_at IS NOT NULL THEN RAISE EXCEPTION 'PAY_DISPUTE_LOST_CONFIRMED'; END IF;
  IF d.freeze_state='withdrawn' THEN RETURN jsonb_build_object('duplicate',true,'restored',0); END IF;
  IF d.freeze_state<>'frozen' OR u.id IS NULL THEN RAISE EXCEPTION 'PAY_DISPUTE_NOT_FROZEN'; END IF;
  UPDATE payment_disputes SET freeze_state='withdrawn',withdrawn_by=p_actor,withdrawn_at=clock_timestamp() WHERE id=d.id;

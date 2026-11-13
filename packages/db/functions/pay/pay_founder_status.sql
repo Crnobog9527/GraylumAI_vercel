@@ -22,6 +22,11 @@ BEGIN
    ended_reason:='refunded';
    ended_at:=coalesce((o.metadata->'stripeExternalRefund'->>'refundedAt')::timestamptz,o.updated_at,o.entitlement_start);
   END IF;
+  -- CHARGEBACK G1: a dispute the admin confirmed as lost ends the founder identity at confirmation (seat not returned).
+  IF ended_at IS NULL THEN
+   SELECT min(d.lost_confirmed_at) INTO ended_at FROM payment_disputes d WHERE d.order_id=o.id AND d.lost_confirmed_at IS NOT NULL;
+   IF ended_at IS NOT NULL THEN ended_reason:='dispute_lost'; END IF;
+  END IF;
   -- A card renewal charged after the 7-day window does not restore an identity that already ended.
   -- Wallet renewals are refused by admission after the deadline (0211), so they never form a gap here.
   IF ended_at IS NULL AND prev.id IS NOT NULL AND o.payment_method IN ('card','card_cn')
