@@ -201,8 +201,10 @@ export async function prepareChatTools(input: { admin: SupabaseClient; read: Tur
         ...(imagesOffered && input.tools.images ? { images: input.tools.images.calls(input.actorId, input.sessionId,
           { turnId: calls.turnId, kept: extra.photos ?? null }) } : {}) });
       // A stop raised inside a tool (paused for credits, a tombstone) reaches the turn, not the SDK's error wrapper.
-      const skillNames: ReadonlySet<string> = new Set(allowedSkills(catalog, extra.gated).map(entry => entry.name));
-      const tools = withStepEvents(built.tools, extra.announce, skillNames, extra.onStop);
+      // The step line names a loaded Skill by its display title only (LOAD-SKILL): a Skill without one is shown unnamed.
+      const skillTitles: ReadonlyMap<string, string> = new Map(allowedSkills(catalog, extra.gated)
+        .flatMap(entry => entry.title ? [[entry.name, entry.title] as const] : []));
+      const tools = withStepEvents(built.tools, extra.announce, skillTitles, extra.onStop);
       return { ...built, tools };
     },
   };

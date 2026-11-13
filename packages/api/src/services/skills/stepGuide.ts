@@ -43,6 +43,15 @@ export async function loadStepWork(source: SkillSource, descriptor: PackageDescr
   return manifest && stepWorkOf(manifest, maxGuideBytes);
 }
 /** A3a: the guided positioning Skill starts only from the positioning entry, never from free chat matching. */
+/**
+ * The one rule for what free chat never offers: a package with tasks (a workflow) or the positioning workflow (it runs on the
+ * positioning page). Both the load_skill catalog (turn/skills/skillCatalog.ts) and the composer's manual Skill menu
+ * (skills/choiceSkills.ts) use it, so the menu never lists a Skill a free-chat message would refuse. Unreadable counts as excluded.
+ */
+export async function freeChatExcluded(source: SkillSource, descriptor: PackageDescriptor): Promise<boolean> {
+  if (Object.keys(descriptor.tasks).length) return true;
+  try { return await isPositioningPackage(source, descriptor); } catch { return true; }
+}
 export async function isPositioningPackage(source: SkillSource, descriptor: PackageDescriptor): Promise<boolean> {
   const manifest = await readStepManifest(source, descriptor);
   return Boolean(manifest && isPositioningWorkflow(manifest));

@@ -19,7 +19,12 @@ export const juryEntryHref = (draftId: string) => `/app/positioning/${draftId}?$
 type Account = { projectId: string; platform: string; account: string; strategyDraftId?: string | null };
 type Business = { name?: string | null; accounts: Account[] };
 type Draft = { draftId: string; state?: string; currentVersion?: number };
-export type JuryChoice = { draftId: string; name: string; business: string; review?: MineItem };
+export type JuryChoice = { draftId: string; name: string; business: string; review?: MineItem;
+  /** A new round is being made on top of the confirmed version: the report page offers no review until it is confirmed. */
+  revising?: true };
+
+/** Said in place of the way in for a positioning under revision (staging validation #1545: it was listed with no reason). */
+export const JURY_REVISING_NOTE = '这份定位正在修订，修订完成后才能评审。';
 
 /**
  * The positionings a jury can review: one row per confirmed positioning (a published version, or a draft round on top of
@@ -35,7 +40,8 @@ export function juryChoices(
     const draft = (drafts ?? []).find(item => item.draftId === draftId);
     if (!draftId || seen.has(draftId) || !draft || !(draft.state === 'published' || (draft.currentVersion ?? 0) > 0)) return [];
     seen.add(draftId);
-    return [{ draftId, name: `${platformName(account.platform)} · ${account.account}`, business: business.name ?? '', review: latest.get(draftId) }];
+    return [{ draftId, name: `${platformName(account.platform)} · ${account.account}`, business: business.name ?? '', review: latest.get(draftId),
+      ...(draft.state === 'published' ? {} : { revising: true as const }) }];
   }));
 }
 
@@ -43,6 +49,20 @@ export function juryChoices(
 const reviewLine = (review: MineItem) => (ACTIVE.has(review.state)
   ? (review.state === 'paused' ? '评审团已暂停，去看看 →' : '评审团正在审阅，去看看 →')
   : review.awaitingChoice ? '评审完成，去逐章选择 →' : '查看上次评审 →');
+
+/** One positioning in the list: the way to its jury card, or, while it is under revision, why there is none yet. */
+export function JuryChoiceRow({ choice, onClose }: { choice: JuryChoice; onClose: () => void }) {
+  return <li>
+    {choice.revising
+      ? <div className={styles.chooserRow} aria-disabled="true" data-revising="true">
+        <span>{choice.name}<small>{JURY_REVISING_NOTE}</small></span></div>
+      : <Link className={styles.chooserRow} href={juryEntryHref(choice.draftId)} onClick={onClose}>
+        <span>{choice.name}{choice.business && <small>{choice.business}</small>}</span><span aria-hidden="true">→</span></Link>}
+    {choice.revising && <Link className={styles.link} href={`/app/positioning/${choice.draftId}`} onClick={onClose}>继续修订 →</Link>}
+    {choice.review && <Link className={styles.link} href={reviewHref(choice.draftId, choice.review.reviewId)} onClick={onClose}>
+      {reviewLine(choice.review)}</Link>}
+  </li>;
+}
 
 /**
  * The rail's "评审团" entry for a member whose plan has the jury (Owner 2026-11-12). The jury has no page of its own: it
@@ -75,12 +95,7 @@ export function JuryChooser({ onClose }: { onClose: () => void }) {
                 {resume ? '继续定位' : '开始定位'}</Link>
             </div>
               : <ul className={styles.chooserList}>
-                {choices.map(choice => <li key={choice.draftId}>
-                  <Link className={styles.chooserRow} href={juryEntryHref(choice.draftId)} onClick={onClose}>
-                    <span>{choice.name}{choice.business && <small>{choice.business}</small>}</span><span aria-hidden="true">→</span></Link>
-                  {choice.review && <Link className={styles.link} href={reviewHref(choice.draftId, choice.review.reviewId)} onClick={onClose}>
-                    {reviewLine(choice.review)}</Link>}
-                </li>)}
+                {choices.map(choice => <JuryChoiceRow key={choice.draftId} choice={choice} onClose={onClose} />)}
               </ul>}
       </DialogContent>
     </Dialog>

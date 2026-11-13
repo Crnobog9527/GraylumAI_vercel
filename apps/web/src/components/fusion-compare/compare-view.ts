@@ -50,6 +50,8 @@ const REFUSALS: Record<string, string> = {
   POSITIONING_REQUIRED: '先完成账号定位，再使用这个功能。',
   // The turn path's own refusals (POST /api/turn/compare): nothing was frozen when one of these comes back.
   TURN_INSUFFICIENT_CREDITS: '余额不够这次对比的上限，充值后再点一次开始。',
+  // turn_fusion_open: the columns' upper bounds together are above one compare's 500-credit limit (nothing was frozen).
+  TURN_COMPARE_LIMIT: '这次对比的预计消耗超过了单次 500 积分的上限，没有开始，也没有扣费。请少选几个模型，或缩短问题后再试。',
   TURN_RATE_LIMITED: '操作太频繁，请稍后再试。',
   TURN_NEW_CALLS_PAUSED: '服务暂时暂停了新请求，请稍后再试。',
   TURN_LIMIT_UNAVAILABLE: '暂时无法确认用量，请稍后再试。',

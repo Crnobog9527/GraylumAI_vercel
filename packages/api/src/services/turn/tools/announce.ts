@@ -17,7 +17,7 @@ export const METHOD_STEP_ID = 'method';
  * A TurnStop raised inside a tool reaches `onStop` first (the turn, not the SDK's error wrapper, owns it).
  */
 export function withStepEvents(tools: readonly RuntimeTool[], announce: ((event: StepEvent) => void) | undefined,
-  skillNames: ReadonlySet<string>, onStop?: (stop: TurnStop) => void,
+  skillTitles: ReadonlyMap<string, string>, onStop?: (stop: TurnStop) => void,
   /** The user-facing name of the method whose files `read_skill_file` reads (the mentor's current step title); never a path or id. */
   methodName?: string,
   /** When set, `read_skill_file` reports on this step id instead of a new one (it is the same method). */
@@ -28,7 +28,7 @@ export function withStepEvents(tools: readonly RuntimeTool[], announce: ((event:
     const id = tool.name === 'read_skill_file' && methodStepId ? methodStepId : String(++stepNumber);
     let start: ReturnType<typeof stepStart> = { tool: 'other' };
     try {
-      start = stepStart(tool.name, args, skillNames);
+      start = stepStart(tool.name, args, skillTitles);
       if (tool.name === 'read_skill_file' && methodName) start = { ...start, label: methodName };
     } catch { /* display only */ }
     tell(() => ({ type: 'step', id, ...start, state: 'running' }));
