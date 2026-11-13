@@ -26,15 +26,35 @@ it('puts the light token class on the light tone only (no light aliases leak int
   expect(render({ tone: 'dark' })).not.toContain(light.light);
 });
 
-it('keeps the font licence notice the replaced footer carried', () => {
-  expect(render()).toContain('/fonts/misans/LICENSE.pdf');
-  expect(render({ locale: 'zh-TW' })).toContain('MiSans');
+// Owner 2026-11-14 (PUBLIC-SITE): the MiSans notice moves from the footer to the terms page (LegalDocumentPage.test.tsx).
+it('no longer carries the font licence notice in the footer', () => {
+  expect(render()).not.toContain('MiSans');
+  expect(render({ locale: 'zh-TW' })).not.toContain('MiSans');
 });
 
-it('keeps the mobile menu without client JS: a details with a named summary', () => {
+it('gives the light tone the home page backdrop and its first light; the dark tone has neither', () => {
   const html = render();
+  expect(html).toMatch(/data-tone="light" data-zone="hero"/);
+  expect(html).toMatch(/data-zone="final"><footer/);
+  expect(render({ locale: 'zh-TW' })).toMatch(/<footer[^>]*data-zone="final"/);
+  const dark = render({ tone: 'dark' });
+  expect(dark).not.toContain('data-zone');
+});
+
+it('keeps the mobile menu without client JS where this shell draws the header (zh-TW, dark tone): a details with a named summary', () => {
+  const html = render({ tone: 'dark' });
   expect(html).toMatch(/<details[^>]*><summary[^>]*aria-label="菜单"/);
   expect(html).toContain('aria-label="主导航"');
+});
+
+// Owner 2026-11-14 (PUBLIC-SITE): the Simplified light pages carry the home page's own header and footer.
+it('gives the Simplified light pages the home page header and footer', () => {
+  const html = render();
+  expect(html).toContain('href="/faq"');
+  expect(html).toContain('data-header-cta=""');
+  expect(html).toContain('data-region="页脚"');
+  expect(render({ locale: 'zh-TW' })).not.toContain('data-header-cta');
+  expect(render({ tone: 'dark' })).not.toContain('data-header-cta');
 });
 
 it('links the header, the sign-in and the sign-up button wording the production home page shows', () => {
@@ -60,7 +80,7 @@ it('keeps the footer links search engines follow: company, legal, refund and acc
   expect(html).toContain('mailto:support@example.com');
 });
 
-it('stays a server component (public pages ship no client JS for their chrome)', () => {
+it('stays a server component (public pages ship no client JS for their chrome; the backdrop is its own client island)', () => {
   const source = readFileSync(join(__dirname, 'PublicShell.tsx'), 'utf8');
   expect(source).not.toMatch(/['"]use client['"]/);
   expect(source).not.toMatch(/\buse(State|Effect|Ref)\b/);

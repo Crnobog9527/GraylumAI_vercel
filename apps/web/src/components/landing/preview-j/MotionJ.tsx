@@ -3,8 +3,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ChevronDown } from 'lucide-react';
-import { cn } from '@/lib/utils';
-import backdrop from './backdrop-j.module.css';
+import { BackdropJ } from './BackdropJ';
 import styles from './j.module.css';
 
 const reducedMotion = () => Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
@@ -47,12 +46,7 @@ export function MotionJ({ className, children }: { className?: string; children:
   }, []);
   return (
     <div ref={ref} className={className} data-zone="hero">
-      <div className={backdrop.backdrop} aria-hidden="true">
-        <div className={backdrop.grid} />
-        <span className={cn(backdrop.pool, backdrop.paper)} />
-        <span className={cn(backdrop.pool, backdrop.cool)} />
-        <span className={cn(backdrop.pool, backdrop.gold)} />
-      </div>
+      <BackdropJ />
       {children}
     </div>
   );
