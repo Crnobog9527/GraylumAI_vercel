@@ -26,9 +26,13 @@ export async function chatPhotosCases({ admin, service, connect }) {
   };
   const session = async (actor, columns = {}) => {
     const id = randomUUID();
-    await admin.query(`INSERT INTO runtime_sessions(id,actor_id,scope,start_request_id,start_payload,content_deleted_at,erased_at)
-      VALUES($1,$2,$3,$4,'{}',$5,$6)`, [id, actor, JSON.stringify({ kind: 'free_chat', probe: randomUUID() }), randomUUID(),
-      columns.contentDeleted ?? null, columns.erased ?? null]);
+    await admin.query(`INSERT INTO runtime_sessions(id,actor_id,scope,start_request_id,start_payload) VALUES($1,$2,$3,$4,'{}')`,
+      [id, actor, JSON.stringify({ kind: 'free_chat', probe: randomUUID() }), randomUUID()]);
+    // The deletion marks as the erasure functions leave them: the marker guard lets only the table owner set content_deleted_at (never
+    // on insert), and an erased row has its content cleared in the same write (0150's allow-list).
+    if (columns.contentDeleted) await admin.query('UPDATE runtime_sessions SET content_deleted_at=$2 WHERE id=$1', [id, columns.contentDeleted]);
+    if (columns.erased) await admin.query('UPDATE runtime_sessions SET scope=NULL, start_payload=NULL, erased_at=$2 WHERE id=$1',
+      [id, columns.erased]);
     return id;
   };
   const [me, other] = [await profile(), await profile()];
