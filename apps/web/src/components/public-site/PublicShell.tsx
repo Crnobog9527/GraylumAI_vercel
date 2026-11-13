@@ -137,7 +137,7 @@ export function PublicShell({
   );
 
   return (
-    <div className={cn(tone === 'light' && [light.light, dawn.dawn], homeChrome && page.page, styles.root)} data-tone={tone}
+    <div className={cn(tone === 'light' && [light.light, dawn.dawn, page.page], styles.root)} data-tone={tone}
       data-zone={tone === 'light' ? 'hero' : undefined}>
       {tone === 'light' ? <BackdropJ track /> : null}
       {homeChrome ? <SiteHeaderJ siteName={siteName} cta={HERO.primaryCta} onlyBuilt /> : header}
