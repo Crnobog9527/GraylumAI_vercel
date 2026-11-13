@@ -129,7 +129,7 @@ it('offers lost confirmation only for a frozen Stripe loss or a frozen Waffo row
   expect(renderToStaticMarkup(<AdminPaymentDisputes />)).toContain('确认判输结案');
   fixture.rows = [{ ...base, provider: 'stripe', status: 'lost', freeze_state: 'frozen', lost_confirmed_at: '2026-11-14T00:00:00Z' }];
   const html = renderToStaticMarkup(<AdminPaymentDisputes />);
-  expect(html).toContain('已判输结案'); expect(html).not.toContain('>撤回冻结');
+  expect(html).toContain('已判输结案'); expect(html).toContain('冻结：已收回'); expect(html).not.toContain('>撤回冻结');
   expect(html).not.toContain('>确认判输结案');
   fixture.rows = [{ ...base, provider: 'stripe', status: 'lost', freeze_state: 'withdrawn' }];
   expect(renderToStaticMarkup(<AdminPaymentDisputes />)).toContain('撤回冻结后被判输');

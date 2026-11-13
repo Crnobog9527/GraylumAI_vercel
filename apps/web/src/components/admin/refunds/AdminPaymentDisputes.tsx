@@ -37,8 +37,8 @@ export function WithdrawConfirm({ status, pending, onConfirm, onCancel, provider
 export function ConfirmLost({ provider, pending, onConfirm, onCancel }:
   { provider: string; pending: boolean; onConfirm: () => void; onCancel: () => void }) {
   return <div className="space-y-2" data-testid="confirm-lost">
-    <p>确认这笔拒付判输并结案？结案后：冻结的积分作为最终收回（不会再多扣），这份会员结束、以后的按月积分不再发放，
-      是创始会员的结束创始身份。结案后不能再撤回冻结。</p>
+    <p>确认这笔拒付判输并结案？结案后：这笔付款冻结的积分作为最终收回（不会再多扣）；如果是会员付款，这份会员结束、
+      以后的按月积分不再发放，是创始会员的结束创始身份。结案后不能再撤回冻结。</p>
     {provider === 'waffo' ? <p role="alert" className="font-bold">Waffo 不会把判决结果推送给我们，请先在 Waffo 后台核实这笔已判输。</p> : null}
     <Button disabled={pending} onClick={onConfirm}>确认判输结案</Button>
     <Button variant="outline" disabled={pending} onClick={onCancel}>返回</Button>
@@ -75,7 +75,7 @@ export function AdminPaymentDisputes() {
   const [evidenceOpen, setEvidenceOpen] = useState<string | null>(null);
   const confirmLost = trpc.paymentDisputes.confirmLost.useMutation({
     onSuccess: () => {
-      setMessage('已判输结案：冻结的积分作为最终收回，这份会员已结束。'); setLostSelected(null);
+      setMessage('已判输结案：这笔付款冻结的积分作为最终收回。'); setLostSelected(null);
       void utils.paymentDisputes.invalidate();
       void utils.payments.invalidate();
     },
@@ -116,7 +116,7 @@ export function AdminPaymentDisputes() {
             <p>{typeof row.amount === 'number' && Number.isSafeInteger(row.amount) && row.amount > 0
               && typeof row.currency === 'string' && /^[a-zA-Z]{3}$/.test(row.currency)
               ? `${(row.amount / 100).toFixed(2)} ${row.currency.toUpperCase()}` : '金额待核实'} · 拒付：{label(row.status)}</p>
-            <p>冻结：{label(row.freeze_state)} · 停续费：{label(row.renewal_stop_state)}</p>
+            <p>冻结：{row.lost_confirmed_at ? '已收回' : label(row.freeze_state)} · 停续费：{label(row.renewal_stop_state)}</p>
             {row.evidence_due_by ? <p>举证截止：{new Date(row.evidence_due_by).toLocaleString('zh-CN')}</p> : null}
             {row.source_review_required ? <p role="alert">积分来源无法核实，未扣取无法确认的积分，请人工核对。</p> : null}
             {!row.order_id && row.provider_dispute_id && row.merchant_namespace && ['test', 'live'].includes(row.mode)
