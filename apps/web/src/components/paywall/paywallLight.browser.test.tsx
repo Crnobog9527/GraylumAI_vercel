@@ -106,6 +106,8 @@ async function open(view: string, width: number, level = 'free'): Promise<{ page
 type Measured = {
   background: string; radius: string; overflow: number; inner: number; dark: string[]; small: string[]; faint: string[];
   closeWidth: number; lastBottom: number; viewport: number;
+  /** Where the panel rests: its edges against the screen, and its bottom corners. */
+  edges: { left: number; right: number; top: number; bottom: number; width: number; bottomRadius: string };
 };
 
 /** What the dialog looks like: its panel, any dark surface or faint text inside it, sideways overflow, and undersized targets. */
@@ -139,12 +141,15 @@ const measure = (page: Page, selector: string) => page.evaluate((target): Measur
     .filter(visible);
   const small = targets.filter(element => element.getBoundingClientRect().height < 44).map(name);
   const close = [...dialog.querySelectorAll('button')].find(button => /关闭|Close/.test(button.getAttribute('aria-label') ?? button.textContent ?? ''));
+  const style = getComputedStyle(dialog);
+  const box = dialog.getBoundingClientRect();
+  const edges = { left: Math.round(box.left), right: Math.round(box.right), top: Math.round(box.top), bottom: Math.round(box.bottom),
+    width: innerWidth, bottomRadius: style.borderBottomLeftRadius };
   dialog.scrollTop = dialog.scrollHeight;
   const last = targets.at(-1)?.getBoundingClientRect();
-  const style = getComputedStyle(dialog);
   return { background: style.backgroundColor, radius: style.borderTopLeftRadius, overflow: document.documentElement.scrollWidth - innerWidth,
     inner: dialog.scrollWidth - dialog.clientWidth, dark, small, faint, closeWidth: close?.getBoundingClientRect().width ?? 0,
-    lastBottom: last?.bottom ?? Infinity, viewport: innerHeight };
+    lastBottom: last?.bottom ?? Infinity, viewport: innerHeight, edges };
 }, selector);
 
 const CASES: Array<[string, string, string, string]> = [
@@ -157,14 +162,24 @@ const CASES: Array<[string, string, string, string]> = [
 
 describe('paywall dialogs are the light signed-in dialog on a phone', () => {
   for (const width of [390, 360]) for (const [view, level, selector, text] of CASES) {
-    it(`${view} at ${width}px: white 18px panel, no dark leftover or faint caption, no sideways scroll, 44px targets`, async () => {
+    // The paywall is a sheet on the bottom edge on a phone (Owner 2026-11-12, mobile plan A; design/bottom-sheet.module.css): as wide
+    // as the screen, rounded on top only. The checkout dialog is not part of that change and stays the centred 18px dialog.
+    const isSheet = selector.includes('report-paywall');
+    const shape = isSheet ? 'bottom sheet' : '18px panel';
+    it(`${view} at ${width}px: white ${shape}, no dark leftover or faint caption, no sideways scroll, 44px targets`, async () => {
       const { page, errors } = await open(view, width, level);
       try {
         await browserExpect(page.locator(selector)).toContainText(text);
+        await page.waitForFunction(target => document.querySelector(target)!.getAnimations()
+          .every(animation => animation.playState === 'finished'), selector);
         if (shots) await page.screenshot({ path: `${shots}/${view}-${width}.png` });
         const measured = await measure(page, selector);
         expect(measured.background).toBe('rgb(255, 255, 255)');
-        expect(measured.radius).toBe('18px');
+        if (isSheet) {
+          expect([measured.radius, measured.edges.bottomRadius]).toEqual(['24px', '0px']);
+          expect([measured.edges.left, measured.edges.right, measured.edges.bottom]).toEqual([0, measured.edges.width, measured.viewport]);
+          expect(measured.edges.top, 'the page behind stays visible above the sheet').toBeGreaterThanOrEqual(28);
+        } else expect(measured.radius).toBe('18px');
         expect(measured.dark, 'dark surfaces inside the dialog').toEqual([]);
         expect(measured.faint, 'text under 4.5:1 on its surface').toEqual([]);
         expect(measured.overflow, 'the page scrolls sideways').toBeLessThanOrEqual(0);

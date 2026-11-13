@@ -1,0 +1,48 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/*
+ * Phones (639px and below; Owner 2026-11-12, mobile plan A): a choice, a confirmation or a paywall rises from the bottom edge
+ * instead of sitting in the middle as a small window. Above 639px nothing here applies, so a dialog keeps its desktop look.
+ *
+ *   .panel    the dialog itself: full width, rounded on top, a grabber, scrolls inside, keeps clear of the home indicator.
+ *   .anchored for a Radix dialog (ui/dialog.tsx), which is centred with `fixed` and a translate: pins it to the bottom edge.
+ *   .host     for a dialog that sits in its own flex overlay (the paywall): the overlay lays the panel at the bottom.
+ *   .bar      the row of main buttons: stays at the bottom of the sheet while its content scrolls, thumb-reachable.
+ *
+ * `!important` is only where the value has to win over an inline style (the light dialog's radius) or over a utility class
+ * of the shared dialog; this file changes nothing in ui/dialog.tsx itself.
+ */
+@media (max-width: 639px) {
+  .panel {
+    --sheet-pad: calc(16px + env(safe-area-inset-bottom, 0px));
+    width: 100%; max-width: none !important; max-height: calc(100dvh - 28px - env(safe-area-inset-top, 0px)) !important;
+    margin: 0; border-width: 0; border-radius: 24px 24px 0 0 !important;
+    overflow-y: auto; overscroll-behavior: contain;
+  }
+  .panel::before {
+    content: ''; position: absolute; z-index: 1; top: 8px; left: 50%; width: 36px; height: 5px; margin-left: -18px;
+    border-radius: 999px; background: #d9d9d9;
+  }
+  .anchored {
+    top: auto !important; right: 0; bottom: 0; left: 0 !important; translate: none !important; transform: none;
+    padding: 28px 16px var(--sheet-pad);
+  }
+  .host { align-items: flex-end !important; padding: 0 !important; }
+  .host > .panel { padding-bottom: env(safe-area-inset-bottom, 0px); }
+  /* The buttons carry the sheet's bottom space themselves, so nothing that scrolls under them shows through below them. */
+  .anchored:has(> .bar) { padding-bottom: 0; }
+  .bar {
+    position: sticky; z-index: 1; bottom: 0; display: grid !important; grid-template-columns: 1fr 2fr; gap: 10px;
+    margin: 0 !important; padding: 12px 0 var(--sheet-pad); background: var(--gl-surface, #fff);
+  }
+  .bar > * { min-height: 48px; margin: 0 !important; border-radius: 999px; font-size: 15px; }
+}
+@media (max-width: 639px) and (prefers-reduced-motion: no-preference) {
+  .panel { animation: rise .26s cubic-bezier(.32, .72, 0, 1); }
+  .anchored[data-state=closed] { animation: sink .18s ease-in forwards; }
+}
+/* With reduced motion the sheet is simply there: the shared dialog's own zoom and slide are switched off as well. */
+@media (max-width: 639px) and (prefers-reduced-motion: reduce) {
+  .panel, .anchored[data-state=closed] { animation: none !important; }
+}
+@keyframes rise { from { transform: translateY(100%); } to { transform: translateY(0); } }
+@keyframes sink { from { transform: translateY(0); } to { transform: translateY(100%); } }

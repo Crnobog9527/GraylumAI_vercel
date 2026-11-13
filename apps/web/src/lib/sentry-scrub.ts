@@ -25,7 +25,7 @@ export function scrubText(value: string): string {
  * Static segments of our own routes (apps/web/src/app) plus Next.js bundle folders. A test keeps the
  * route list complete; any other segment of one of our URLs is a dynamic value and becomes `:param`.
  */
-export const APP_SEGMENTS = new Set(['about', 'acceptable-use', 'accessibility', 'access-denied', 'account-erasure', 'admin',
+export const APP_SEGMENTS = new Set(['about', 'acceptable-use', 'accessibility', 'access-denied', 'account-erasure', 'admin', 'avatar',
   'agent-first-preview', 'ai', 'announcements', 'api', 'auth', 'auto-close', 'billing-reconcile', 'blog', 'callback', 'chat',
   'advance', 'fusion', 'connect', 'contact', 'cookies', 'costs', 'cron', 'diagnostics', 'expert-consult', 'f', 'faq', 'features', 'finance', 'founders',
   'chats', 'cleanup', 'compare', 'estimate', 'tools',
