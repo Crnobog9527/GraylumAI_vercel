@@ -2,20 +2,22 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { ArrowRight, ArrowUpRight, Check, Image as ImageIcon, Maximize2 } from 'lucide-react';
+import { ArrowRight, ArrowUpRight, Check, Image as ImageIcon, Maximize2, Table2 } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import sheet from '@/components/design/bottom-sheet.module.css';
-import { showcasePairs, trackedLink, type IntegrationModule, type IntegrationPicture, type IntegrationSample,
+import { showcasePairs, viewLink, type IntegrationModule, type IntegrationPicture, type IntegrationSample,
   type IntegrationUse } from '@/lib/integrations/catalog';
 import { IntegrationViewer, type Viewing } from './IntegrationViewer';
 import type { ShotvivaState } from './use-shotviva';
+import type { ConnectionState } from './use-connection';
+import { FeishuWriteIllustration } from './FeishuWriteIllustration';
 import styles from './integrations.module.css';
 
 /** A product's own mark (the card and the head of its introduction); a product without one gets the plain picture icon. */
 export function IntegrationIcon({ module }: { module: IntegrationModule }) {
   // The mark is decoration beside the product's name, which is always written next to it.
   return module.icon ? <img className={styles.mark} src={module.icon} alt="" width={96} height={96}/>
-    : <i className={styles.mark} aria-hidden="true"><ImageIcon /></i>;
+    : <i className={styles.mark} aria-hidden="true">{module.glyph === 'table' ? <Table2 /> : <ImageIcon />}</i>;
 }
 
 /**
@@ -25,8 +27,9 @@ export function IntegrationIcon({ module }: { module: IntegrationModule }) {
  * that stays put. On a phone it is a sheet from the bottom edge (design/bottom-sheet.module.css). The words are the catalog's.
  * A sample picture is a button: pressing it opens the photo and its result large, over this dialog (IntegrationViewer).
  */
-export function IntegrationDetail({ module, open, onOpenChange, shotviva }: {
+export function IntegrationDetail({ module, open, onOpenChange, shotviva, connection }: {
   module: IntegrationModule; open: boolean; onOpenChange: (open: boolean) => void; shotviva?: ShotvivaState;
+  connection?: ConnectionState;
 }) {
   const [viewing, setViewing] = useState<Viewing | null>(null);
   /** The picture whose press opened the large view; focus returns to it. */
@@ -41,7 +44,8 @@ export function IntegrationDetail({ module, open, onOpenChange, shotviva }: {
         <div className={styles.scroll} data-scrolls="">
           <DialogDescription id={`${module.id}-tagline`} className={styles.tagline}>{module.tagline}</DialogDescription>
           {module.philosophy && <p className={styles.philosophy}>{module.philosophy}</p>}
-          <IntegrationDetailBody module={module} onView={(to, from) => { setOpener(from); setViewing(to); }} {...(shotviva ? { shotviva } : {})}/>
+          <IntegrationDetailBody module={module} onView={(to, from) => { setOpener(from); setViewing(to); }} {...(shotviva ? { shotviva } : {})}
+            {...(connection ? { connection } : {})}/>
         </div>
         <IntegrationViewLink module={module} {...(shotviva ? { shotviva } : {})}/>
         {/* Inside this dialog, so that it is the layer above it: Esc and a press outside close the large view alone. */}
@@ -53,19 +57,21 @@ export function IntegrationDetail({ module, open, onOpenChange, shotviva }: {
 }
 
 /** Under the product's own two paragraphs: the connection, then the introduction row by row, pictures before words. */
-export function IntegrationDetailBody({ module, shotviva, onView }: {
-  module: IntegrationModule; shotviva?: ShotvivaState; onView?: (viewing: Viewing, from: HTMLElement) => void;
+export function IntegrationDetailBody({ module, shotviva, connection, onView }: {
+  module: IntegrationModule; shotviva?: ShotvivaState; connection?: ConnectionState; onView?: (viewing: Viewing, from: HTMLElement) => void;
 }) {
   const { showcase } = module;
   /** Opens pair `pair` (0: 能做什么's; then the kinds of use, in order) on its photo or its result. */
   const view = (pair: number, side: 0 | 1) => (from: HTMLElement) => onView?.({ pair, side }, from);
   return <>
     {module.connector === 'shotviva' && shotviva && <ShotvivaConnection shotviva={shotviva} icon={module.icon}/>}
+    {module.connector === 'feishu_base' && connection && <CredentialConnection connection={connection} name={module.name}/>}
     <div className={styles.rows}>
       <section className={styles.row}>
         <h3>能做什么</h3>
         <div className={styles.what}>
           {/* The same thing twice: as the phone took it, and as a template gave it back. */}
+          {module.illustration === 'feishu-write' && <FeishuWriteIllustration/>}
           {showcase && <div className={styles.turn}>
             <Shot sample={showcase.before} onView={view(0, 0)}/><ArrowRight className={styles.turnArrow} aria-hidden="true"/>
             <Shot sample={showcase.after} onView={view(0, 1)}/>
@@ -167,7 +173,7 @@ const canConnect = (shotviva?: ShotvivaState) => {
 export function IntegrationViewLink({ module, shotviva }: { module: IntegrationModule; shotviva?: ShotvivaState }) {
   return (
     <footer className={`${styles.links} ${sheet.bar}`}>
-      <a className={canConnect(shotviva) ? styles.secondary : styles.primary} href={trackedLink(module.viewUrl, module.id)}
+      <a className={canConnect(shotviva) ? styles.secondary : styles.primary} href={viewLink(module)}
         target="_blank" rel="noopener noreferrer">去查看<NewTab/></a>
     </footer>
   );
@@ -248,4 +254,54 @@ function ShotvivaConnection({ shotviva, icon }: { shotviva: ShotvivaState; icon?
       </div>
     </div>
   );
+}
+
+/**
+ * INTEGRATION-BASE: a connection that holds the user's own credential (the Feishu Base). Connected: which table, a credential the
+ * provider rejected, and disconnecting. Not connected: members only (Owner 2026-11-14: Pro and Gold); the way to connect comes
+ * with the Feishu connection step (V3-FEISHU F1), until then it says so.
+ */
+function CredentialConnection({ connection, name }: { connection: ConnectionState; name: string }) {
+  const [confirming, setConfirming] = useState(false);
+  const { status, disconnect } = connection;
+  const data = status.data;
+  const pair = <Pair linked={!!data?.connected && !data.failed}/>;
+  if (status.isLoading) return <div className={styles.connection} role="status">{pair}<p>连接状态读取中…</p></div>;
+  if (!data) return <div className={styles.connection} role="status">{pair}<p>连接状态暂时读取不了，请稍后再试。</p></div>;
+  if (data.connected) {
+    return (
+      <div className={styles.connection} data-connection={data.failed ? 'failed' : 'connected'}>
+        {pair}
+        <div className={styles.connectionBody}>
+          <p><b>{data.failed ? '授权已失效' : '已连接'}</b>{data.label ? <>：{data.label}</> : null}
+            {data.failed ? '。请断开后用新的授权码重新连接。' : null}</p>
+          <div className={styles.connectionActions}>
+            {confirming
+              ? <>
+                <span className={styles.confirmText}>断开后，授权码会立即删除；已经写进{name}的内容还在你自己的表格里。</span>
+                <button type="button" className={styles.danger} disabled={disconnect.isPending}
+                  onClick={() => disconnect.mutate({ provider: connection.provider }, { onSettled: () => setConfirming(false) })}>确认断开</button>
+                <button type="button" className={styles.secondary} onClick={() => setConfirming(false)}>取消</button>
+              </>
+              : <button type="button" className={styles.quiet} onClick={() => setConfirming(true)}>断开</button>}
+          </div>
+          {disconnect.isError && <p role="alert" className={styles.error}>断开没有成功，请稍后再试。</p>}
+        </div>
+      </div>
+    );
+  }
+  if (!data.eligible) {
+    return (
+      <div className={styles.connection} data-connection="members">
+        {pair}
+        <div className={styles.connectionBody}>
+          <p><b>未连接</b>：连接{name}是 Pro 和 Gold 会员的功能。</p>
+          <div className={styles.connectionActions}>
+            <Link prefetch={false} className={styles.secondary} href="/app/profile?tab=subscription">查看会员</Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  return <div className={styles.connection} data-connection="soon">{pair}<p><b>未连接</b>：连接功能正在接入，很快开放。</p></div>;
 }

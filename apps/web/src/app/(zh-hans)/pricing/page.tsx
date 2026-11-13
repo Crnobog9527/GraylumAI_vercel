@@ -5,6 +5,7 @@ import { expertConsultPath } from '@/components/expert-consult/expertConsultCopy
 import { PricingPlans } from '@/components/pricing/PricingPlans';
 import { PricingCreditPacks, PricingFaq, PricingStudio } from '@/components/pricing/PricingExtras';
 import { PRICING_COPY as COPY } from '@/components/pricing/pricingContent';
+import styles from '@/components/pricing/pricing-page.module.css';
 import { getPublicSiteSettings } from '@/lib/public-site';
 import { buildPageMetadata } from '@/lib/seo/metadata';
 import { getPublicCreditPackages } from '@/lib/public-pricing';
@@ -22,7 +23,10 @@ export function generateMetadata() {
   });
 }
 
-/** Public pricing page (PAYWALL design v25 scene 5); every price comes from the server catalog. */
+/**
+ * Public pricing page (PAYWALL design v25 scene 5); every price comes from the server catalog. In the home page's look
+ * (Owner 2026-11-14, PUBLIC-SITE): pricing-page.module.css gives the cards the public layer's values on this page only.
+ */
 export default async function PricingPage() {
   const [{ membershipPlans, membershipPlansStatus }, packs, offers] = await Promise.all([
     getPublicSiteSettings(), getPublicCreditPackages(), getPublicPageOffers(),
@@ -30,17 +34,23 @@ export default async function PricingPage() {
   const plans = membershipPlansStatus === 'available' ? membershipPlans : [];
   return (
     <MarketingShell tone="light">
-      <div className="mx-auto grid max-w-6xl gap-12 px-4 py-10 sm:px-6 sm:py-16 md:py-20 lg:px-8">
-        <header className="grid gap-3 text-center">
-          <h1 className="text-3xl font-bold md:text-4xl" style={{ color: 'var(--text-primary)' }}>{COPY.title}</h1>
-          <p className="mx-auto max-w-2xl text-base" style={{ color: 'var(--text-secondary)' }}>{COPY.lede}</p>
+      <div className={styles.pricing}>
+        <header className={styles.head}>
+          <h1 className={styles.title}>{COPY.title}</h1>
+          <p className={styles.lede}>{COPY.lede}</p>
         </header>
-        <PricingPlans plans={plans} links={{ signup: buildAuthHref('/login?action=signup&lang=zh-Hans'),
-          membership: buildAuthHref('/app/profile?tab=subscription') }} offers={offers} />
-        <PricingCreditPacks packages={packs.packages} plans={plans} failed={packs.failed} />
+        <div data-zone="price">
+          <PricingPlans plans={plans} links={{ signup: buildAuthHref('/login?action=signup&lang=zh-Hans'),
+            membership: buildAuthHref('/app/profile?tab=subscription') }} offers={offers} />
+        </div>
+        <div data-zone="work">
+          <PricingCreditPacks packages={packs.packages} plans={plans} failed={packs.failed} />
+        </div>
         <PricingStudio />
         <ExpertConsultCard href={buildAuthHref(expertConsultPath('pricing'))} />
-        <PricingFaq />
+        <div data-zone="faq">
+          <PricingFaq />
+        </div>
       </div>
     </MarketingShell>
   );

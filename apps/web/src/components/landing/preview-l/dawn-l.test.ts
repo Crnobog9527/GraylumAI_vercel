@@ -108,15 +108,18 @@ describe('the home page\'s 晨光 layer and the first screen\'s product window',
     expect(layer).toContain('.card h3 { word-break: keep-all; overflow-wrap: anywhere; }');
   });
 
-  it('puts the layer on the home page only: one root carries it, one first screen draws the window', () => {
+  // Owner 2026-11-14 (PUBLIC-SITE): every public page takes the home page's look, so the public shell's light tone carries the
+  // layer too (its own root); the first screen's window stays the home page's alone.
+  it('puts the layer on the home page and the public shell only: two roots carry it, one first screen draws the window', () => {
     // Every landing component and the public pages' shell, each read once.
     const files = [join(SRC, 'components/landing'), join(SRC, 'components/public-site')].flatMap(sources)
       .map(path => [path.slice(SRC.length + 1), readFileSync(path, 'utf8')] as const);
     const users = (needle: string) => files.filter(([, source]) => source.includes(needle)).map(([path]) => path).sort();
     expect(users('dawn-l.module.css\'')).toEqual([
       'components/landing/preview-l/HeroL.tsx', 'components/landing/preview-l/HeroWindowL.tsx', 'components/landing/preview-l/SampleL.tsx',
+      'components/public-site/PublicShell.tsx',
     ]);
-    expect(users('dawn.dawn')).toEqual(['components/landing/preview-l/SampleL.tsx']);
+    expect(users('dawn.dawn')).toEqual(['components/landing/preview-l/SampleL.tsx', 'components/public-site/PublicShell.tsx']);
     expect(users('<HeroWindowL')).toEqual(['components/landing/preview-l/HeroL.tsx']);
   });
 

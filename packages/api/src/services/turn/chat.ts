@@ -26,7 +26,7 @@ import { runRuntime } from './agent/runner';
 import { serverChatModel } from './agent/serverChatModel';
 import type { PricingDeps } from './admission/pricingAdmission';
 import { ceil12, modelCall, TurnStop } from './call';
-import { turnDatabase, TurnDatabaseError, type CloseKind, type TurnClients, type WorkItemTurn } from './db';
+import { erasedCode, turnDatabase, TurnDatabaseError, voiceRevokedOnly, type CloseKind, type TurnClients, type WorkItemTurn } from './db';
 import { historyRoom, projectHistory, trimHistory, turnSession } from './history';
 import type { CounterStore } from './limiter';
 import { startThresholdCredits, stopLossSettings, turnPolicy } from './policy';
@@ -448,7 +448,11 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
         // The steps the reply showed: written in the close's own transaction, in a savepoint of their own (turn_close, 0507).
         ...(stepLog.size ? { steps: savedSteps(stepLog.values()) } : {}) } } : {}) });
     markStage('close');
-    if (closed.closeKind === 'erased') return emit({ type: 'error', code: 'TURN_TOMBSTONED', turnId: opened.turnId });
+    // A deleted voice voids only the reply: the user's message (and its photos) was kept (0535).
+    if (closed.closeKind === 'erased') {
+      messageKept = voiceRevokedOnly(closed);
+      return emit({ type: 'error', code: erasedCode(closed), turnId: opened.turnId });
+    }
     messageKept = true;
     // The page reads the photos again on the result: they are uploaded first (they started before the model call).
     if (photos) await photos;
@@ -470,16 +474,21 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
       // by its receipts once the call's cost is known (shownReply.ts). A save that fails falls through to the close below.
       if (code === 'TURN_CALL_UNKNOWN' && saveShown) {
         const kept = await swallow('turn_reply_cut_save_failed', saveShown(), null, { category: 'ai' });
-        if (kept) messageKept = kept.closeKind !== 'erased';
-        if (kept) return emit({ type: 'error', code: kept.closeKind === 'erased' ? 'TURN_TOMBSTONED' : REPLY_CUT, turnId: opened.turnId });
+        if (kept) messageKept = kept.closeKind !== 'erased' || voiceRevokedOnly(kept);
+        if (kept) return emit({ type: 'error', code: kept.closeKind === 'erased' ? erasedCode(kept) : REPLY_CUT, turnId: opened.turnId });
       }
       // Any other failure delivered nothing (no answer shown as final, nothing saved): the user pays nothing; the receipts and
       // the platform's cost stay recorded (e.g. a response truncated before any text, RUNTIME_OUTPUT_TRUNCATED).
       const plan = CLOSES[code] ?? { kind: 'failed' as const, refundAll: true };
       if (answered) noteUnsavedAnswer('chat', opened.turnId, code);
       // A close that fails here is left to recovery (the turn stays open, its freeze kept); logged, never thrown at the client.
-      await swallow('turn_close_failed', close(plan.kind, { refundAll: plan.refundAll, failureCode: code.toLowerCase() }), undefined,
-        { category: 'ai' });
+      // An erased close is handed the user's message: turn_close keeps it only when the deleted voice is the reason (0535).
+      const ended = await swallow('turn_close_failed', close(plan.kind, { refundAll: plan.refundAll, failureCode: code.toLowerCase(),
+        ...(plan.kind === 'erased' ? { messages: [{ role: 'user' as const, content: text }] } : {}) }), undefined, { category: 'ai' });
+      if (plan.kind === 'erased' && voiceRevokedOnly(ended)) {
+        messageKept = true;
+        return emit({ type: 'error', code: 'TURN_VOICE_REVOKED', turnId: opened.turnId });
+      }
     }
     emit({ type: 'error', code, turnId: opened.turnId });
   } finally {

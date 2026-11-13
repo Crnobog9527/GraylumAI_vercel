@@ -12,7 +12,7 @@ vi.mock('@/trpc/client', () => ({ trpc: {
     withdraw: { useMutation: () => ({ mutate: vi.fn(), isPending: false }) },
   },
 } }));
-import { AdminPaymentDisputes, ConfirmLost, WithdrawConfirm } from './AdminPaymentDisputes';
+import { AdminPaymentDisputes, ConfirmLost, WithdrawConfirm, withdrawMessage } from './AdminPaymentDisputes';
 import { PaymentDisputeNotice } from '@/components/profile/PaymentDisputeNotice';
 beforeEach(() => { fixture.rows = []; fixture.frozen = false; fixture.lost = false; fixture.error = false; });
 it('shows the approved neutral notice only while the account has a frozen payment', () => {
@@ -143,4 +143,12 @@ it('tells the user a lost dispute is closed, separately from a paused one', () =
   fixture.lost = true;
   const html = renderToStaticMarkup(<PaymentDisputeNotice />);
   expect(html).toContain('支付争议已结案'); expect(html).not.toContain('暂停使用');
+});
+
+it('reports restored credits, the monthly backfill and the resubscribe email after a withdrawal', () => {
+  const sent = withdrawMessage({ restored: 100, backfilled: 300, email: 'sent' });
+  expect(sent).toContain('恢复 100 积分'); expect(sent).toContain('按月积分 300'); expect(sent).toContain('已给用户发');
+  expect(withdrawMessage({ restored: 0, backfilled: 0, email: 'failed' })).toContain('请在付款提醒页重发');
+  expect(withdrawMessage({ restored: 0, email: 'not_won' })).toContain('不是判赢');
+  expect(withdrawMessage({ restored: 0, duplicate: true })).toContain('之前已经撤回过');
 });

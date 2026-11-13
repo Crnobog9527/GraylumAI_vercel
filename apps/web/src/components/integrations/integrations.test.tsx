@@ -2,13 +2,16 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => ({ status: vi.fn(), disconnect: vi.fn() }));
-vi.mock('@/trpc/client', () => ({ trpc: { useUtils: () => ({ connectors: { shotvivaStatus: { invalidate: vi.fn() } } }),
-  connectors: { shotvivaStatus: { useQuery: mocks.status }, shotvivaDisconnect: { useMutation: mocks.disconnect } } } }));
+const mocks = vi.hoisted(() => ({ status: vi.fn(), disconnect: vi.fn(), connection: vi.fn(), connectionDisconnect: vi.fn() }));
+vi.mock('@/trpc/client', () => ({ trpc: {
+  useUtils: () => ({ connectors: { shotvivaStatus: { invalidate: vi.fn() }, connectionStatus: { invalidate: vi.fn() } } }),
+  connectors: { shotvivaStatus: { useQuery: mocks.status }, shotvivaDisconnect: { useMutation: mocks.disconnect },
+    connectionStatus: { useQuery: mocks.connection }, connectionDisconnect: { useMutation: mocks.connectionDisconnect } } } }));
 import { INTEGRATIONS } from '@/lib/integrations/catalog';
 import { IntegrationDetailBody, IntegrationViewLink } from './IntegrationDetail';
 import { IntegrationsView } from './IntegrationsView';
 import type { ShotvivaState } from './use-shotviva';
+import type { ConnectionState } from './use-connection';
 
 const shotviva = INTEGRATIONS[0]!;
 const state = (data: unknown, over: Partial<ShotvivaState> = {}) => ({ status: { data, isLoading: false }, connect: vi.fn(),
@@ -21,6 +24,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.status.mockReturnValue({ data: { available: true, eligible: true, connected: false, balance: null }, isLoading: false });
   mocks.disconnect.mockReturnValue({ mutate: vi.fn(), isPending: false, isError: false });
+  mocks.connection.mockReturnValue({ data: { eligible: true, connected: false, label: null, last4: null, failed: false }, isLoading: false });
+  mocks.connectionDisconnect.mockReturnValue({ mutate: vi.fn(), isPending: false, isError: false });
 });
 
 describe('the integrations page', () => {
@@ -34,6 +39,7 @@ describe('the integrations page', () => {
     expect(renderToStaticMarkup(<IntegrationsView result={{ error: 'SHOTVIVA_CODE_INVALID' }}/>)).toContain('授权已过期');
     // A state that could not be read is not "未连接".
     mocks.status.mockReturnValue({ data: undefined, isLoading: false, isError: true });
+    mocks.connection.mockReturnValue({ data: undefined, isLoading: false, isError: true });
     const failed = renderToStaticMarkup(<IntegrationsView result={{}}/>);
     expect(failed).toContain('状态读取失败');
     expect(failed).not.toContain('未连接');
@@ -125,5 +131,55 @@ describe('starting a connection', () => {
       .toEqual({ message: '连接 Shotviva 是 Pro 和 Gold 会员的功能。' });
     expect(await startShotvivaConnect(vi.fn(async () => { throw new Error('offline'); }) as never))
       .toEqual({ message: 'Shotviva 暂时连接不上，请稍后再试。' });
+  });
+});
+
+describe('INTEGRATION-BASE: the Feishu Base module', () => {
+  const feishu = INTEGRATIONS.find(module => module.id === 'feishu-base')!;
+  const conn = (data: unknown, over: Partial<ConnectionState> = {}) => ({ provider: 'feishu_base', status: { data, isLoading: false },
+    disconnect: { mutate: vi.fn(), isPending: false, isError: false }, ...over }) as unknown as ConnectionState;
+  const view = (c: ConnectionState) => renderToStaticMarkup(<><IntegrationDetailBody module={feishu} connection={c}/>
+    <IntegrationViewLink module={feishu}/></>);
+  const words = (html: string) => html.replace(/<[^>]+>/g, '');
+
+  it('a card on the page with its own state; the detail draws what it does instead of pictures', () => {
+    const page = renderToStaticMarkup(<IntegrationsView result={{}}/>);
+    expect(page).toContain('飞书多维表格');
+    expect(mocks.connection).toHaveBeenCalledWith({ provider: 'feishu_base' }, expect.anything());
+    const html = view(conn({ eligible: true, connected: false, label: null, last4: null, failed: false }));
+    expect(html).toContain('role="img" aria-label="示意：Graylum 里写好的一篇作品');
+    expect(html).not.toContain('<img src="/integrations/');
+    for (const title of ['能做什么', '什么时候适合用', '连接到 Graylum 以后']) expect(html).toContain(title);
+  });
+
+  it('去查看 is Feishu\'s official Base page as it is, in a new tab, with no tracking of ours', () => {
+    const html = view(conn({ eligible: true, connected: false, label: null, last4: null, failed: false }));
+    expect(html).toContain('href="https://www.feishu.cn/product/base"');
+    expect(html).not.toMatch(/feishu\.cn[^"]*(from=graylum|utm_)/);
+  });
+
+  it('not a member: the membership page; a member not connected: no way to connect yet, said plainly', () => {
+    const members = view(conn({ eligible: false, connected: false, label: null, last4: null, failed: false }));
+    expect(words(members)).toContain('连接飞书多维表格是 Pro 和 Gold 会员的功能');
+    expect(members).toContain('href="/app/profile?tab=subscription"');
+    expect(words(view(conn({ eligible: true, connected: false, label: null, last4: null, failed: false })))).toContain('连接功能正在接入');
+  });
+
+  it('connected: the table\'s name and 断开 (confirm first); a rejected code says to reconnect; never the code', () => {
+    const html = view(conn({ eligible: true, connected: true, label: '选题排期', last4: 'ab12', failed: false }));
+    expect(words(html)).toContain('已连接：选题排期');
+    expect(html).toContain('>断开<');
+    expect(html).not.toContain('ab12');
+    const failed = view(conn({ eligible: true, connected: true, label: '选题排期', last4: 'ab12', failed: true }));
+    expect(words(failed)).toContain('授权已失效');
+    expect(failed).toContain('data-connection="failed"');
+    mocks.connection.mockReturnValue({ data: { eligible: true, connected: true, label: 'x', last4: 'ab12', failed: true }, isLoading: false });
+    expect(renderToStaticMarkup(<IntegrationsView result={{}}/>)).toContain('需重新连接');
+  });
+
+  it('an unreadable state is not "未连接"', () => {
+    const html = view(conn(undefined));
+    expect(html).toContain('连接状态暂时读取不了');
+    expect(html).not.toContain('未连接');
   });
 });
