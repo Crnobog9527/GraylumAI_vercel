@@ -1,9 +1,10 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { beforeEach, expect, it, vi } from 'vitest';
-const mocks = vi.hoisted(() => ({ create: vi.fn(), run: vi.fn(), idle: vi.fn(), drain: vi.fn(), dispatched: vi.fn() }));
+const mocks = vi.hoisted(() => ({ create: vi.fn(), run: vi.fn(), idle: vi.fn(), drain: vi.fn(), dispatched: vi.fn(), library: vi.fn() }));
 vi.mock('./host', () => ({ createAccountErasureHost: mocks.create }));
 vi.mock('./authAdapter', () => ({ createErasureAuthAdapter: vi.fn() }));
 vi.mock('./storageTransport', () => ({ createErasureStorageTransport: vi.fn() }));
+vi.mock('../library/erasure', () => ({ createLibraryErasureAdapter: () => ({ cleanSubject: mocks.library }) }));
 import { runAccountErasureExecutor } from './executor';
 const actor = '00000000-0000-4000-8000-000000000001';
 const request = '00000000-0000-4000-8000-000000000002';
@@ -249,4 +250,23 @@ it('stops starting log cleanup batches once the work deadline has passed', async
   });
   expect((await runAccountErasureExecutor(database as never, Date.now() - 1)).failed).toBe(1);
   expect(calls).toBe(1);
+});
+
+it('erases the profile avatar after the library, in the same storage pass that gates Auth deletion (PROFILE-AVATAR)', async () => {
+  const database = client();
+  const list = vi.fn().mockResolvedValueOnce({ data: [{ name: '00000000-0000-4000-8000-0000000000aa.webp', id: 'o1' }], error: null })
+    .mockResolvedValueOnce({ data: [], error: null });
+  const remove = vi.fn().mockResolvedValue({ data: [], error: null });
+  const from = vi.fn().mockReturnValue({ list, remove });
+  await runAccountErasureExecutor({ ...database, storage: { from } } as never);
+  const storage = mocks.create.mock.calls[0]![0].additionalStorage;
+  // The library is not done yet: the avatar bucket is not touched and the pass is not complete.
+  mocks.library.mockResolvedValueOnce({ complete: false, remaining: 2, manualReview: 0 });
+  expect(await storage.cleanSubject(actor)).toEqual({ complete: false, remaining: 2, manualReview: 0 });
+  expect(from).not.toHaveBeenCalled();
+  mocks.library.mockResolvedValueOnce({ complete: true, remaining: 0, manualReview: 0 });
+  expect(await storage.cleanSubject(actor)).toEqual({ complete: true, remaining: 0, manualReview: 0 });
+  expect(from).toHaveBeenCalledWith('profile-avatars');
+  expect(list).toHaveBeenCalledWith(actor, expect.objectContaining({ limit: 100 }));
+  expect(remove).toHaveBeenCalledWith([`${actor}/00000000-0000-4000-8000-0000000000aa.webp`]);
 });

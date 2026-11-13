@@ -20,6 +20,10 @@ export function syntheticSdk(createClient,profileId){
   // Library erasure (LIB-2a) also scans its own bucket; this synthetic account holds no library objects.
   if(target.pathname==='/storage/v1/object/list-v2/library-documents')
    return response({hasNext:false,nextCursor:null,folders:[],objects:[]});
+  // Avatar erasure (PROFILE-AVATAR) lists <profile id>/ in its bucket after the library; this account holds no avatar.
+  if(target.pathname==='/storage/v1/object/list/profile-avatars'){
+   assert.equal(method,'POST');assert.equal(body.prefix,profileId);assert.equal(body.limit,100);return response([]);
+  }
   if(target.pathname==='/storage/v1/object/list-v2/ticket-attachments'){
    assert.ok(body.limit>=1&&body.limit<=1000);assert.equal(body.with_delimiter,false);assert.equal(body.offset,undefined);
    if(mode==='page_failure'&&body.cursor)return response({},403);
