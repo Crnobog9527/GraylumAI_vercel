@@ -42,7 +42,7 @@ export function VoiceProfileCard({ version, title, busy, onConfirm, onDelete, on
         <textarea rows={2} maxLength={300} value={form[key]} onChange={event => set(key, event.target.value)} /></label>)}
       {LIST_FIELDS.map(([key, label]) => <label key={key}><span>{label}<small>每行一条</small></span>
         <textarea rows={3} value={form[key]} onChange={event => set(key, event.target.value)} /></label>)}
-      <fieldset><legend>最能代表你的原文<small>写稿时会参考这几段</small></legend>
+      <fieldset><legend>最能代表你的原文<small>用来帮你核对这份画像像不像你</small></legend>
         {form.samples.map((sample, index) => <textarea key={index} rows={3} maxLength={400} value={sample}
           aria-label={`原文片段 ${index + 1}`}
           onChange={event => setForm(current => current && { ...current,
