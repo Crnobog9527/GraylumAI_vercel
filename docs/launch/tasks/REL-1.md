@@ -402,6 +402,7 @@
 26. 同意 X 和 YouTube 各真实发布验收一次 `<账号和内容>`。
 27. 同意在 staging 用备份恢复功能原地演练一次备份恢复和删除重放。（E2；Owner 2026-11-03 原话：直接用 staging 的备份恢复功能做恢复测试，数据丢了没关系）
 28. Waffo 后台的拒付邮件通知已打开。（E5，Owner 亲手做）
+28a. 我来在 Stripe **正式**后台把信用卡账单商户名（Settings → Business → Public details 的 statement descriptor）设为 `GRAYLUM AI`。（E6，Owner 亲手做；Master Plan 第 2.1 节 2026-11-14 CHARGEBACK 决定）
 29. 我来在 Waffo 提交正式审核；通过后建 12 个正式一次性商品、填正式密钥，渠道保持 Stripe。（S-8，可在上线后）
 
 **E. 公开开放**
@@ -420,6 +421,7 @@
 | E3 | **已定（Owner 2026-10-24：「Firecrawl 不开零保留，直接上线」，取代同日先前的"开零保留"）**：Firecrawl 不开零保留，不挡上线 | — | 已回复 |
 | E4 | **待办（建库日 Owner 操作，建库日清单第 8 步，要在设置每日花费上限和 `core_path_v2` 之前）：正式库 PostgREST 连接池**（Master Plan 第 2.1 节 2026-10-25（晚））。staging 现在是 8；正式库**上线前要问 Owner**，Owner 同意后才设（需 Owner 生成的 Supabase 管理令牌，放本机密钥文件，不进仓库、日志或 PR）。不设会回到约 20 人就卡。**2026-11-01 的 100 人压测（报告 `result-20261101.md`）是在池 8 上跑的**，新路径正式池该设多少没有单独复测；这个数字还决定 `core_path_v2` 的 `poolSize`／`p` 和日限（第 3.0a 节），所以**必须先于日限确定** | 总控用 100 人压测结果和真实数字问 Owner | 「同意把正式库的 PostgREST 连接池设成 `<数字>`。」 |
 | E5 | **待办（建库日 Owner 操作）：Waffo 后台打开拒付邮件通知 `notifyChargeback`**（#1355 的建议）。Owner 亲手在 Waffo 后台做；没打开时拒付只靠我们这边的对账发现 | 上线前做；做完告诉总控 | 「Waffo 后台的拒付邮件通知已打开。」 |
+| E6 | **待办（上线前 Owner 操作）：Stripe 正式后台账单商户名设为 `GRAYLUM AI`**（Master Plan 第 2.1 节 2026-11-14 CHARGEBACK 决定）。正式环境设置，AI 不动 Stripe。MP 订单在账单上怎么显示由 Stripe 决定，设置后以 Stripe 后台预览为准 | 上线前做；做完告诉总控 | 「Stripe 正式后台账单商户名已设为 GRAYLUM AI。」 |
 
 ## 8. 旧版（2026-10-17）条目去向
 

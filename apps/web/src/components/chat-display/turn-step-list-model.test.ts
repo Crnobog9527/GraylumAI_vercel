@@ -16,6 +16,11 @@ describe('the line of each step', () => {
   });
   it('done: what was done, with the count when there is one', () => {
     expect(stepLine(step('load_skill', 'done', { label: '分镜脚本' }))).toBe('已读取「分镜脚本」方法');
+    // LOAD-SKILL: an internal package name saved by an older reply never reaches the user.
+    expect(stepLine(step('load_skill', 'done', { label: 'short-video-script' }))).toBe('已读取方法');
+    expect(stepLine(step('load_skill', 'running', { label: 'short-video-script' }))).toBe('正在读取方法…');
+    expect(stepLine(step('load_skill', 'failed', { label: 'script_writer' }))).toBe('方法暂时读取不了，改为直接回答');
+    expect(stepLine(step('load_skill', 'done', { label: '视频口播稿' }))).toBe('已读取「视频口播稿」方法');
     expect(stepLine(step('research', 'done', { count: 6 }))).toBe('已搜索，找到 6 条结果');
     expect(stepLine(step('research', 'done', { count: 0 }))).toBe('已搜索，没有找到结果');
     expect(stepLine(step('research', 'done'))).toBe('已搜索');
