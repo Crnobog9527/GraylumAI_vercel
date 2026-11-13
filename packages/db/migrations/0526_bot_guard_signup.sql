@@ -1,7 +1,7 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC.
 -- All rights reserved. This code is proprietary and confidential.
 -- BOT-GUARD (Owner 2026-11-13, Master Plan 2.1): the visible hCaptcha goes; the defences move to what abuse is after, the
--- opening grant (500 credits) and SMS. Number 9999 is a placeholder until the controller assigns one.
+-- opening grant (500 credits) and SMS. Number 0526 assigned by the controller.
 --   * Opening grant, three refusals (opening_grant_remember, the private helper of opening_grant_claim):
 --     - paused: system_settings.signup_gift_paused = true, nobody new gets the grant;
 --     - same_ip: the visitor's IP already received a grant in the last 24 hours (signup_gift_ips, IP only, kept 2 days);
