@@ -9,9 +9,9 @@ import { JsonLd } from '@/components/seo/JsonLd';
 import { REFUND_PAGE } from '@/lib/seo/content/refund';
 import { breadcrumbJsonLd, webPageJsonLd } from '@/lib/seo/structured-data';
 import { SiteShell } from './SiteShell';
-import { CRUMB_LINK, SITE_CHROME, visibleHref } from './site-chrome';
-
-const TEXT = 'text-base leading-8 text-[#C8C8C8]';
+import { sectionZone } from './ArticlePage';
+import { SITE_CHROME, visibleHref } from './site-chrome';
+import styles from './article.module.css';
 
 /** The public refund summary (/refund): one H1, the answer first, rules as plain lists, and the pointer to the full terms. */
 export function RefundPage({ supportEmail }: { supportEmail?: string | null }) {
@@ -25,30 +25,30 @@ export function RefundPage({ supportEmail }: { supportEmail?: string | null }) {
         }),
         breadcrumbJsonLd([...REFUND_PAGE.crumbs]),
       ]} />
-      <article className="mx-auto max-w-3xl px-4 py-10 sm:px-6 md:py-14">
-        <nav aria-label={chrome.breadcrumbLabel} className="mb-6 text-sm text-[#8A8A8A]">
-          <ol className="flex flex-wrap items-center gap-2">
-            <li><Link href={visibleHref('/')} className={CRUMB_LINK}>{REFUND_PAGE.crumbs[0].name}</Link></li>
-            <li className="flex items-center gap-2"><span aria-hidden="true">/</span><span aria-current="page">{REFUND_PAGE.crumbs[1].name}</span></li>
+      <article className={styles.article}>
+        <nav aria-label={chrome.breadcrumbLabel} className={styles.crumbs}>
+          <ol>
+            <li><Link href={visibleHref('/')}>{REFUND_PAGE.crumbs[0].name}</Link></li>
+            <li><span aria-hidden="true">/</span><span aria-current="page">{REFUND_PAGE.crumbs[1].name}</span></li>
           </ol>
         </nav>
-        <h1 className="text-3xl font-bold leading-tight sm:text-4xl">{REFUND_PAGE.h1}</h1>
-        <p className="mt-5 text-lg leading-8 text-[#E6E6E6]">{REFUND_PAGE.lead}</p>
-        <p className="mt-5 text-sm text-[#8A8A8A]">
-          <Link href={chrome.company[0].href} rel="author" className="underline hover:text-[#FFD700]">{chrome.authorLabel}</Link>
+        <h1 className={styles.title}>{REFUND_PAGE.h1}</h1>
+        <p className={styles.lead}>{REFUND_PAGE.lead}</p>
+        <p className={styles.byline}>
+          <Link href={chrome.company[0].href} rel="author">{chrome.authorLabel}</Link>
           {' · '}{chrome.updatedLabel} <time dateTime={REFUND_PAGE.updated}>{REFUND_PAGE.updated}</time>
         </p>
-        {REFUND_PAGE.sections.map(section => (
-          <section key={section.h2} className="mt-12">
-            <h2 className="text-2xl font-semibold">{section.h2}</h2>
-            <ul className={`mt-4 list-disc space-y-2 pl-6 ${TEXT}`}>
+        {REFUND_PAGE.sections.map((section, index) => (
+          <section key={section.h2} className={styles.section} data-zone={sectionZone(index)}>
+            <h2>{section.h2}</h2>
+            <ul className={styles.list}>
               {section.items.map(item => <li key={item}>{item}</li>)}
             </ul>
           </section>
         ))}
-        <p className={`mt-12 border-t border-[#262626] pt-6 ${TEXT}`}>
-          {REFUND_PAGE.footnote}<Link href="/terms" className="ml-1 text-[#FFD700] underline underline-offset-2">查看服务条款</Link>
-          <Link href="/refund-policy" className="ml-3 text-[#FFD700] underline underline-offset-2">查看完整退款政策（英文）</Link>
+        <p className={styles.foot} data-zone="final">
+          {REFUND_PAGE.footnote}<Link href="/terms" className={`${styles.textLink} ${styles.footLink}`}>查看服务条款</Link>
+          <Link href="/refund-policy" className={styles.textLink}>查看完整退款政策（英文）</Link>
         </p>
       </article>
     </SiteShell>

@@ -22,6 +22,11 @@ describe('turn notices', () => {
   ])('keeps the text of the refusal %s and says why', (code, words) => {
     expect(turnCodeNotice(code)).toMatchObject({ kept: true, text: expect.stringContaining(words) });
   });
+  // VOICE-ABORT-FIX: a deleted voice voids only the reply; it is never worded as a deleted conversation.
+  it('says the voice was deleted, not the conversation, when the writing voice was deleted mid-reply', () => {
+    expect(turnCodeNotice('TURN_VOICE_REVOKED')).toEqual({ kept: false, text: '文风已删除，这一轮没有生成。' });
+    expect(turnCodeNotice('TURN_VOICE_REVOKED').text).not.toContain('对话已删除');
+  });
   it('says a provider failure refunded the round and does not hand the text back', () => {
     for (const code of ['TURN_PROVIDER_402', 'TURN_PROVIDER_BUSY'])
       expect(turnCodeNotice(code)).toMatchObject({ kept: false, text: expect.stringContaining('全额退回') });

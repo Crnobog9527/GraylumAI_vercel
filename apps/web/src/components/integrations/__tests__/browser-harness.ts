@@ -15,8 +15,12 @@ const PUBLIC = fileURLToPath(new URL('../../../../public', import.meta.url));
 const STUBS: Record<string, string> = {
   '@/trpc/client': `
     import { useState } from 'react';
-    export const trpc = { useUtils: () => ({ connectors: { shotvivaStatus: { invalidate() {} } } }),
+    export const trpc = { useUtils: () => ({ connectors: { shotvivaStatus: { invalidate() {} }, connectionStatus: { invalidate() {} } } }),
       connectors: { shotvivaStatus: { useQuery: () => window.__status },
+        // INTEGRATION-BASE: the Feishu Base card (window.__connection overrides: a member, not connected).
+        connectionStatus: { useQuery: () => window.__connection
+          || { data: { eligible: true, connected: false, label: null, last4: null, failed: false }, isLoading: false } },
+        connectionDisconnect: { useMutation: () => ({ isPending: false, isError: false, mutate() {} }) },
         shotvivaDisconnect: { useMutation: () => {
           const [isError, setError] = useState(false);
           return { isPending: false, isError, mutate(_input, options) { window.__disconnects = (window.__disconnects || 0) + 1;
@@ -81,8 +85,9 @@ export type Opened = {
  * screen, which takes fingers. `slowLarge`: the large pictures take this long to arrive.
  */
 export async function openIntroduction(browser: Browser, html: string, state: StateName, width: number, height = 780,
-  options: { touch?: boolean; slowLarge?: number } = {}): Promise<Opened> {
-  const page = await browser.newPage({ viewport: { width, height }, hasTouch: !!options.touch });
+  options: { touch?: boolean; slowLarge?: number; card?: RegExp; reducedMotion?: boolean } = {}): Promise<Opened> {
+  const page = await browser.newPage({ viewport: { width, height }, hasTouch: !!options.touch,
+    reducedMotion: options.reducedMotion ? 'reduce' : 'no-preference' });
   page.setDefaultTimeout(8000);
   const errors: string[] = [];
   const asked: string[] = [];
@@ -110,7 +115,7 @@ export async function openIntroduction(browser: Browser, html: string, state: St
   await page.goto('https://app.test/app/integrations');
   // Nothing of the introduction is fetched for a page whose card has not been opened.
   expect([asked, askedLarge]).toEqual([[], []]);
-  await page.getByRole('button', { name: /Shotviva/ }).click();
+  await page.getByRole('button', { name: options.card ?? /Shotviva/ }).click();
   const dialog = page.getByRole('dialog');
   await dialog.waitFor();
   await page.waitForFunction(() => document.querySelector('[role=dialog]')!.getAnimations().every(animation => animation.playState === 'finished'));
