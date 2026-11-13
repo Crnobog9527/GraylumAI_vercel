@@ -25,6 +25,8 @@ const STUBS: Record<string, string> = {
     const subscribe = listener => { listeners.add(listener); return () => listeners.delete(listener); };
     export const useSearchParams = () => new URLSearchParams(useSyncExternalStore(subscribe, () => window.location.search));
   `,
+  // The page carries the phone's bottom bar (PhoneTabs), whose links are next/link: a plain anchor here, as in the other page fixtures.
+  'next/link': `import { createElement } from 'react'; export default function Link({ prefetch, ...props }) { return createElement('a', props); }`,
   '@/trpc/client': `
     const ticket = over => ({ id: 't1', ticket_number: 'TK-0001', title: '申请退款', description: '买错了套餐', category: 'billing',
       status: 'pending', created_at: '2026-11-01T02:03:00Z', attachments: [], replies: [], ...over });

@@ -7,6 +7,9 @@
 .hub, .back { display: none; }
 
 @media (max-width: 639px) {
+  /* The bottom bar is the way round the product on a phone (phone-tabs.tsx), as on the other pages that show it: the top bar keeps
+     the logo and the language switch, and its three links and the button that opened the section drawer go. */
+  .shell header nav[aria-label="全局导航"], .shell header button[aria-label="打开导航"] { display: none; }
   .hub { display: grid; gap: 14px; padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px)); }
   /* While the list is the page, the section behind it is not shown; while a section is open, the drawer's button is not. */
   .behindHub, .drawerTrigger { display: none !important; }
