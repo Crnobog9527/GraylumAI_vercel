@@ -12,7 +12,7 @@ const actorId = '00000000-0000-4000-8000-000000000001', sessionId = '00000000-00
 const hash = 'a'.repeat(64);
 const entry = (name: string, extra = {}) => ({ name, description: `${name} method`, moduleId: actorId, skillId: actorId, packageId: name,
   revisionId: actorId, packageHash: hash, resultBytes: 10, ...extra });
-const catalog = [entry('Hooks', { social: true as const }), entry('Pricing', { usesVoice: true as const })];
+const catalog = [entry('Hooks', { social: true as const }), entry('Pricing', { usesVoice: true as const, title: '定价方案' })];
 const skills = async () => ({ catalog, prepared: new Map([['Hooks', 'hooks text'], ['Pricing', 'pricing text']]) });
 
 function prepare(tools: ChatToolDeps, switches: Record<string, unknown> = {}) {
@@ -36,8 +36,9 @@ describe('a free chat\'s tools from the route\'s dependencies (CORE-PATH-V2 V2-6
     // Hooks is a social-media Skill: this account may not load it, so the page is not told its name and the step is skipped.
     await run('load_skill', { name: 'Hooks' });
     expect(events).toEqual([
-      { type: 'step', id: '1', tool: 'load_skill', label: 'Pricing', state: 'running' },
-      { type: 'step', id: '1', tool: 'load_skill', label: 'Pricing', state: 'done' },
+      // LOAD-SKILL: named by its display title (the menu name), never by the name the model calls.
+      { type: 'step', id: '1', tool: 'load_skill', label: '定价方案', state: 'running' },
+      { type: 'step', id: '1', tool: 'load_skill', label: '定价方案', state: 'done' },
       { type: 'step', id: '2', tool: 'load_skill', state: 'running' },
       { type: 'step', id: '2', tool: 'load_skill', state: 'skipped' }]);
   });

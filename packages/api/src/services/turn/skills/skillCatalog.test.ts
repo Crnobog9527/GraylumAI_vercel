@@ -6,6 +6,7 @@ vi.mock('../settings/catalogCache',async importOriginal=>({...await importOrigin
 import {clearSkillCatalogCache,discoverSkillCatalog,moduleUsesVoice,pinnedCatalogEntry,serializedResultBytes} from './skillCatalog';
 import {databaseSkillSource} from '../../skills/databaseSource';
 import {withPinnedSkill} from '../tools/skills';
+import {listChoiceSkills} from '../../skills/choiceSkills';
 import {clearSkillResourceCache,packageHash,sha256} from '../../skills/loader';
 
 const skillState={status:'published',version:1};
@@ -55,7 +56,7 @@ function clients(social:Record<string,boolean|undefined>={}){
  } as unknown as SupabaseClient;
  const admin={
   from:tables((table,f)=>{
-   if(table==='modules')return {data:catalog.filter(c=>(f.id as string[]).includes(c.module)).map(c=>({id:c.module,skill_id:c.skill,model_id:c.model,
+   if(table==='modules')return {data:catalog.filter(c=>(f.id as string[]).includes(c.module)).map(c=>({id:c.module,skill_id:c.skill,model_id:c.model,title:c.name==='skill-gamma'?null:`显示名 ${c.name}`,
     social_media_related:c.module in social?social[c.module]:false,required_member_level:version.level})),error:null};
    // CONTENT-CONVERSATION-DRIVEN: the published version of each Skill, which a cached catalog is checked against.
    if(table==='skills')return {data:(f.id as string[]).map(skill=>({id:skill,status:skillState.status,published_version:skillState.version})),error:null};
@@ -85,6 +86,26 @@ it('lists loadable Skills without reading any model, skipping task packages, pos
   expect(c.resultBytes).toBeGreaterThan(0);
   expect(c).not.toHaveProperty('modelId');
  }
+});
+it('LOAD-SKILL: each entry carries its module\'s display title (the menu name), none when the module has no title',async()=>{
+ const {user,admin}=clients();
+ const listed=await discoverSkillCatalog(user,admin,{maxResultBytes:20000,excludeSocial:false});
+ expect(listed.map(c=>[c.name,c.title])).toEqual([['skill-alpha','显示名 skill-alpha'],['skill-gamma',undefined],['skill-epsilon','显示名 skill-epsilon']]);
+ // A pinned revision, read without its module row, keeps the title listed for the same module.
+ const pinned={...listed[0]!,revisionId:id(98)};delete (pinned as {title?:string}).title;
+ expect(withPinnedSkill(listed,{moduleId:listed[0]!.moduleId},pinned).find(c=>c.revisionId===id(98))?.title).toBe('显示名 skill-alpha');
+});
+it('LOAD-SKILL: the manual Skill menu never offers a Skill the free-chat catalog leaves out (the positioning workflow), by the same rule',async()=>{
+ const {user,admin}=clients();
+ const listed=await discoverSkillCatalog(user,admin,{maxResultBytes:20000,excludeSocial:false});
+ const modules=catalog.map(c=>({id:c.module,skill_id:c.skill,title:c.name,model_id:c.model,required_member_level:null}));
+ const visible=catalog.map(c=>({id:c.module,active:true})) as never;
+ const menu=await listChoiceSkills({userClient:user,privateClient:admin,visible,modules,runnable:()=>true,listed:()=>true,tier:null});
+ const positioning=catalog[5]!.module;
+ expect(menu.map(m=>m.moduleId)).not.toContain(positioning);
+ expect(listed.map(c=>c.moduleId)).not.toContain(positioning);
+ // Every module the menu offers is one the catalog lists (or could not be read for it, like delta's unavailable package).
+ for(const m of menu)expect(listed.map(c=>c.moduleId)).toContain(m.moduleId);
 });
 it('drops social media Skills without a confirmed positioning and Skills too large to load',async()=>{
  const {user,admin}=clients({[id(1)]:true});
