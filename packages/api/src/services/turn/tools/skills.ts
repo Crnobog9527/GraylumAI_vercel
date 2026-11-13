@@ -43,7 +43,9 @@ export async function prepareSkills(entries: readonly SkillCatalogEntry[], sourc
 /** The catalog with its module's entry replaced by the pinned one; without one (unreadable), the module is not offered at all. */
 export function withPinnedSkill(catalog: readonly SkillCatalogEntry[], pin: { moduleId: string }, entry: SkillCatalogEntry | null): SkillCatalogEntry[] {
   const others = catalog.filter(item => item.moduleId !== pin.moduleId && item.name !== entry?.name);
-  return entry ? [...others, entry] : others;
+  // The pinned revision is read without its module row: it keeps the display title the catalog listed for the same module (LOAD-SKILL).
+  const title = entry && !entry.title ? catalog.find(item => item.moduleId === pin.moduleId)?.title : undefined;
+  return entry ? [...others, title ? { ...entry, title } : entry] : others;
 }
 
 export function turnLoadSkillTool(skills: PreparedSkills, maxLoads: number, onLoad?: () => void): RuntimeTool {
