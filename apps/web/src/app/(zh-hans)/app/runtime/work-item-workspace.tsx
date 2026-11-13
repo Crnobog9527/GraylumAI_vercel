@@ -20,6 +20,7 @@ import { WorkComposer } from '@/components/opc/work-composer';
 import composerStyles from '@/components/opc/work-composer.module.css';
 import { WorkspaceFrame } from '@/components/opc/workspace-frame';
 import { QueryNotice } from '@/components/opc/query-notice';
+import { MinutesButton, SessionMinutesPanel, useSessionMinutes } from '@/components/opc/session-minutes';
 import { RUNTIME_CHOICES_STALE_MS } from '@/lib/runtime-choices';
 import { trpc } from '@/trpc/client';
 import { clearForSend, forgetPending, markPendingRestored, openingDraftWithReferences, readPending, rememberPending, requestIdFor } from './send-input';
@@ -58,6 +59,8 @@ export function WorkItemWorkspace({ sessionId, workItemId }: { sessionId: string
   const [panelOpen, setPanelOpen] = useState(true),
     [saving, setSaving] = useState(false),
     [guiding, setGuiding] = useState(false);
+  // CONTENT-CONVERSATION-2: "整理本选题", only when pressed; the note is shown at the top of the right panel's results.
+  const minutes = useSessionMinutes(sessionId, () => { void utils.credits.getBalance.invalidate(); });
   const [typePending, setTypePending] = useState(false),
     [heldGuide, setHeldGuide] = useState(false);
   const scrollArea = useRef<HTMLDivElement>(null),
@@ -219,7 +222,9 @@ export function WorkItemWorkspace({ sessionId, workItemId }: { sessionId: string
       : [])
   ];
   const libraryHref = '/app/library?item=' + workItemId + '&return=' + sessionId;
-  const showLive = outgoing !== null || chat.sending || Boolean(chat.view?.activeTurn && !paused);
+  // A minutes turn holds the conversation too, but it writes no reply here: no live reply for it.
+  const chatTurnBusy = chat.sending || Boolean(chat.view?.activeTurn && chat.view.activeTurn.kind !== 'minutes');
+  const showLive = outgoing !== null || chat.sending || Boolean(chat.view?.activeTurn && chat.view.activeTurn.kind !== 'minutes' && !paused);
   // A reply that starts with "{" is a proposal still being written as data: it is not shown, the steps keep saying what is happening.
   const liveText = chat.live?.text && !chat.live.text.trimStart().startsWith('{') ? chat.live.text : '';
 
@@ -236,6 +241,7 @@ export function WorkItemWorkspace({ sessionId, workItemId }: { sessionId: string
             <RuntimeTypePendingPanel />
           ) : (
             <ContentEditor key={workItem.workItemId + ':' + contentType} item={workItem} onSaved={() => library.refetch()}>
+              <SessionMinutesPanel minutes={minutes} title="本选题整理" />
               <RuntimeResultsSection
                 isVideo={isVideo}
                 versions={versions}
@@ -263,15 +269,33 @@ export function WorkItemWorkspace({ sessionId, workItemId }: { sessionId: string
               : undefined
           }
         />
-        {newTopicHref && (
-          <p className="px-6 pt-1 text-sm text-[var(--text-secondary)]">
-            这个窗口只聊「{workItem?.title}」。要聊别的选题，
-            <Link className="underline" href={newTopicHref}>
-              新开一个选题
-            </Link>
-            。
-          </p>
-        )}
+        {/* A line of its own, set off from the transcript that scrolls under it (validation of #1996). */}
+        <div
+          className={
+            'flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border-primary)] px-6 py-2 text-sm ' +
+            'text-[var(--text-secondary)]'
+          }
+        >
+          {newTopicHref ? (
+            <p>
+              这个窗口只聊「{workItem?.title}」。要聊别的选题，
+              <Link className="underline" href={newTopicHref}>
+                新开一个选题
+              </Link>
+              。
+            </p>
+          ) : (
+            <span />
+          )}
+          {workItem && contentType !== 'unknown' && (
+            <MinutesButton
+              minutes={minutes}
+              label="整理本选题"
+              disabled={chatTurnBusy || saving || guiding || !chat.view?.messages.length}
+              onStarted={() => setPanelOpen(true)}
+            />
+          )}
+        </div>
         <QueryNotice error={choices.error || library.error} label="当前工作" retry={() => Promise.all([choices.refetch(), library.refetch()])} />
         <div ref={scrollArea} className={workStyles.scrollArea} aria-label="对话记录">
           {!messages.length && !outgoing && <RuntimeEmptyState text="已带入选题简报和原工作方法，正在根据当前进度准备引导。" />}
