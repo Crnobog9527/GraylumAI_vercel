@@ -61,6 +61,11 @@ describe('review page data', () => {
     expect(startErrorText('SOMETHING_ELSE')).toBe('没能开始评审，请稍后再试。');
     // Three unfinished reviews of one report version stop reviews of that version (0236); a new version counts afresh (Owner 2026-10-20).
     expect(startErrorText('FUSION_REVIEW_VERSION_BLOCKED')).toBe('暂时无法评审这份报告。可以修改报告后再试，或联系客服。');
+    // FUSION-REVIEW: the turn path's own refusals (staging validation, #1545) have their own words, not the generic line.
+    for (const code of ['TURN_MEMBERSHIP_REQUIRED', 'TURN_JURY_VERSION_BLOCKED', 'FUSION_REVIEW_STALE'])
+      expect(startErrorText(code)).not.toBe('没能开始评审，请稍后再试。');
+    expect(startErrorText('TURN_MEMBERSHIP_REQUIRED')).toContain('Gold');
+    expect(startErrorText('TURN_JURY_VERSION_BLOCKED')).toContain('没有扣费');
   });
 });
 

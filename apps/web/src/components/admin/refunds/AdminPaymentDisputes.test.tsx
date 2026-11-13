@@ -1,19 +1,20 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, expect, it, vi } from 'vitest';
-const fixture = vi.hoisted(() => ({ rows: [] as unknown[], frozen: false, error: false }));
+const fixture = vi.hoisted(() => ({ rows: [] as unknown[], frozen: false, lost: false, error: false }));
 vi.mock('@/trpc/client', () => ({ trpc: {
   useUtils: () => ({ paymentDisputes: { invalidate: vi.fn() }, payments: { invalidate: vi.fn() } }),
   paymentDisputes: {
     list: { useQuery: () => ({ data: fixture.rows, isError: fixture.error, isLoading: false }) },
-    notice: { useQuery: () => ({ data: { frozen: fixture.frozen } }) },
+    notice: { useQuery: () => ({ data: { frozen: fixture.frozen, lost: fixture.lost } }) },
+    confirmLost: { useMutation: () => ({ mutate: vi.fn(), isPending: false }) },
     resolveExternal: { useMutation: () => ({ mutate: vi.fn(), isPending: false }) },
     withdraw: { useMutation: () => ({ mutate: vi.fn(), isPending: false }) },
   },
 } }));
-import { AdminPaymentDisputes, WithdrawConfirm } from './AdminPaymentDisputes';
+import { AdminPaymentDisputes, ConfirmLost, WithdrawConfirm } from './AdminPaymentDisputes';
 import { PaymentDisputeNotice } from '@/components/profile/PaymentDisputeNotice';
-beforeEach(() => { fixture.rows = []; fixture.frozen = false; fixture.error = false; });
+beforeEach(() => { fixture.rows = []; fixture.frozen = false; fixture.lost = false; fixture.error = false; });
 it('shows the approved neutral notice only while the account has a frozen payment', () => {
   expect(renderToStaticMarkup(<PaymentDisputeNotice />)).toBe('');
   fixture.frozen = true;
@@ -114,4 +115,32 @@ it('shows a known foreign chargeback currency without substituting USD',()=>{
     freeze_state:'frozen',renewal_stop_state:'not_applicable',evidence_due_by:null,source_review_required:false}];
   const html = renderToStaticMarkup(<AdminPaymentDisputes />);
   expect(html).toContain('12.34 EUR'); expect(html).not.toContain('USD');
+});
+
+it('offers lost confirmation only for a frozen Stripe loss or a frozen Waffo row, and hides withdrawal once confirmed', () => {
+  const base = { id: 'd1', order_id: 'order-id', amount: 100, currency: 'usd', renewal_stop_state: 'confirmed',
+    evidence_due_by: null, source_review_required: false, lost_confirmed_at: null };
+  fixture.rows = [{ ...base, provider: 'stripe', status: 'under_review', freeze_state: 'frozen' }];
+  expect(renderToStaticMarkup(<AdminPaymentDisputes />)).not.toContain('确认判输结案');
+  fixture.rows = [{ ...base, provider: 'stripe', status: 'lost', freeze_state: 'frozen' }];
+  expect(renderToStaticMarkup(<AdminPaymentDisputes />)).toContain('确认判输结案');
+  fixture.rows = [{ ...base, provider: 'waffo', status: 'under_review', freeze_state: 'frozen' }];
+  expect(renderToStaticMarkup(<AdminPaymentDisputes />)).toContain('确认判输结案');
+  fixture.rows = [{ ...base, provider: 'stripe', status: 'lost', freeze_state: 'frozen', lost_confirmed_at: '2026-11-14T00:00:00Z' }];
+  const html = renderToStaticMarkup(<AdminPaymentDisputes />);
+  expect(html).toContain('已判输结案'); expect(html).not.toContain('>撤回冻结');
+  expect(html).not.toContain('>确认判输结案');
+  fixture.rows = [{ ...base, provider: 'stripe', status: 'lost', freeze_state: 'withdrawn' }];
+  expect(renderToStaticMarkup(<AdminPaymentDisputes />)).toContain('撤回冻结后被判输');
+});
+it('explains the final result in the lost confirmation dialog and warns for Waffo', () => {
+  const stripe = renderToStaticMarkup(<ConfirmLost provider="stripe" pending={false} onConfirm={() => {}} onCancel={() => {}} />);
+  expect(stripe).toContain('不会再多扣'); expect(stripe).toContain('不能再撤回冻结'); expect(stripe).not.toContain('Waffo 后台');
+  expect(renderToStaticMarkup(<ConfirmLost provider="waffo" pending={false} onConfirm={() => {}} onCancel={() => {}} />))
+    .toContain('请先在 Waffo 后台核实');
+});
+it('tells the user a lost dispute is closed, separately from a paused one', () => {
+  fixture.lost = true;
+  const html = renderToStaticMarkup(<PaymentDisputeNotice />);
+  expect(html).toContain('支付争议已结案'); expect(html).not.toContain('暂停使用');
 });

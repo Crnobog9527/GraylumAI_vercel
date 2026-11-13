@@ -1,7 +1,12 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => ({ status: vi.fn(), disconnect: vi.fn(), rateLimit: vi.fn(), image: vi.fn() }));
+const mocks = vi.hoisted(() => ({ status: vi.fn(), disconnect: vi.fn(), rateLimit: vi.fn(), image: vi.fn(),
+  connection: vi.fn(), paid: vi.fn(), remove: vi.fn() }));
+vi.mock('../services/connectors/userConnections', async (original) => ({
+  ...(await original<typeof import('../services/connectors/userConnections')>()),
+  readUserConnection: mocks.connection, paidConnectorMember: mocks.paid, deleteUserConnection: mocks.remove,
+}));
 vi.mock('../services/redisRateLimiter', () => ({ checkRateLimitOrThrow: mocks.rateLimit }));
 vi.mock('../services/connectors/shotviva/images', () => ({ readImageJob: mocks.image }));
 vi.mock('../services/connectors/shotviva/connect', async (original) => ({
@@ -10,6 +15,7 @@ vi.mock('../services/connectors/shotviva/connect', async (original) => ({
 }));
 import { connectorsRouter } from './connectors';
 import { ShotvivaConnectError } from '../services/connectors/shotviva/connect';
+import { UserConnectionError } from '../services/connectors/userConnections';
 
 const me = '00000000-0000-4000-8000-000000000001';
 const profile = { id: me, role: 'user', status: 'active', nickname: 'U', email: 'u@example.com' };
@@ -63,5 +69,41 @@ describe('INTEGRATION-SHOTVIVA PR B: an image card', () => {
     expect(await caller().shotvivaImage({ jobId: JOB })).toEqual({ status: 'failed', code: 'not_found', viewUrl: null });
     await expect(caller().shotvivaImage({ jobId: 'not-a-uuid' })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
     await expect(caller(null).shotvivaImage({ jobId: JOB })).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+  });
+});
+
+describe('INTEGRATION-BASE: a connection with the user\'s own credential', () => {
+  it('status says eligible/connected/label/last4/failed for the signed-in user only, never the credential', async () => {
+    mocks.paid.mockResolvedValue(true);
+    mocks.connection.mockResolvedValueOnce(null);
+    expect(await caller().connectionStatus({ provider: 'feishu_base' }))
+      .toEqual({ eligible: true, connected: false, label: null, last4: null, failed: false });
+    mocks.connection.mockResolvedValueOnce({ provider: 'feishu_base', target: { appToken: 'x' }, label: '选题库', last4: 'ab12',
+      failed: true, connectedAt: '2026-11-14T00:00:00Z' });
+    const status = await caller().connectionStatus({ provider: 'feishu_base' });
+    expect(status).toEqual({ eligible: true, connected: true, label: '选题库', last4: 'ab12', failed: true });
+    expect(JSON.stringify(status)).not.toContain('appToken');
+    expect(mocks.connection).toHaveBeenCalledWith(db, me, 'feishu_base');
+    expect(mocks.rateLimit).toHaveBeenCalledWith(`connection-status:${me}`, 'api');
+  });
+
+  it('disconnect deletes the caller\'s own connection', async () => {
+    mocks.remove.mockResolvedValueOnce(true);
+    expect(await caller().connectionDisconnect({ provider: 'feishu_base' })).toEqual({ connected: false });
+    expect(mocks.remove).toHaveBeenCalledWith(db, me, 'feishu_base');
+  });
+
+  it('refuses unknown providers, signed-out callers and maps failures to fixed codes', async () => {
+    await expect(caller().connectionStatus({ provider: 'notion' } as never)).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    await expect(caller(null).connectionStatus({ provider: 'feishu_base' })).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+    await expect(caller({ id: me }, false).connectionDisconnect({ provider: 'feishu_base' }))
+      .rejects.toMatchObject({ message: 'CONNECTION_UNAVAILABLE' });
+    mocks.remove.mockRejectedValueOnce(new UserConnectionError('CONNECTION_ACCOUNT_CLOSED'));
+    await expect(caller().connectionDisconnect({ provider: 'feishu_base' }))
+      .rejects.toMatchObject({ code: 'FORBIDDEN', message: 'CONNECTION_ACCOUNT_CLOSED' });
+    mocks.paid.mockRejectedValueOnce(new Error('private detail'));
+    mocks.connection.mockResolvedValueOnce(null);
+    await expect(caller().connectionStatus({ provider: 'feishu_base' }))
+      .rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE', message: 'CONNECTION_UNAVAILABLE' });
   });
 });
