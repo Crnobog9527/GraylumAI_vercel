@@ -15,6 +15,7 @@ import {reportCases} from './report-cases.mjs';
 import {topicAccountCases,topicCases,topicRebindCases} from './topic-cases.mjs';
 import {reportFinalCases} from './report-final-cases.mjs';
 import {workContentCases} from './work-content-cases.mjs';
+import {minutesCases} from './minutes-cases.mjs';
 import {holdCases} from './hold-cases.mjs';
 import {stopLossCases} from './stop-loss-cases.mjs';
 import {workResultCases} from './work-result-cases.mjs';
@@ -826,6 +827,7 @@ try{
  await holdCases({c,one,open,begin,record,close,balance,account,policy,refusal,peer,report});
  await stopLossCases({c,one,open,begin,identity,record,close,balance,account,policy,refusal,peer,report});
  await workContentCases({c,one,open,begin,record,close,account,policy,refusal,report});
+ await minutesCases({c,one,open,begin,record,close,balance,account,policy,refusal,report});
  await screenshotCases({c,one,open,begin,identity,record,balance,account,refusal,report});
 }catch(error){report.failed=String(error.stack??error);process.exitCode=1;}
 finally{await db.close();report.cleanup='PASS';console.log(JSON.stringify(report,null,2));}
