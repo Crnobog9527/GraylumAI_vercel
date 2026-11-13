@@ -15,15 +15,23 @@ BEGIN
   FOR item IN SELECT value FROM jsonb_array_elements(p_steps) LOOP
     IF jsonb_typeof(item) <> 'object' OR NOT (item ? 'id' AND item ? 'tool' AND item ? 'state') THEN RETURN false; END IF;
     FOR k IN SELECT jsonb_object_keys(item) LOOP
-      IF k NOT IN ('id', 'tool', 'state', 'label', 'count', 'reason') THEN RETURN false; END IF;
+      IF k NOT IN ('id', 'tool', 'state', 'label', 'count', 'reason', 'job') THEN RETURN false; END IF;
     END LOOP;
     -- A saved step has ended: "running" is never kept.
     IF jsonb_typeof(item->'id') <> 'string' OR char_length(item->>'id') > 8
-       OR jsonb_typeof(item->'tool') <> 'string' OR (item->>'tool') NOT IN ('load_skill', 'research', 'read_source', 'coach_review', 'other')
+       OR jsonb_typeof(item->'tool') <> 'string' OR (item->>'tool') NOT IN ('load_skill', 'research', 'read_source', 'coach_review', 'image', 'other')
        OR jsonb_typeof(item->'state') <> 'string' OR (item->>'state') NOT IN ('done', 'failed', 'skipped') THEN RETURN false; END IF;
     IF item ? 'label' AND (jsonb_typeof(item->'label') <> 'string' OR char_length(item->>'label') > 80) THEN RETURN false; END IF;
     IF item ? 'count' AND (jsonb_typeof(item->'count') <> 'number' OR (item->>'count') !~ '^[0-9]{1,6}$') THEN RETURN false; END IF;
-    IF item ? 'reason' AND (jsonb_typeof(item->'reason') <> 'string' OR (item->>'reason') <> 'no_brand') THEN RETURN false; END IF;
+    IF item ? 'reason' AND (jsonb_typeof(item->'reason') <> 'string' OR NOT (
+         (item->>'reason') = 'no_brand'
+         -- INTEGRATION-SHOTVIVA: why an image was not made, or that it is still being made; only on an image step.
+         OR (item->>'tool') = 'image' AND (item->>'reason') IN ('running', 'not_linked', 'membership_required', 'quota_exhausted',
+           'IDENTITY_SWAP_REFUSED', 'content_rejected', 'invalid_input', 'rate_limited', 'generation_failed', 'link_revoked', 'unavailable')))
+    THEN RETURN false; END IF;
+    -- INTEGRATION-SHOTVIVA: the Shotviva job of an image step (the card reads a fresh address by it); never a URL.
+    IF item ? 'job' AND ((item->>'tool') <> 'image' OR jsonb_typeof(item->'job') <> 'string'
+         OR (item->>'job') !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') THEN RETURN false; END IF;
   END LOOP;
   UPDATE public.turns SET steps = p_steps WHERE actor_id = p_actor_id AND id = p_turn_id AND steps IS NULL;
   RETURN FOUND;

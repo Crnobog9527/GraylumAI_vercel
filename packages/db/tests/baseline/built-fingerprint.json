@@ -3996,7 +3996,7 @@
   "fn:turn_call_settle_no_identity(uuid,bigint,integer)": "179261d44341",
   "fn:turn_call_spent_usd(text,numeric,numeric)": "5d8a4767f2ec",
   "fn:turn_chat_screenshots_apply(uuid,jsonb)": "b8831d648e93",
-  "fn:turn_chat_steps_apply(uuid,bigint,jsonb)": "7b347cb31000",
+  "fn:turn_chat_steps_apply(uuid,bigint,jsonb)": "54e7b7f9f6f2",
   "fn:turn_close(uuid,bigint,text,jsonb,boolean,boolean,text,jsonb)": "d6fe6676b11e",
   "fn:turn_fusion_begin(uuid,bigint,integer,text,uuid,text,boolean,text,numeric,numeric)": "2b5745934e54",
   "fn:turn_fusion_close(uuid,bigint,text,boolean,boolean,text,jsonb)": "84f8ac84fdf2",
