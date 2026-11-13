@@ -5,11 +5,11 @@
 const SAFE_PROTOCOLS = new Set(["http:", "https:", "mailto:"]);
 
 /**
- * The in-app pages a host rule may point the user to (positioning entry, library, voice tab): exactly these paths, nothing
- * else relative. A model cannot make a reply link anywhere else on the site (REL-1: the positioning redirect's link was
- * dropped to plain text because every relative link was).
+ * The in-app pages a host rule may point the user to (positioning entry, library, voice tab, integrations to connect Shotviva):
+ * exactly these paths, nothing else relative. A model cannot make a reply link anywhere else on the site (REL-1: the
+ * positioning redirect's link was dropped to plain text because every relative link was).
  */
-const APP_PATHS = new Set(["/app/positioning", "/app/library", "/app/library?tab=voice"]);
+const APP_PATHS = new Set(["/app/positioning", "/app/library", "/app/library?tab=voice", "/app/integrations"]);
 export const isAppMessageHref = (href: string) => APP_PATHS.has(href);
 
 /** Absolute http(s) and mailto links and the fixed in-app paths survive; everything else is dropped. */

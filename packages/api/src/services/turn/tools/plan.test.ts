@@ -119,6 +119,9 @@ describe('INTEGRATION-SHOTVIVA: the image tools', () => {
       expect(plan.trimmed).toEqual([{ name: 'list_image_templates', reason }, { name: 'generate_image', reason }]);
       expect(plan.limits.freeTools).toBe(2);
       expect(plan.note).toContain(`generate_image (${reason})`);
+      // Owner 2026-11-13: "connect Shotviva first" came with no link; the account's own reasons give the integrations page.
+      if (reason === 'disabled') expect(plan.note).not.toContain('/app/integrations');
+      else expect(plan.note).toContain('[去连接 Shotviva](/app/integrations)');
     }
   });
 

@@ -13,7 +13,7 @@ import type { ConfigurationRows } from '../settings/settingsRows';
 import type { StagingPolicy } from '../settings/stagingPolicy';
 import type { ResearchToolsConfig } from '../../research/vendors/config';
 import type { ResearchVendor } from '../../research/vendors/types';
-import { GENERATE_IMAGE_CALLS, IMAGE_RESULT_RESERVE_BYTES, IMAGE_TOOL_NAMES, LIST_IMAGE_TEMPLATES_CALLS } from './imageTools';
+import { GENERATE_IMAGE_CALLS, IMAGE_RESULT_RESERVE_BYTES, IMAGE_TOOL_NAMES, LIST_IMAGE_TEMPLATES_CALLS, imageTrimNote } from './imageTools';
 import type { GeneralResearchToolName, ToolPlan, TrimReason, TurnToolName } from './types';
 
 /*
@@ -167,8 +167,9 @@ export async function planTurnTools(input: PlanInput): Promise<{ plan: ToolPlan;
     used += strategyBytes; sourceRoom.strategy = true; elasticBytes = strategyBytes;
   }
   const order = (names: TurnToolName[]) => offered.filter(name => names.includes(name));
+  const imageTrim = trimmed.find(t => t.name === 'generate_image');
   const note = trimmed.length ? `\nTools unavailable for this reply: ${trimmed.map(t => `${t.name} (${t.reason})`).join(', ')}. `
-    + 'Do not call them; if the answer needs them, tell the user plainly.' : null;
+    + 'Do not call them; if the answer needs them, tell the user plainly.' + (imageTrim ? imageTrimNote(imageTrim.reason) : '') : null;
   return {
     plan: { offered, available: order(available), trimmed, note,
       paidToolUpperUsd: setup ? paidToolBounds(setup.policies, paidTools, subcalls, input.modelMultiplier) : [],
