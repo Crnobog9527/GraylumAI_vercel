@@ -30,10 +30,13 @@ describe('the workbench canvas (conversation pages)', () => {
     expect(canvas).not.toContain('animation');
   });
 
-  it('leaves the reading panels white, and the top bar and the announcement as they were', () => {
+  it('leaves the reading panels white and the top bar as it was; the announcement carries its own light, not the canvas\'s', () => {
     expect(frame).toMatch(/\.center,\.right\{[^}]*background:#fff/);
     expect(frame).toContain('.global{height:60px;display:flex;align-items:center;gap:42px;padding:0 26px;background:#fff;border-bottom:1px solid #ededed}');
-    expect(frame).toMatch(/\.announcement\{[^}]*background:#efefef/);
+    // Owner 2026-11-12 redesigned the announcement ("现在这个一片灰再加一点字，就是太单调了"): it is no longer grey. It still has a
+    // ground of its own, opaque, so the canvas behind the shell does not show through it (announcement.test.tsx holds its look).
+    expect(frame).toMatch(/\.announcement\{[^}]*background:#fff1cf/);
+    expect(frame).not.toMatch(/\.announcement\{[^}]*background:#efefef/);
   });
 
   it('gives only the new-conversation page a breath of light at its head; it stays white beneath', () => {
