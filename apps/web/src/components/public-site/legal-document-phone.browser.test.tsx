@@ -157,7 +157,7 @@ it('1280px: the documents are what they were: no button, no word above the table
     await ui(nav(page)).toBeHidden();
     const wrap = page.locator('[data-legal-doc] .table-wrap').first();
     expect(await wrap.evaluate(element => getComputedStyle(element, '::before').content)).toBe('none');
-    expect(await page.locator('[data-legal-doc] h1').evaluate(heading => getComputedStyle(heading).fontSize)).toBe('36px');
+    expect(await page.locator('[data-legal-doc] h1').evaluate(heading => getComputedStyle(heading).fontSize)).toBe('52px'); // the home page's title scale (PUBLIC-SITE, 2026-11-14)
     expect(await page.locator('[data-legal-doc] h2').first().evaluate(heading => getComputedStyle(heading).fontSize)).toBe('24px');
     expect(errors).toEqual([]);
   } finally { await page.close(); }

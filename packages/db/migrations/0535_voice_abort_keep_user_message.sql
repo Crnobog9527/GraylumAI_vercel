@@ -1,0 +1,249 @@
+-- Copyright (c) 2026 Grayscale Luminary LLC.
+-- All rights reserved. This code is proprietary and confidential.
+-- VOICE-ABORT-FIX: deleting the writing voice (a profile version, or an authored document it was learned from) while a reply is
+-- being written no longer empties the conversation. Found on staging 2026-11-14 (PR #1614 comment 6859829232): the page said
+-- "这个对话已删除，本轮回复没有保存。" and after a reload the conversation was empty, the user's own message included.
+-- Two causes, both fixed here; charging is unchanged (Owner 2026-11-14: the voided round keeps its current charge).
+--   * turn_close: whole current definition. A round closed erased only because its voice was revoked (the session and the
+--     account still there) now appends the user's message from p_messages, never the reply. Any other erased close saves
+--     nothing, as before. The answer already carries the tombstones, so the app tells this case from a deleted conversation.
+--   * voice_delete_versions: whole current definition. It hid (visible=false) the messages of every turn bound to the deleted
+--     version, i.e. every past reply in free chat written while the voice was on; it now does so only for turns not yet
+--     closed. Replies already shown stay (Master Plan 5, D7); the voice text itself was never stored in the history.
+-- Number 0535 assigned by the controller.
+-- Compatibility: signatures, privileges and return shapes unchanged; old code passes no user message to an erased close and
+-- reads the same answer. Repeatable: CREATE OR REPLACE only.
+-- Recovery: re-apply the current definitions (turn_close from 0508_mentor_turn_steps_history.sql,
+-- voice_delete_versions from 0459_core_path_v2_voice.sql). Messages kept by the new rule are ordinary visible messages.
+BEGIN;
+SET LOCAL lock_timeout='5s';
+
+CREATE OR REPLACE FUNCTION public.turn_close(p_actor_id uuid, p_turn_id bigint, p_close_kind text, p_messages jsonb DEFAULT '[]'::jsonb, p_delivered boolean DEFAULT false, p_refund_all boolean DEFAULT false, p_failure_code text DEFAULT NULL::text, p_kind_result jsonb DEFAULT NULL::jsonb)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  t turns; s runtime_sessions; q numeric; n_total numeric; pending_upper numeric; credits integer; charge integer; h integer;
+  v_kind text := p_close_kind; tomb jsonb; next_seq integer; msg jsonb; pending boolean; user_pending boolean;
+  marker timestamptz; kind_result jsonb; voice_only boolean;
+BEGIN
+  IF p_close_kind NOT IN ('completed','stopped','failed','interrupted','expired','erased') THEN
+    RAISE EXCEPTION 'TURN_CLOSE_INVALID' USING ERRCODE='22023';
+  END IF;
+  SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id;
+  IF t.id IS NULL THEN RAISE EXCEPTION 'TURN_DENIED' USING ERRCODE='42501'; END IF;
+  -- Lock order: the profile, the session, the turn, then the stop-loss bucket (as turn_open and the erasure functions). The
+  -- profile also serializes the actor's closes (the free-stop count) before the settlement locks it again.
+  PERFORM 1 FROM profiles WHERE id = p_actor_id FOR UPDATE;
+  IF t.session_id IS NOT NULL THEN SELECT * INTO s FROM runtime_sessions WHERE id = t.session_id FOR UPDATE; END IF;
+  SELECT * INTO t FROM turns WHERE actor_id = p_actor_id AND id = p_turn_id FOR UPDATE;
+  IF t.state = 'closed' THEN
+    -- Closed with a provider cost still unknown: calling turn_close again settles what has become known since (recovery, a late
+    -- receipt). The close itself (kind, messages) is kept; each receipt is counted once, by settled_at after the last pass
+    -- (both stamped with clock_timestamp under this turn's row lock, so a receipt and a pass never miss each other).
+    IF t.settlement = 'pending' THEN
+      marker := clock_timestamp();
+      SELECT coalesce(sum(turn_call_spent_usd(call_kind, nominal_usd, actual_usd)) FILTER (WHERE status = 'ok'), 0) + coalesce(sum(actual_usd) FILTER (WHERE status = 'unusable'), 0),
+             coalesce(sum(upper_usd), 0)
+        INTO n_total, pending_upper
+      FROM turn_calls WHERE turn_id = p_turn_id AND NOT cost_pending AND settled_at > t.updated_at;
+      UPDATE daily_spend SET spent_usd = spent_usd + n_total, reserved_usd = greatest(reserved_usd - pending_upper, 0)
+        WHERE day = (t.policy->>'day')::date AND bucket = (t.policy->>'bucket')::smallint;
+      q := (t.policy->>'q')::numeric;
+      -- The user's base is what it was at the close plus the late model receipts: a tool whose result was unknown at the close
+      -- stays 0 to the user (2.5.2) however late its receipt comes; only its cost goes to the stop-loss above.
+      SELECT ceil(q * coalesce(sum(nominal_usd * multiplier) FILTER (WHERE status = 'ok' AND call_kind <> 'decision'
+               AND NOT (call_kind = 'tool' AND settled_at > t.closed_at)), 0))::integer,
+             coalesce(bool_or(cost_pending), false), coalesce(bool_or(cost_pending AND call_kind = 'model'), false)
+        INTO credits, pending, user_pending
+      FROM turn_calls WHERE turn_id = p_turn_id;
+      credits := credits + coalesce((t.policy->>'carriedCredits')::int, 0);
+      IF t.charged_credits IS NULL AND NOT user_pending THEN
+        charge := CASE WHEN t.kind = 'report' THEN (public.turn_report_settlement(t, t.close_kind, t.delivered, credits,
+            t.reserved_credits + coalesce((t.policy->>'carriedCredits')::int, 0), t.closed_at)).charge
+          ELSE public.turn_user_charge(p_actor_id, p_turn_id, t.close_kind, t.delivered,
+          coalesce((t.policy->>'closeRefundAll')::boolean, false), credits,
+          t.reserved_credits + coalesce((t.policy->>'carriedCredits')::int, 0), (t.policy->>'fixedCredits')::int, t.closed_at) END;
+        PERFORM public.turn_settle_holds(p_actor_id, t, charge);
+        t.charged_credits := charge; t.absorbed_credits := greatest(credits - charge, 0);
+      END IF;
+      UPDATE turns SET charged_credits = t.charged_credits, absorbed_credits = t.absorbed_credits,
+          settlement = CASE WHEN pending THEN 'pending' ELSE 'done' END, updated_at = marker
+        WHERE actor_id = p_actor_id AND id = p_turn_id RETURNING * INTO t;
+    END IF;
+    RETURN jsonb_build_object('turnId', t.id, 'closeKind', t.close_kind, 'chargedCredits', t.charged_credits,
+      'absorbedCredits', t.absorbed_credits, 'settlement', t.settlement, 'replay', true);
+  END IF;
+  -- Only a report can be stopped by its user (Owner 10-28).
+  IF v_kind = 'stopped' AND t.kind <> 'report' THEN RAISE EXCEPTION 'TURN_STOP_NOT_ALLOWED' USING ERRCODE='42501'; END IF;
+  IF p_refund_all AND v_kind NOT IN ('failed','expired','erased') THEN RAISE EXCEPTION 'TURN_CLOSE_INVALID' USING ERRCODE='22023'; END IF;
+  -- A tombstone wins: nothing is saved and the turn closes as erased.
+  IF t.kind = 'report' THEN v_kind := public.turn_report_close_kind(t, v_kind); END IF;
+  tomb := turn_tombstones(p_actor_id, t.session_id, t.policy);
+  IF v_kind IN ('completed','stopped') AND ((tomb->>'sessionTombstoned')::boolean OR (tomb->>'accountErasing')::boolean
+    OR (tomb->>'voiceSourceRevoked')::boolean) THEN v_kind := 'erased'; END IF;
+  -- VOICE-ABORT-FIX (0535): erased only because the writing voice it used was deleted (the conversation and the account are
+  -- still there). Only this round's reply is void: the user's own message is kept below, so the conversation is not emptied.
+  voice_only := v_kind = 'erased' AND t.session_id IS NOT NULL AND (tomb->>'voiceSourceRevoked')::boolean
+    AND NOT (tomb->>'sessionTombstoned')::boolean AND NOT (tomb->>'accountErasing')::boolean;
+  -- The per-kind hook: what a kind keeps from its result (a draft, a report, a verdict) is written in the same transaction as the
+  -- close, by that kind's own function (e.g. turn_mentor_apply(t, v_kind, p_kind_result)), one branch per kind:
+  --   IF t.kind = '<kind>' THEN PERFORM public.turn_<kind>_apply(...); ELSE ... END IF;
+  -- A kind without a branch has its result refused rather than dropped.
+  IF p_kind_result IS NOT NULL THEN
+    IF t.kind = 'mentor' THEN
+      -- V2-5c: what this turn's research made, on any close that saves anything (paid lookups stay paid when the reply failed).
+      IF v_kind <> 'erased' AND p_kind_result ? 'research' THEN PERFORM public.research_turn_apply(p_actor_id, t, p_kind_result->'research'); END IF;
+      -- V2-5: the organizer's checklist patches; only a delivered completed turn applies them (an erased one saves nothing).
+      IF v_kind = 'completed' AND p_delivered AND p_kind_result ? 'organizerInput' THEN kind_result := public.turn_mentor_apply(p_actor_id, p_turn_id, p_kind_result); END IF;
+      -- TURN-STEPS: the steps the reply showed (the step's method read, a source read, a search), kept for a delivered completed turn so a
+      -- reload shows them again. Best effort, as for a chat turn: its own savepoint, so a failure there never touches the close or the settlement.
+      IF v_kind = 'completed' AND p_delivered AND p_kind_result ? 'steps' THEN
+        BEGIN
+          IF NOT public.turn_chat_steps_apply(p_actor_id, p_turn_id, p_kind_result->'steps') THEN
+            RAISE WARNING 'turn_chat_steps_apply refused the steps of turn %', p_turn_id;
+          END IF;
+        EXCEPTION WHEN OTHERS THEN
+          RAISE WARNING 'turn_chat_steps_apply failed: %', SQLERRM;
+        END;
+      END IF;
+    ELSIF t.kind = 'report' THEN
+      PERFORM public.turn_report_apply(t, v_kind, p_kind_result);
+    ELSIF t.kind = 'plan' THEN
+      PERFORM public.turn_plan_apply(t, v_kind, p_kind_result);
+    ELSIF t.kind = 'voice' THEN
+      PERFORM public.turn_voice_apply(t, v_kind, p_kind_result);
+    ELSIF t.kind = 'chat' THEN
+      -- PUBLISH-MONITOR: the numbers the coach read from the user's screenshots in this reply, and TURN-STEPS: the steps the reply
+      -- showed (a tool kind, an end state, a Skill's public name, a count). Both are best effort: a failure in either never touches
+      -- the close or the settlement below (each has its own savepoint that rolls back only itself), and only a delivered completed
+      -- turn saves them (an erased or failed one saves nothing). A chat result holds at most these two keys; any other is still
+      -- refused, as before.
+      IF jsonb_typeof(p_kind_result) IS DISTINCT FROM 'object' OR p_kind_result = '{}'::jsonb
+        OR EXISTS (SELECT 1 FROM jsonb_object_keys(p_kind_result) AS k(key) WHERE k.key NOT IN ('coachScreenshots', 'steps')) THEN
+        RAISE EXCEPTION 'TURN_KIND_RESULT_UNSUPPORTED' USING ERRCODE='22023';
+      END IF;
+      IF v_kind = 'completed' AND p_delivered AND p_kind_result ? 'coachScreenshots' THEN
+        BEGIN
+          PERFORM public.turn_chat_screenshots_apply(p_actor_id, p_kind_result->'coachScreenshots');
+        EXCEPTION WHEN OTHERS THEN
+          RAISE WARNING 'turn_chat_screenshots_apply failed: %', SQLERRM;
+        END;
+      END IF;
+      IF v_kind = 'completed' AND p_delivered AND p_kind_result ? 'steps' THEN
+        BEGIN
+          IF NOT public.turn_chat_steps_apply(p_actor_id, p_turn_id, p_kind_result->'steps') THEN
+            RAISE WARNING 'turn_chat_steps_apply refused the steps of turn %', p_turn_id;
+          END IF;
+        EXCEPTION WHEN OTHERS THEN
+          RAISE WARNING 'turn_chat_steps_apply failed: %', SQLERRM;
+        END;
+      END IF;
+    ELSE
+      RAISE EXCEPTION 'TURN_KIND_RESULT_UNSUPPORTED' USING ERRCODE='22023';
+    END IF;
+  END IF;
+
+  -- Calls without a final receipt: their cost is unknown; it is never presumed zero and never retried (2.5.2).
+  UPDATE turn_calls SET status = 'unknown', cost_pending = true
+   WHERE turn_id = p_turn_id AND status IN ('dispatched','identified');
+  q := (t.policy->>'q')::numeric;
+  -- N = ceil(q x sum(n_i x m_i)) over the known receipts the user pays for (never the positioning check); n_total is the provider
+  -- cost of every receipt, the positioning check and the platform-paid unusable results included, which the stop-loss counts; a
+  -- tool receipt counts its whole known supplier cost (turn_call_spent_usd), the subcalls the user does not pay for included.
+  SELECT ceil(q * coalesce(sum(nominal_usd * multiplier) FILTER (WHERE status = 'ok' AND call_kind <> 'decision'), 0))::integer,
+         coalesce(sum(turn_call_spent_usd(call_kind, nominal_usd, actual_usd)) FILTER (WHERE status = 'ok'), 0) + coalesce(sum(actual_usd) FILTER (WHERE status = 'unusable'), 0),
+         coalesce(sum(upper_usd) FILTER (WHERE cost_pending), 0),
+         coalesce(bool_or(cost_pending), false),
+         -- Only an unknown model call holds the user's settlement: a third-party tool whose result is unknown is 0 to the user
+         -- (Owner 10-13, plan 2.5.2) and the positioning check is never theirs; both keep only the provider cost pending.
+         coalesce(bool_or(cost_pending AND call_kind = 'model'), false)
+    INTO credits, n_total, pending_upper, pending, user_pending
+  FROM turn_calls WHERE turn_id = p_turn_id;
+  -- Credits a resumed turn carried from the turn it continues (V2-8): settled here, once, under this turn's rule.
+  credits := credits + coalesce((t.policy->>'carriedCredits')::int, 0);
+  -- H: the whole hold, the carried credits included (reserved_credits leaves them out for the calls' own checks).
+  h := t.reserved_credits + coalesce((t.policy->>'carriedCredits')::int, 0);
+
+  -- Stop-loss: what is known is spent; the reservation of calls with an unknown cost stays until recovery settles them.
+  UPDATE daily_spend SET spent_usd = spent_usd + n_total,
+      reserved_usd = greatest(reserved_usd - (t.reserved_usd - pending_upper), 0)
+    WHERE day = (t.policy->>'day')::date AND bucket = (t.policy->>'bucket')::smallint;
+
+  -- What the user pays (turn_user_charge: D = min(N, H), the stop and fixed-price rules).
+  -- One instant for this close, taken under the account lock: the stop count, closed_at and the settlement pass all use it, so a
+  -- concurrent close of the same actor that committed first is always before it, and a later settlement counts the same.
+  marker := clock_timestamp();
+  IF t.kind = 'report' THEN
+    SELECT r.charge, user_pending AND NOT r.settle_now INTO charge, user_pending FROM public.turn_report_settlement(t, v_kind, p_delivered, credits, h, marker) r;
+  ELSE
+    charge := public.turn_user_charge(p_actor_id, p_turn_id, v_kind, p_delivered, p_refund_all, credits, h,
+      (t.policy->>'fixedCredits')::int, marker);
+  END IF;
+
+  -- Credits: settled once, each freeze of the turn exactly once; with an unknown model cost they all wait for recovery.
+  -- settlement stays 'pending' while any provider cost is unknown, so recovery still settles the stop-loss; a repeated credit
+  -- settlement of the same freeze returns the first one.
+  IF NOT user_pending THEN PERFORM public.turn_settle_holds(p_actor_id, t, charge); END IF;
+
+  -- What a paused turn kept for its resume ends with it (the 24-hour expiry closes here).
+  IF t.state = 'paused' THEN DELETE FROM session_messages WHERE session_id = t.session_id AND turn_id = p_turn_id AND NOT visible; END IF;
+
+  -- The messages of a delivered turn, appended in order.
+  -- A round voided by a deleted voice keeps only the user's message (voice_only above).
+  IF (v_kind IN ('completed','stopped') OR voice_only) AND t.session_id IS NOT NULL AND jsonb_typeof(p_messages) = 'array' THEN
+    SELECT coalesce(max(seq), 0) INTO next_seq FROM session_messages WHERE session_id = t.session_id;
+    FOR msg IN SELECT value FROM jsonb_array_elements(p_messages) WHERE NOT voice_only OR value->>'role' = 'user' LOOP
+      next_seq := next_seq + 1;
+      INSERT INTO session_messages (session_id, seq, role, turn_id, content, content_hash)
+        VALUES (t.session_id, next_seq, msg->>'role', p_turn_id, msg->>'content', encode(sha256(convert_to(msg->>'content', 'UTF8')), 'hex'));
+    END LOOP;
+  END IF;
+
+  -- updated_at marks this settlement pass (see the closed branch above); a full refund still owed is kept with the turn.
+  UPDATE turns SET state = 'closed', pause_reason = NULL, close_kind = v_kind, closed_at = marker, updated_at = marker,
+      policy = CASE WHEN user_pending AND p_refund_all THEN policy || '{"closeRefundAll": true}'::jsonb ELSE policy END,
+      charged_credits = CASE WHEN user_pending THEN NULL ELSE charge END,
+      absorbed_credits = CASE WHEN user_pending THEN NULL ELSE greatest(credits - charge, 0) END,
+      settlement = CASE WHEN pending THEN 'pending' ELSE 'done' END,
+      stopped_by_user = (v_kind = 'stopped'), delivered = p_delivered AND v_kind IN ('completed','stopped'),
+      failure_code = p_failure_code
+    WHERE actor_id = p_actor_id AND id = p_turn_id RETURNING * INTO t;
+  IF s.id IS NOT NULL AND s.active_turn_id = p_turn_id THEN UPDATE runtime_sessions SET active_turn_id = NULL WHERE id = s.id; END IF;
+  RETURN jsonb_build_object('turnId', t.id, 'closeKind', t.close_kind, 'chargedCredits', t.charged_credits,
+    'absorbedCredits', t.absorbed_credits, 'settlement', t.settlement, 'replay', false, 'kindResult', kind_result) || tomb;
+END $function$;
+
+CREATE OR REPLACE FUNCTION public.voice_delete_versions(a uuid, ids uuid[])
+ RETURNS integer
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE n integer;
+BEGIN
+ INSERT INTO voice_billing_scrubs(run_id,actor_id,outcome)
+ SELECT billing_run_id,a,CASE WHEN profile IS NULL THEN 'confirmed_failure' ELSE 'cancelled' END
+ FROM voice_profile_versions WHERE actor_id=a AND id=ANY(ids) AND billing_run_id IS NOT NULL
+ ON CONFLICT(run_id) DO NOTHING;
+ DELETE FROM voice_profile_versions WHERE actor_id=a AND id=ANY(ids);
+ GET DIAGNOSTICS n=ROW_COUNT;
+ -- Owner 10-23: a deletion is effective at once for the turns still running with this version; replies already shown stay
+ -- in the conversation (D7; VOICE-ABORT-FIX 0535: this used to hide every past turn bound to the version). The
+ -- open turns bound to it are locked first, so a turn that closes waits for this commit, re-reads its tombstones, closes
+ -- erased and saves nothing. The callers hold the account row (library_actor), which turn_close takes before its turn row,
+ -- so a turn row held here is only ever held by a call write (turn row only): waiting on it cannot deadlock.
+ PERFORM 1 FROM turns WHERE actor_id=a AND state<>'closed' AND ((policy ? 'voiceVersionId' AND policy->>'voiceVersionId'=ANY(ids::text[]))
+   OR (kind='voice' AND policy->'voice'->>'versionId'=ANY(ids::text[]))) ORDER BY id FOR UPDATE;
+ -- V2-12 B7: what a generation of these versions saved on its receipts (the model's answer, derived from the user's own documents).
+ DELETE FROM turn_call_raw r USING turns t WHERE t.actor_id=a AND t.kind='voice' AND t.policy->'voice'->>'versionId'=ANY(ids::text[])
+  AND r.turn_id=t.id;
+ UPDATE session_messages m SET visible=false FROM turns t
+  WHERE t.actor_id=a AND t.state<>'closed' AND t.policy ? 'voiceVersionId' AND t.policy->>'voiceVersionId'=ANY(ids::text[])
+   AND m.session_id=t.session_id AND m.turn_id=t.id AND m.visible;
+ RETURN n;
+END $function$;
+
+COMMIT;

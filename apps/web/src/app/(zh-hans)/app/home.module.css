@@ -32,7 +32,7 @@
 .account {
   display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 20px; border-radius: 16px;
   background: rgba(255, 255, 255, .72); box-shadow: 0 0 0 1px var(--home-line), 0 18px 40px -30px rgba(120, 70, 0, .35);
-  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
 }
 .account strong, .account span { display: block; }
 .account strong { font-size: 16px; font-weight: 600; }

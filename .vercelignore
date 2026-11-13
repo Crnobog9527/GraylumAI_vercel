@@ -1,8 +1,9 @@
+# .git stays: the Ignored Build Step (apps/web/scripts/vercel-ignore-build.mjs) reads the commits since the last deployment.
+# Function bundles take only traced files, so .git never reaches a deployment.
 .audit-output
 .agent
 .agents
 .claude
-.git
 .release-output
 .turbo
 .next

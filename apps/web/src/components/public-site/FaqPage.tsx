@@ -10,7 +10,8 @@ import { JsonLd } from '@/components/seo/JsonLd';
 import { FAQ_PAGE, faqEntries, faqGroups } from '@/lib/seo/content/faq';
 import { breadcrumbJsonLd, faqPageJsonLd, webPageJsonLd } from '@/lib/seo/structured-data';
 import { SiteShell } from './SiteShell';
-import { CRUMB_LINK, SITE_CHROME, visibleHref } from './site-chrome';
+import { SITE_CHROME, visibleHref } from './site-chrome';
+import styles from './article.module.css';
 
 /** /faq: the landing page's FAQ on its own page; the FAQPage data is made from the same groups the page shows. */
 export function FaqPage({ supportEmail }: { supportEmail?: string | null }) {
@@ -26,21 +27,21 @@ export function FaqPage({ supportEmail }: { supportEmail?: string | null }) {
         breadcrumbJsonLd(FAQ_PAGE.breadcrumb),
         faqPageJsonLd(faqEntries(groups)),
       ]} />
-      <div className="mx-auto max-w-3xl px-4 pt-10 sm:px-6 md:pt-14">
-        <nav aria-label={chrome.breadcrumbLabel} className="mb-6 text-sm text-[#8A8A8A]">
-          <ol className="flex flex-wrap items-center gap-2">
-            <li><Link href={visibleHref('/')} className={CRUMB_LINK}>{FAQ_PAGE.breadcrumb[0].name}</Link></li>
-            <li className="flex items-center gap-2"><span aria-hidden="true">/</span><span aria-current="page">{FAQ_PAGE.breadcrumb[1].name}</span></li>
+      <div className={styles.article} data-wide="">
+        <nav aria-label={chrome.breadcrumbLabel} className={styles.crumbs}>
+          <ol>
+            <li><Link href={visibleHref('/')}>{FAQ_PAGE.breadcrumb[0].name}</Link></li>
+            <li><span aria-hidden="true">/</span><span aria-current="page">{FAQ_PAGE.breadcrumb[1].name}</span></li>
           </ol>
         </nav>
-        <h1 className="text-3xl font-bold leading-tight sm:text-4xl">{FAQ_PAGE.h1}</h1>
-        <p className="mt-5 text-lg leading-8 text-[#E6E6E6]">{FAQ_PAGE.lead}</p>
-        <p className="mt-5 text-sm text-[#8A8A8A]">
-          <Link href={chrome.company[0].href} rel="author" className="underline hover:text-[#FFD700]">{chrome.authorLabel}</Link>
+        <h1 className={styles.title}>{FAQ_PAGE.h1}</h1>
+        <p className={styles.lead}>{FAQ_PAGE.lead}</p>
+        <p className={styles.byline}>
+          <Link href={chrome.company[0].href} rel="author">{chrome.authorLabel}</Link>
           {' · '}{chrome.updatedLabel} <time dateTime={FAQ_PAGE.updated}>{FAQ_PAGE.updated}</time>
         </p>
+        <OfferFaq groups={groups} />
       </div>
-      <OfferFaq groups={groups} />
     </SiteShell>
   );
 }
