@@ -64,3 +64,18 @@ it('closes an unfinished Markdown mark while a reply is still being written', ()
   expect(renderToStaticMarkup(<RuntimeReply text="先拍 **第一" streaming/>)).toContain('<strong>第一</strong>');
   expect(renderToStaticMarkup(<RuntimeReply text="先拍 **第一"/>)).toContain('**第一');
 });
+
+// Chat photos (Owner 2026-11-13): a message sent with images shows them with it, each opening full size, read through the signed-in route.
+it('shows the photos the user sent with their message; a message without photos shows none', () => {
+  const src = (n: number) => `/api/chat-photos/view?p=${encodeURIComponent(`a/b.1.${n}.c.jpg`)}`;
+  const html = renderToStaticMarkup(<>
+    <RuntimeTurnView userText="[截图×2] 帮我做成商品图" photos={[src(0), src(1)]}><RuntimeReply text="好的"/></RuntimeTurnView>
+    <RuntimeTurnView userText="再来一张"><RuntimeReply text="好"/></RuntimeTurnView>
+  </>);
+  expect(html.match(/alt="你发的第/g)).toHaveLength(2);
+  expect(html).toContain('aria-label="你发的图片"');
+  expect(html).toContain('alt="你发的第 1 张图片"');
+  expect(html).toContain('alt="你发的第 2 张图片"');
+  expect(html).toContain(`href="${src(0).replace(/&/g, '&amp;')}"`);
+  expect(html.match(/aria-label="你发的图片"/g)).toHaveLength(1);
+});

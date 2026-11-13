@@ -42,6 +42,7 @@ import { REPLY_CUT, REPLY_CUT_FAILURE, shownSoFar } from './shownReply';
 import { RESEARCH_INPUT_BYTES } from './tools/plan';
 import { fitToolTurn } from './tools/capacity';
 import { chatImages, imageMark, withImages } from './chatImage';
+import { jpegFromDataUrl, keepTurnPhotos, removeTurnPhotos } from '../chatPhotos/photos';
 
 /*
  * CORE-PATH-V2 kind=chat (2.7): a free-chat turn without tools (V2-4a; the free tools come in V2-4b). Database work is
@@ -86,7 +87,8 @@ export type ChatInput = { actorId: string; sessionId: string; requestId: string;
   /** The page's work_item conversation (V2-10b): reads its checks, method and brief before the open. */ workItem?: boolean;
   /** A resumed work turn: the request that claimed its material (the resume has its own id). */ workRequest?: string;
   /** The turn paused for credits this one continues, as read before it (resume.ts). */ resume?: { of: number; read: ResumeRead };
-  /** PUBLISH-MONITOR B2: JPEG data URLs sent with this message only; never saved, logged or written anywhere (chatImage.ts). */
+  /** PUBLISH-MONITOR B2: JPEG data URLs sent with this message. Kept with the message as chat photos (Owner 2026-11-13); never
+   *  logged or written anywhere else (chatImage.ts). */
   images?: string[] };
 
 const sha256 = (text: string) => createHash('sha256').update(text).digest('hex');
@@ -146,7 +148,8 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
   // not by the platform stopping the function (which could save nothing of what the user was shown).
   const budget = createRuntimeBudget();
   // The images are checked before anything is read or frozen: JPEGs within LIB-2d's limits (the route's own allowance is checked again
-  // after the quote). The model sees, and the conversation keeps, the text marked with imageMark(n); the images are in no row.
+  // after the quote). The model sees, and the conversation keeps, the text marked with imageMark(n); the images are in no row (they
+  // are kept with the message as chat photos once the turn is open, below).
   const images = input.images === undefined ? null : chatImages(input.images);
   if (input.images !== undefined && !images) return emit({ type: 'error', code: 'TURN_IMAGE_INVALID' });
   const text = images ? imageMark(images.length) + input.text : input.text;
@@ -268,6 +271,11 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
     ...(tools ? { tools: { available: tools.plan.available, trimmed: tools.plan.trimmed } } : {}) });
   // A repeated request never runs the model again; the first request owns the turn.
   if (opened.replay) return emit({ type: 'error', code: 'TURN_REQUEST_REPLAYED', turnId: opened.turnId });
+  // Chat photos (Owner 2026-11-13): the images stay with this message, uploaded while the model answers. When the turn ends (finally,
+  // below) a kept message waits for the uploads; a turn that kept no message takes them back.
+  const photos = images ? keepTurnPhotos({ client: admin, profileId: input.actorId, sessionId: input.sessionId, turnId: opened.turnId,
+    photos: images.flatMap(image => jpegFromDataUrl(image.url) ?? []) }) : null;
+  let messageKept = false;
   // Archived between the read and the open: the turn runs on, as one opened just before; the miss is only logged (B1).
   if (work) void swallow('turn_work_business_archived_after_read', db.workCheck({ actorId: input.actorId, sessionId: input.sessionId,
     videoRequired: false, requestId: workRequest }), undefined, { category: 'api' });
@@ -421,12 +429,15 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
         ...(stepLog.size ? { steps: savedSteps(stepLog.values()) } : {}) } } : {}) });
     markStage('close');
     if (closed.closeKind === 'erased') return emit({ type: 'error', code: 'TURN_TOMBSTONED', turnId: opened.turnId });
+    messageKept = true;
+    // The page reads the photos again on the result: they are uploaded first (they started before the model call).
+    if (photos) await photos;
     // The held-back tail of a reply that has a hidden block (a lone backtick the stream could not yet tell from its start) goes out now.
     if (captured && answer.length > sentChars && answer.startsWith(reply.slice(0, sentChars))) emit({ type: 'text', delta: answer.slice(sentChars) });
     emit({ type: 'result', turnId: opened.turnId, body: answer, chargedCredits: closed.chargedCredits, settlement: closed.settlement });
   } catch (error) {
     const thrown = stopped ? stopped.code : error instanceof TurnStop ? error.code : error instanceof TurnDatabaseError ? error.code : 'TURN_FAILED';
-    // A turn with images never pauses: a resume could not send them again (they are kept nowhere), so it ends now, refunded in full,
+    // A turn with images never pauses: a resume could not send them to the model again, so it ends now, refunded in full,
     // and the user sends the screenshots again after topping up.
     const code = images && thrown === 'TURN_PAUSED_FOR_CREDITS' ? 'TURN_IMAGE_CREDITS_LOW' : thrown;
     // Paused for credits: the turn waits (recovery or a resume closes it); everything else closes now.
@@ -439,6 +450,7 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
       // by its receipts once the call's cost is known (shownReply.ts). A save that fails falls through to the close below.
       if (code === 'TURN_CALL_UNKNOWN' && saveShown) {
         const kept = await swallow('turn_reply_cut_save_failed', saveShown(), null, { category: 'ai' });
+        if (kept) messageKept = kept.closeKind !== 'erased';
         if (kept) return emit({ type: 'error', code: kept.closeKind === 'erased' ? 'TURN_TOMBSTONED' : REPLY_CUT, turnId: opened.turnId });
       }
       // Any other failure delivered nothing (no answer shown as final, nothing saved): the user pays nothing; the receipts and
@@ -450,5 +462,8 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
         { category: 'ai' });
     }
     emit({ type: 'error', code, turnId: opened.turnId });
+  } finally {
+    // A paused turn never has images (it ends as TURN_IMAGE_CREDITS_LOW above), so a message is either kept now or never.
+    if (photos) await (messageKept ? photos : photos.then(kept => removeTurnPhotos(admin, kept)));
   }
 }

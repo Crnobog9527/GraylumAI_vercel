@@ -1,10 +1,11 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
-const mocks=vi.hoisted(()=>({auth:vi.fn(),create:vi.fn(),cleanup:vi.fn(),backlog:vi.fn(),flush:vi.fn(),heartbeat:vi.fn()}));
+const mocks=vi.hoisted(()=>({auth:vi.fn(),create:vi.fn(),cleanup:vi.fn(),backlog:vi.fn(),flush:vi.fn(),heartbeat:vi.fn(),photos:vi.fn()}));
 vi.mock('@/lib/cron-auth',()=>({validateCronRequest:mocks.auth}));
 vi.mock('@supabase/supabase-js',()=>({createClient:mocks.create}));
 vi.mock('@repo/api/src/services/library/cleanup',()=>({runLibraryCleanup:mocks.cleanup}));
+vi.mock('@repo/api/src/services/chatPhotos/photos',()=>({cleanOrphanPhotos:mocks.photos}));
 vi.mock('@/lib/erasure-backlog-alert',()=>({checkLibraryBacklog:mocks.backlog,flushAlerts:mocks.flush}));
 vi.mock('@/lib/recovery-heartbeat-alert',()=>({checkRecoveryHeartbeat:mocks.heartbeat}));
 import { GET } from './route';
@@ -15,6 +16,7 @@ beforeEach(()=>{
  vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY','synthetic-service-value');
  mocks.create.mockReturnValue({synthetic:true});
  mocks.cleanup.mockResolvedValue({checked:2,released:1,pending:1,failed:0,unknownPaths:0,storageGuard:true,scanCursor:'internal-cursor'});
+ mocks.photos.mockResolvedValue({removed:3,failed:0});
 });
 it('denies unauthorized cron before any client or cleanup work',async()=>{
  mocks.auth.mockReturnValue(new Response('Unauthorized',{status:401}));
@@ -25,7 +27,15 @@ it('uses the existing cron auth and does not return storage continuation',async(
  const request=new Request('https://synthetic.test/api/cron/library-cleanup');
  const response=await GET(request);
  expect(mocks.auth).toHaveBeenCalledWith(request,'library_cleanup');
- expect(await response.json()).toEqual({success:true,checked:2,released:1,pending:1});
+ expect(await response.json()).toEqual({success:true,checked:2,released:1,pending:1,photosRemoved:3});
+});
+// Chat photos (Owner 2026-11-13): those of a deleted conversation are deleted on every run, the backstop of the deletion itself.
+it('deletes the photos of deleted conversations on every run, and a photo it could not delete fails the run',async()=>{
+ await GET(new Request('https://synthetic.test/api/cron/library-cleanup'));
+ expect(mocks.photos).toHaveBeenCalledWith({synthetic:true});
+ mocks.photos.mockResolvedValue({removed:0,failed:2});
+ const response=await GET(new Request('https://synthetic.test/api/cron/library-cleanup'));
+ expect(response.status).toBe(500);expect((await response.json()).success).toBe(false);
 });
 it('fails the run when the storage write guard is missing',async()=>{
  mocks.cleanup.mockResolvedValue({checked:0,released:0,pending:0,failed:0,unknownPaths:0,storageGuard:false});

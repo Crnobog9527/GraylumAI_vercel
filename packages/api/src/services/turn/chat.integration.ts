@@ -93,11 +93,24 @@ async function setup(credits = 1000, options: { image?: boolean } = {}) {
 }
 
 /** A Supabase client that counts its Postgres round trips by REST path. */
+/** The chat photo bucket as Storage answers it (the local stack has no Storage): what was uploaded and what was removed. */
+const photoStore = { uploads: [] as Array<{ path: string; bytes: Buffer }>, removed: [] as string[] };
+const PHOTO_OBJECT = '/storage/v1/object/chat-photos';
 function countingAdmin() {
   const calls: string[] = [];
   const fetcher: typeof fetch = async (input, init) => {
     const path = new URL(input instanceof Request ? input.url : String(input)).pathname;
     if (path.startsWith('/rest/v1/')) calls.push(path.slice('/rest/v1/'.length));
+    if (path.startsWith(`${PHOTO_OBJECT}/`) && init?.method === 'POST') {
+      const key = decodeURIComponent(path.slice(PHOTO_OBJECT.length + 1));
+      photoStore.uploads.push({ path: key, bytes: Buffer.from(await new Response(init.body).arrayBuffer()) });
+      return Response.json({ Key: `chat-photos/${key}`, Id: randomUUID() });
+    }
+    if (path === PHOTO_OBJECT && init?.method === 'DELETE') {
+      const prefixes = (JSON.parse(String(init.body)) as { prefixes: string[] }).prefixes;
+      photoStore.removed.push(...prefixes);
+      return Response.json(prefixes.map(name => ({ name })));
+    }
     return fetch(input, init);
   };
   const admin = createClient(process.env.V3_LOCAL_REST!, process.env.V3_LOCAL_SERVICE_JWT!, { auth: { persistSession: false },
@@ -586,8 +599,9 @@ const logged = () => {
   return { text: () => JSON.stringify(spies.flatMap(spy => spy.mock.calls)), restore: () => spies.forEach(spy => spy.mockRestore()) };
 };
 
-it('RUNTIME: PUBLISH-MONITOR B2: screenshots go to the model with their message, are charged as the turn, and are kept nowhere', async () => {
+it('RUNTIME: PUBLISH-MONITOR B2: screenshots go to the model with their message, are charged as the turn, and are kept with it in Storage only', async () => {
   const f = await setup(1000, { image: true }), url = screenshot(), second = screenshot(), logs = logged();
+  photoStore.uploads.length = 0; photoStore.removed.length = 0;
   const bodies: string[] = [];
   const transport: typeof fetch = async (_url, init) => { bodies.push(String(init?.body)); return sse('gen-image-1', ['看到了', '完播率 42%']); };
   const requestId = randomUUID();
@@ -616,7 +630,13 @@ it('RUNTIME: PUBLISH-MONITOR B2: screenshots go to the model with their message,
   expect(again.events.at(-1)).toMatchObject({ type: 'error', code: 'TURN_REQUEST_REPLAYED' });
   expect(bodies).toHaveLength(1);
   expect((await db.query('select credits from profiles where id=$1', [f.actor])).rows[0].credits).toBe(1000 - result.chargedCredits!);
-  // Owner 10-27 "截图不长期保留": no table holds any piece of it, and no log line does.
+  // Owner 2026-11-13 (replacing 10-27 "截图不长期保留"): the photos are kept with this message in the chat photo bucket, by turn
+  // and position, once (the replayed request uploads nothing more). No table holds any piece of them, and no log line does.
+  const turnId = result.turnId, decoded = (data: string) => Buffer.from(data.slice(JPEG_DATA_URL_PREFIX.length), 'base64');
+  expect(photoStore.uploads.map(upload => upload.path.replace(/\.[0-9a-f-]{36}\.jpg$/, '')).sort())
+    .toEqual([`${f.actor}/${f.session}.${turnId}.0`, `${f.actor}/${f.session}.${turnId}.1`]);
+  expect(photoStore.uploads.find(upload => upload.path.includes(`.${turnId}.0.`))!.bytes.equals(decoded(url))).toBe(true);
+  expect(photoStore.removed).toEqual([]);
   expect(await imageTraces(url)).toEqual([]);
   expect(await imageTraces(second)).toEqual([]);
   expect(logs.text()).not.toContain(url.slice(JPEG_DATA_URL_PREFIX.length + 1000, JPEG_DATA_URL_PREFIX.length + 1048));
@@ -642,6 +662,7 @@ it('RUNTIME: PUBLISH-MONITOR B2: a model that does not read images, and an image
 
 it('RUNTIME: PUBLISH-MONITOR B2: a failed screenshot turn charges nothing and keeps nothing of the image', async () => {
   const f = await setup(1000, { image: true }), url = screenshot();
+  photoStore.uploads.length = 0; photoStore.removed.length = 0;
   // Billed, but cut off before any text (as the V2-4a case above): nothing delivered, the user pays nothing.
   const transport: typeof fetch = async () => new Response(
     frame('gen-image-cut', { choices: [{ index: 0, delta: { role: 'assistant', content: '' }, finish_reason: null }] })
@@ -653,6 +674,9 @@ it('RUNTIME: PUBLISH-MONITOR B2: a failed screenshot turn charges nothing and ke
   expect((await db.query('select close_kind,charged_credits from turns where actor_id=$1', [f.actor])).rows)
     .toEqual([{ close_kind: 'failed', charged_credits: 0 }]);
   expect((await db.query('select credits from profiles where id=$1', [f.actor])).rows[0].credits).toBe(1000);
+  // No message was kept, so its photo is taken back from the chat photo bucket (Owner 2026-11-13: photos go with their message).
+  expect(photoStore.uploads).toHaveLength(1);
+  expect(photoStore.removed).toEqual([photoStore.uploads[0]!.path]);
   expect(await imageTraces(url)).toEqual([]);
 });
 

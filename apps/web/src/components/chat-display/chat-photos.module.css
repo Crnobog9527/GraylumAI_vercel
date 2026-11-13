@@ -1,0 +1,6 @@
+/* Chat photos (Owner 2026-11-13): the images a user sent, shown with their message when the conversation is read again. */
+.photos{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;max-width:85%;margin:0 0 8px auto}
+.photo{display:block;width:120px;height:120px;border-radius:12px;overflow:hidden;background:#f4f4f5;border:1px solid #e9e9e9}
+.photo img{display:block;width:100%;height:100%;object-fit:cover}
+.photo:focus-visible{outline:2px solid #292929;outline-offset:2px}
+@media(max-width:639px){.photos{max-width:90%}.photo{width:96px;height:96px}}

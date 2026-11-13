@@ -154,3 +154,39 @@ describe('conversation cleanup sweep (cron backstop)', () => {
     await expect(sweepErasedConversations({ rpc } as never, Date.now() + 30_000)).rejects.toThrow('CONTENT_ERASURE_SWEEP_FAILED');
   });
 });
+
+// Chat photos (Owner 2026-11-13): a conversation's photos are deleted with it, right away.
+describe('conversation deletion takes its photos', () => {
+  const deleted = { data: { kind: 'session', id, status: 'deleted', alreadyDeleted: false, preservedSavedVersions: 0,
+    financialReviewCount: 0 }, error: null };
+  const me = '00000000-0000-4000-8000-0000000000c1';
+  const photo = (session: string, n: number) => `${session}.${n}.0.00000000-0000-4000-8000-00000000000${n}.jpg`;
+  function withStorage(rpc: ReturnType<typeof vi.fn>, names: string[], remove = vi.fn().mockResolvedValue({ data: [], error: null })) {
+    const list = vi.fn(async (_prefix: string, options: { search?: string }) => ({ error: null,
+      data: names.filter(name => name.startsWith(options.search ?? '')).map(name => ({ name, id: name, created_at: '2026-11-13T00:00:00Z' })) }));
+    const from = vi.fn(() => ({ list, remove }));
+    const scoped = { from: () => ({ select() { return this; }, eq() { return this; },
+      single: async () => ({ data: { ...profile, id: me }, error: null }), maybeSingle: async () => ({ data: { ...profile, id: me }, error: null }) }) };
+    const call = accountRouter.createCaller({ headers: new Headers(), user: { id: me, email: 'u@example.com', app_metadata: {}, user_metadata: {} },
+      profileId: me, isEmailVerified: true, authProvider: 'email', supabase: scoped, supabaseAuth: scoped, supabasePublic: {},
+      supabaseAdmin: { ...scoped, rpc, storage: { from } }, hasSupabaseAdminPrivileges: true } as never);
+    return { call, from, list, remove };
+  }
+
+  it('after the mark, removes this conversation\'s photos only', async () => {
+    const t = withStorage(vi.fn().mockResolvedValueOnce(deleted), [photo(id, 1), photo(id, 2), photo('00000000-0000-4000-8000-0000000000d9', 3)]);
+    await expect(t.call.conversationErasure({ sessionId: id })).resolves.toEqual(deleted.data);
+    expect(t.from).toHaveBeenCalledWith('chat-photos');
+    expect(t.list).toHaveBeenCalledWith(me, expect.objectContaining({ search: `${id}.` }));
+    expect(t.remove).toHaveBeenCalledWith([`${me}/${photo(id, 1)}`, `${me}/${photo(id, 2)}`]);
+  });
+
+  it('a refused deletion touches no photo; a photo that cannot be removed does not fail the deletion', async () => {
+    const refused = withStorage(vi.fn().mockResolvedValue({ data: null, error: { code: '42501', message: 'CONTENT_NOT_FOUND' } }), [photo(id, 1)]);
+    await expect(refused.call.conversationErasure({ sessionId: id })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    expect(refused.from).not.toHaveBeenCalled();
+    const stuck = withStorage(vi.fn().mockResolvedValueOnce(deleted), [photo(id, 1)], vi.fn().mockRejectedValue(new Error('down')));
+    await expect(stuck.call.conversationErasure({ sessionId: id })).resolves.toEqual(deleted.data);
+  });
+});
+

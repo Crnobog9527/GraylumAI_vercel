@@ -96,6 +96,8 @@
     "./src/services/redisRateLimiter": "./src/services/redisRateLimiter.ts",
     "./src/services/connectors/shotviva/connect": "./src/services/connectors/shotviva/connect.ts",
     "./src/services/connectors/shotviva/images": "./src/services/connectors/shotviva/images.ts",
+    "./src/services/chatPhotos/photos": "./src/services/chatPhotos/photos.ts",
+    "./src/services/chatPhotos/grant": "./src/services/chatPhotos/grant.ts",
     "./src/services/turn/settings/stopLossNotify": "./src/services/turn/settings/stopLossNotify.ts",
     "./src/services/ownerAlerts": "./src/services/ownerAlerts/index.ts",
     "./src/services/ownerAlerts/errorSpike": "./src/services/ownerAlerts/errorSpike.ts",

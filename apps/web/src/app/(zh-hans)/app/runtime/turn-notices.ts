@@ -46,7 +46,7 @@ const FAILED: Record<string, string> = {
   // "pick another model": the system chooses the model (the composer only shows Auto), so that is advice the user cannot follow.
   TURN_MODEL_METERING_BLOCKED: '这个模型暂时停用，这一轮没有完成，积分已退回。请稍后再试。',
   TURN_PAUSED_FOR_CREDITS: TURN_PAUSED_NOTICE,
-  // A turn with a screenshot cannot pause (the image is kept nowhere to send again): it ends refunded instead.
+  // A turn with a screenshot cannot pause (a resume could not send the image to the model again): it ends refunded instead.
   TURN_IMAGE_CREDITS_LOW: '积分不足，带截图的这一轮没有完成，已全额退回积分。充值后请重新附上截图发送。',
   // Owner 2026-11-11: a turn cut off saved no answer and charges nothing; its freeze returns once the provider cost is known.
   TURN_CALL_UNKNOWN: '模型回复中断，这一轮没有完成，不扣积分；已冻结的积分核对后会退回。',
