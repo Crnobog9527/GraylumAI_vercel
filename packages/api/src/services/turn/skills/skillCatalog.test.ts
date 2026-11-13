@@ -55,7 +55,7 @@ function clients(social:Record<string,boolean|undefined>={}){
  } as unknown as SupabaseClient;
  const admin={
   from:tables((table,f)=>{
-   if(table==='modules')return {data:catalog.filter(c=>(f.id as string[]).includes(c.module)).map(c=>({id:c.module,skill_id:c.skill,model_id:c.model,
+   if(table==='modules')return {data:catalog.filter(c=>(f.id as string[]).includes(c.module)).map(c=>({id:c.module,skill_id:c.skill,model_id:c.model,title:c.name==='skill-gamma'?null:`显示名 ${c.name}`,
     social_media_related:c.module in social?social[c.module]:false,required_member_level:version.level})),error:null};
    // CONTENT-CONVERSATION-DRIVEN: the published version of each Skill, which a cached catalog is checked against.
    if(table==='skills')return {data:(f.id as string[]).map(skill=>({id:skill,status:skillState.status,published_version:skillState.version})),error:null};
@@ -85,6 +85,14 @@ it('lists loadable Skills without reading any model, skipping task packages, pos
   expect(c.resultBytes).toBeGreaterThan(0);
   expect(c).not.toHaveProperty('modelId');
  }
+});
+it('LOAD-SKILL: each entry carries its module\'s display title (the menu name), none when the module has no title',async()=>{
+ const {user,admin}=clients();
+ const listed=await discoverSkillCatalog(user,admin,{maxResultBytes:20000,excludeSocial:false});
+ expect(listed.map(c=>[c.name,c.title])).toEqual([['skill-alpha','显示名 skill-alpha'],['skill-gamma',undefined],['skill-epsilon','显示名 skill-epsilon']]);
+ // A pinned revision, read without its module row, keeps the title listed for the same module.
+ const pinned={...listed[0]!,revisionId:id(98)};delete (pinned as {title?:string}).title;
+ expect(withPinnedSkill(listed,{moduleId:listed[0]!.moduleId},pinned).find(c=>c.revisionId===id(98))?.title).toBe('显示名 skill-alpha');
 });
 it('drops social media Skills without a confirmed positioning and Skills too large to load',async()=>{
  const {user,admin}=clients({[id(1)]:true});

@@ -20,6 +20,9 @@ const DESCRIPTION_CHARS = 200;
 
 export const catalogEntry = z.object({
   name: z.string().min(1).max(80), description: z.string().max(DESCRIPTION_CHARS),
+  // LOAD-SKILL: the module's display title (the name the composer menu and 功能广场 show, modules.title), read with the module row.
+  // The page's step line names a loaded Skill by it; `name` is the package's internal name, which the model calls and users never see.
+  title: z.string().min(1).max(80).optional(),
   moduleId: z.string().uuid(), skillId: z.string().uuid(), packageId: z.string().min(1),
   revisionId: z.string().uuid(), packageHash: z.string().regex(/^[a-f0-9]{64}$/),
   // Bytes of the exact tool result for this entry; admission reserves the largest MAX_SKILL_LOADS_PER_TURN of them.
@@ -171,7 +174,7 @@ async function discoverUncached(user: SupabaseClient, admin: SupabaseClient,
   const visible = await (limits.request?.visible ?? userVisibleModules(user, { limit: 65, orderById: true }));
   if (visible.error || visible.data.length > 64) throw new Error('RUNTIME_CATALOG_CAPACITY');
   if (!visible.data.length) return [];
-  const rows = await admin.from('modules').select('id,skill_id,social_media_related,uses_user_voice,required_member_level')
+  const rows = await admin.from('modules').select('id,skill_id,title,social_media_related,uses_user_voice,required_member_level')
     .in('id', visible.data.map(m => m.id)).eq('active', true).order('id');
   if (rows.error) throw new Error('RUNTIME_CATALOG_UNAVAILABLE');
   const catalog: SkillCatalogEntry[] = [];
@@ -200,7 +203,9 @@ async function discoverUncached(user: SupabaseClient, admin: SupabaseClient,
       // Names are what the model calls; a duplicate name would be ambiguous, so the first (lowest module id) wins.
       if (catalog.some(other => other.name === entry.name)) continue;
       const requiredLevel = asRequiredLevel(row.required_member_level);
-      catalog.push(catalogEntry.parse({ ...entry, resultBytes, ...(row.uses_user_voice === true ? { usesVoice: true } : {}),
+      const title = typeof row.title === 'string' ? row.title.trim().slice(0, 80) : '';
+      catalog.push(catalogEntry.parse({ ...entry, resultBytes, ...(title ? { title } : {}),
+        ...(row.uses_user_voice === true ? { usesVoice: true } : {}),
         ...(row.social_media_related !== false ? { social: true } : {}),
         ...(requiredLevel ? { requiredMemberLevel: requiredLevel } : {}) }));
       if (catalog.length >= MAX_CATALOG_ENTRIES) return catalog;
