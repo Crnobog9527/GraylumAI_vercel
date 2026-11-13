@@ -89,6 +89,41 @@ export async function workContentCases(t){
   assert.deepEqual([source.status,source.contentId],['ready',story.id]);
   assert.deepEqual(await call('opc_work_source($1,$2,$3)',[w.a.actor,w.a.session,'script']),{status:'none'});
  }
+ // CONTENT-CONVERSATION-2 (0532): a topic-window turn is given the final script and that script's newest storyboard as a list
+ // (opc_work_check 'sources', frozen as policy.workSources); a storyboard and editing advice are saved from it, the check after the
+ // open covers every listed source, and deleting one reaches the turns given it.
+ {
+  const w=await workspace(),script=await save(w,{expected:await latest(w,'script'),id:(await turn(w,{text:'LIST_SCRIPT'})).id});
+  const list=sources=>({workSources:sources.map(s=>({contentId:s.contentId,kind:s.kind}))});
+  let sources=(await work(w,randomUUID())).work.sources;
+  assert.deepEqual(sources.map(s=>[s.kind,s.contentId,s.body]),[['script',script.id,'LIST_SCRIPT']],'a final script, no storyboard yet');
+  // A request that claimed video material keeps the old package flow: no list.
+  const claimed=randomUUID();await prepare(w,claimed,script.id);
+  assert.deepEqual((await work(w,claimed)).work.sources,[]);
+  const r=await turn(w,{text:'LIST_STORY',extra:list(sources)});
+  assert.match(await refusal(save(w,{kind:'editing',expected:await latest(w,'editing'),id:r.id})),/OPC_CONTENT_SOURCE/,'no storyboard was given');
+  const story=await save(w,{kind:'storyboard',expected:await latest(w,'storyboard'),id:r.id});
+  assert.equal((await version(story.id)).source_content_id,script.id);
+  sources=(await work(w,randomUUID())).work.sources;
+  assert.deepEqual(sources.map(s=>[s.kind,s.contentId]),[['script',script.id],['storyboard',story.id]]);
+  const both=await turn(w,{text:'LIST_EDIT',extra:list(sources)});
+  const edit=await save(w,{kind:'editing',expected:await latest(w,'editing'),id:both.id});
+  assert.equal((await version(edit.id)).source_content_id,story.id,'editing advice reads the listed storyboard');
+  const story2=await save(w,{kind:'storyboard',expected:await latest(w,'storyboard'),id:both.id});
+  assert.equal((await version(story2.id)).source_content_id,script.id,'a revised storyboard reads the listed script');
+  const verify=id=>call('opc_work_verify($1,$2)',[w.actor,id]);
+  const opened=await open(w.a,{session:w.session,pol:policy(list(sources))});
+  assert.equal(await verify(opened.turnId),true);
+  await close(w.a,opened.turnId,'failed',{messages:[],delivered:false});
+  const scope=(await one("select content_erasure_scope($1,'content',$2) v",[w.actor,story.id])).turns.map(Number);
+  assert.ok(scope.includes(Number(both.id)),'deleting the storyboard reaches the turn given it in the list');
+  const hash=(await one("select content_erasure_preview($1,'content',$2) v",[w.actor,story.id])).previewHash;
+  await one("select content_erasure_confirm($1,'content',$2,$3) v",[w.actor,story.id,hash]);
+  const after=await open(w.a,{session:w.session,pol:policy(list(sources))});
+  assert.equal(await verify(after.turnId),false,'a listed source was deleted');
+  await close(w.a,after.turnId,'failed',{messages:[],delivered:false});
+  report.checks.push('CONTENT-CONVERSATION-2 0532: a video topic window is given its final script and storyboard as a list; storyboard and editing saved from it; verify and content delete cover every listed source');
+ }
  // Video: a claim reads its own revision, holds it from other requests, freezes it; the package saves once.
  {
   const w=await workspace(),script=await save(w,{expected:await latest(w,'script'),id:(await turn(w,{text:'定稿口播稿'})).id});
