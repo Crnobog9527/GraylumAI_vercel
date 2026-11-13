@@ -5,9 +5,9 @@ import { useSearchParams } from 'next/navigation';
 import { WorkspaceFrame } from '@/components/opc/workspace-frame';
 import { IntegrationsView } from '@/components/integrations/IntegrationsView';
 
-/** INTEGRATION-SHOTVIVA PR C (Owner 2026-11-12): the integrations page, reached from the phone's 功能 page (and, after PR D, the rail). */
+/** INTEGRATION-SHOTVIVA PR C (Owner 2026-11-12): the integrations page, reached from the phone's 功能 page and the rail's 集成 (PR D). */
 export default function IntegrationsPage() {
-  return <WorkspaceFrame area="tools"><Suspense fallback={null}><WithResult/></Suspense></WorkspaceFrame>;
+  return <WorkspaceFrame area="integrations"><Suspense fallback={null}><WithResult/></Suspense></WorkspaceFrame>;
 }
 
 function WithResult() {

@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { ConversationRow } from './conversation-row';
 import { DraftRow } from './draft-row';
@@ -91,4 +91,20 @@ it('links 数据复盘 and 发布排期 to their pages once the switch is on (PU
   expect(html).not.toContain('待接入');
   const schedule = renderToStaticMarkup(<RailView area="schedule" dataReview><span/></RailView>);
   expect(schedule).toMatch(/<a aria-current="page" href="\/app\/publish-schedule"><img[^>]*calendar-blank[^>]*\/>发布排期<\/a>/);
+});
+
+describe('INTEGRATION-SHOTVIVA PR D: 集成 in the rail', () => {
+  const link = (area: Parameters<typeof RailView>[0]['area']) => {
+    const html = renderToStaticMarkup(<RailView area={area}><span/></RailView>);
+    const tag = [...html.matchAll(/<a\b[^>]*>/g)].find(match => match[0].includes('href="/app/integrations"'));
+    return tag ? { tag: tag[0], after: html.slice(tag.index! + tag[0].length, html.indexOf('</a>', tag.index)) } : null;
+  };
+  it('links to the integrations page and is the current entry there, not elsewhere', () => {
+    const here = link('integrations');
+    expect(here?.after).toContain('集成');
+    expect(here?.tag).toContain('aria-current="page"');
+    const elsewhere = link('library');
+    expect(elsewhere?.after).toContain('集成');
+    expect(elsewhere?.tag).not.toContain('aria-current');
+  });
 });

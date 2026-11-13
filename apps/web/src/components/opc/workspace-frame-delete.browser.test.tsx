@@ -324,6 +324,10 @@ it('Esc on the strategy menu returns focus to its own button, not an earlier row
 }, '#strategy'));
 
 it('deletes a work conversation through the same one-click dialog; the work itself stays', () => open(1280, async page => {
+  // The row can sit just below the fold of the 800px page (the rail has one more entry since INTEGRATION-SHOTVIVA PR D). Bring it into
+  // view and let the list's scroll event land first: the rail closes an open ⋯ menu whenever its list scrolls (by design).
+  await page.getByRole('button', { name: '口播稿工作的更多操作' }).scrollIntoViewIfNeeded();
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   await page.getByRole('button', { name: '口播稿工作的更多操作' }).focus();
   await page.keyboard.press('Enter');
   await page.getByRole('menuitem', { name: '永久删除对话记录' }).click();

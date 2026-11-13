@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { CSSProperties, KeyboardEvent, ReactNode, Ref, SyntheticEvent } from 'react';
 import Link from 'next/link';
-import { ArrowRight, ChevronDown, Columns3, Ellipsis, Grid2X2, Pencil, Pin, Scale, Sparkles, X } from 'lucide-react';
+import { ArrowRight, ChevronDown, Columns3, Ellipsis, Grid2X2, Pencil, Pin, Plug, Scale, Sparkles, X } from 'lucide-react';
 import { ANNOUNCEMENT } from '@/lib/announcement';
 import { HoverPrefetchLink } from './hover-prefetch-link';
 import styles from './workspace-frame.module.css';
@@ -18,7 +18,8 @@ import { AccountAvatar } from '../profile/AccountAvatar';
  * Which page the shell is around. `tools` is the phone's 功能 page and `history` its 对话 page (the rail's own list, shown as
  * the page): both exist for a phone's bottom bar (phone-tabs.tsx) and look like any other area on a computer.
  */
-export type RailArea = 'chat' | 'library' | 'topics' | 'marketplace' | 'search' | 'start' | 'review' | 'schedule' | 'tools' | 'history';
+export type RailArea = 'chat' | 'library' | 'topics' | 'marketplace' | 'search' | 'start' | 'review' | 'schedule' | 'tools' | 'history'
+  | 'integrations';
 type Click = (event: SyntheticEvent<HTMLElement>) => void;
 
 /** Top bar: logo, "首页 / 对话 / 个人中心", and the phone menu button. */
@@ -92,6 +93,9 @@ export function RailView({ area, returnParam = '', onCloseMobile, launched = fal
           <img className={styles.navIcon} src="/opc-reference/chart-bar.svg" alt=""/>数据复盘</HoverPrefetchLink> : <button disabled>
           <img className={styles.navIcon} src="/opc-reference/chart-bar.svg" alt=""/>数据复盘 <small>待接入</small></button>}
       </>}
+      {/* INTEGRATION-SHOTVIVA PR D: the products used with Graylum (the phone reaches the same page from 功能). */}
+      <HoverPrefetchLink href="/app/integrations" aria-current={area==='integrations'?'page':undefined}>
+        <Plug className={styles.navIcon} strokeWidth={1.5} aria-hidden="true"/>集成</HoverPrefetchLink>
     </nav>
     {children}
   </aside>;
