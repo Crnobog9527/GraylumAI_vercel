@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from 'vitest';
-import { createShotvivaClient, shotvivaOrigin, ShotvivaError } from './client';
+import { createShotvivaClient, shotvivaOrigin, shotvivaPageUrl, ShotvivaError } from './client';
 
 const ACCOUNT = '00000000-0000-4000-8000-0000000000aa';
 const KEY = 'sv_test_fixturekey0000';
@@ -87,5 +87,16 @@ describe('INTEGRATION-SHOTVIVA PR B: templates, generate and jobs', () => {
     const send = reply(404, { code: 'not_found', message: 'x' });
     await failure(client(send).job(ACCOUNT, '../account'));
     expect((send.mock.calls[0] as unknown as [URL])[0].pathname).toBe('/api/partner/jobs/..%2Faccount');
+
+describe('shotvivaPageUrl (the top-up link the page opens)', () => {
+  it('only https on Shotviva\'s own domain or a subdomain of it', () => {
+    const origin = 'https://shotviva.com';
+    expect(shotvivaPageUrl('https://shotviva.com/zh/pricing?from=graylum', origin)).toBe('https://shotviva.com/zh/pricing?from=graylum');
+    expect(shotvivaPageUrl('https://www.shotviva.com/pricing', origin)).toBe('https://www.shotviva.com/pricing');
+    expect(shotvivaPageUrl('https://shotviva.com/pricing', 'https://www.shotviva.com')).toBe('https://shotviva.com/pricing');
+    for (const bad of ['http://shotviva.com/pricing', 'https://evil.test/pricing', 'https://shotviva.com.evil.test/x',
+      'https://evilshotviva.com/x', 'https://u:p@shotviva.com/x', 'https://shotviva.com:8443/x', 'javascript:alert(1)', '', null, undefined]) {
+      expect(shotvivaPageUrl(bad, origin), String(bad)).toBeNull();
+    }
   });
 });

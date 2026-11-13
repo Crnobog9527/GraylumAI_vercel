@@ -1,23 +1,30 @@
 'use client';
 
 import { memo } from 'react';
-import { LogOut } from 'lucide-react';
+import Link from 'next/link';
+import { LogOut, Shield } from 'lucide-react';
 import { FounderBadge } from '@/components/founder/FounderBadge';
 import type { ProfileTab } from '@/lib/profile-tabs';
 import { PROFILE_MENU_ITEMS as menuItems, useProfileLogout } from './profile-menu';
 
 export type { ProfileTab };
 
+const ADMIN_ENTRY_CLASS = 'w-full flex items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-lg transition-colors duration-200 '
+  + 'motion-reduce:transition-none hover:bg-[var(--gl-surface-warm,#faf9f5)] hover:text-[var(--text-primary)]';
+
 interface ProfileSidebarProps {
   activeTab: ProfileTab;
   onTabChange: (tab: ProfileTab) => void;
   mobile?: boolean;
+  /** An admin's way into the admin console (Owner 2026-11-13). Only the link: /admin still checks the role on the server. */
+  isAdmin?: boolean;
 }
 
 const ProfileSidebar = memo(function ProfileSidebar({
   activeTab,
   onTabChange,
   mobile = false,
+  isAdmin = false,
 }: ProfileSidebarProps) {
   const { pending: isLoggingOut, run: handleLogout } = useProfileLogout();
 
@@ -63,6 +70,18 @@ const ProfileSidebar = memo(function ProfileSidebar({
       </div>
 
       <div className="pt-4" style={{ borderTop: '1px solid var(--border-primary)' }}>
+        {isAdmin && (
+          <Link
+            prefetch={false}
+            href="/admin"
+            data-testid="profile-admin-entry"
+            className={ADMIN_ENTRY_CLASS}
+            style={{ color: 'var(--text-secondary)' }}
+          >
+            <Shield className="h-4 w-4" />
+            管理后台
+          </Link>
+        )}
         <button
           onClick={handleLogout}
           disabled={isLoggingOut}

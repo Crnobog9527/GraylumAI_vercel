@@ -126,6 +126,8 @@ function ProfilePageContent() {
   }), [userProfile, credits, creditsStatus]);
 
   const [localUser, setLocalUser] = useState<MockUser | null>(null);
+  // The admin console's link (Owner 2026-11-13): the workbench header that used to carry it is no longer on these pages.
+  const isAdmin = userProfile?.role === 'admin';
 
   // Sync localUser with userData when data loads
   const effectiveUser = useMemo(() => ({
@@ -188,7 +190,8 @@ function ProfilePageContent() {
             name={accountDisplayName({ data: userProfile }) ?? '用户'} avatarUrl={effectiveUser.avatar_url}
             initial={effectiveUser.full_name?.[0] || effectiveUser.email?.[0]?.toUpperCase() || 'U'}
             membership={membershipText({ data: userProfile })} credits={effectiveUser.credits}
-            onOpen={openFromHub} onFeedback={() => { setTicketInitialView('create'); openFromHub('tickets'); }} />}
+            onOpen={openFromHub} onFeedback={() => { setTicketInitialView('create'); openFromHub('tickets'); }}
+            isAdmin={isAdmin} />}
 
           {/* The section drawer: between the phone and the desktop widths (640–767px). On a phone the list above replaces it. */}
           <div className={`md:hidden mb-4 ${profileMobileStyles.drawerTrigger}`}>
@@ -219,6 +222,7 @@ function ProfilePageContent() {
                   mobile
                   activeTab={activeTab}
                   onTabChange={setActiveTab}
+                  isAdmin={isAdmin}
                 />
               </SheetContent>
             </Sheet>
@@ -228,6 +232,7 @@ function ProfilePageContent() {
           <ProfileSidebar
             activeTab={activeTab}
             onTabChange={setActiveTab}
+            isAdmin={isAdmin}
           />
 
           {/* Main Content */}

@@ -21,18 +21,18 @@ const tiles = (html: string) => [...html.matchAll(/<li>(<a [^>]*href="([^"]+)"|<
   .map(tile => [tile[3], tile[2] ?? (tile[1].startsWith('<button') ? 'button' : 'waiting'), tile[5] ?? '']);
 
 // Owner 2026-11-12, phone plan A: the 功能 page lists what the rail's function links lead to; nothing in it is new.
-it('lists the rail\'s own entries; 发布排期 and 数据复盘 wait until their switch is on, 集成 waits for its page', () => {
+it('lists the rail\'s own entries; 发布排期 and 数据复盘 wait until their switch is on, 集成 opens the integrations page', () => {
   const html = renderToStaticMarkup(<ToolsPage />);
   expect(state.area).toBe('tools');
   expect(tiles(html)).toEqual([
     ['功能广场', '/app/workbench/marketplace', ''], ['资料库', '/app/library', ''], ['发布排期', 'waiting', '待接入'], ['数据复盘', 'waiting', '待接入'],
-    ['多模型对比', 'button', ''], ['评审团', 'button', ''], ['集成', 'waiting', '待接入'],
+    ['多模型对比', 'button', ''], ['评审团', 'button', ''], ['集成', '/app/integrations', ''],
   ]);
   expect(html).toMatch(/<h1>功能<\/h1><a [^>]*href="\/app\/workbench\/search"/);
   expect(html).toMatch(/<a [^>]*href="\/app\/profile\?tab=tickets"[^>]*>.*?在线反馈/);
   expect(html).toContain('data-dialogs');
-  // 集成 is kept a place for, never a link to a page that is not there.
-  expect(html).not.toContain('/app/integrations');
+  // 集成 links to its page (INTEGRATION-SHOTVIVA PR C), and only once.
+  expect(html.match(/href="\/app\/integrations"/g)).toHaveLength(1);
 });
 
 it('once the publishing switch is on, 发布排期 and 数据复盘 are links, as in the rail', () => {
@@ -44,7 +44,7 @@ it('once the publishing switch is on, 发布排期 and 数据复盘 are links, a
 
 it('while the switch\'s answer is unknown they wait: nothing is offered by guess', () => {
   state.open = undefined;
-  expect(tiles(renderToStaticMarkup(<ToolsPage />)).filter(tile => tile[1] === 'waiting').map(tile => tile[0])).toEqual(['发布排期', '数据复盘', '集成']);
+  expect(tiles(renderToStaticMarkup(<ToolsPage />)).filter(tile => tile[1] === 'waiting').map(tile => tile[0])).toEqual(['发布排期', '数据复盘']);
 });
 
 it('shows 多模型对比 and 评审团 only when the rail would (the same hook decides), each a button', () => {

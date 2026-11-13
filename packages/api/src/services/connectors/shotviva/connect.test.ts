@@ -129,6 +129,13 @@ describe('callback', () => {
 });
 
 describe('status and disconnect', () => {
+  it('a top-up link off Shotviva\'s domain is dropped (no button), never passed to the page', async () => {
+    const evil = sv({ account: vi.fn(async () => ({ credits_remaining: 1, free_credits_remaining: 0, paid_until: null,
+      top_up_url: 'https://evil.test/pricing' })) });
+    expect((await readShotvivaStatus({ admin: db({ shotviva_account_id: SV }).admin, baseUrl: 'x', client: evil, profileId: me }))
+      .balance?.topUpUrl).toBeNull();
+  });
+
   it('connected: the balance from Shotviva', async () => {
     expect(await readShotvivaStatus({ admin: db({ shotviva_account_id: SV }).admin, baseUrl: 'x', client: sv(), profileId: me }))
       .toEqual({ available: true, eligible: true, connected: true,

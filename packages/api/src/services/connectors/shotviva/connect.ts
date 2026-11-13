@@ -5,7 +5,7 @@ import { logger } from '../../../lib/logger';
 import { readOwnDataTier } from '../../membershipEntitlements';
 import { getPlatformSecret, PlatformSecretError } from '../../platformSecrets/reader';
 import { validPlatformSecret } from '../../platformSecrets/slots';
-import { createShotvivaClient, ShotvivaError, type ShotvivaClient } from './client';
+import { createShotvivaClient, shotvivaPageUrl, ShotvivaError, type ShotvivaClient } from './client';
 
 /** INTEGRATION-SHOTVIVA PR A: connect a Graylum account to a Shotviva account by the redirect flow of the connector
  * spec (Shotviva 规范/CONNECTOR_shortest_path_fable.md §2): Graylum sends the user to Shotviva's authorize page with a
@@ -116,7 +116,8 @@ export type ShotvivaStatus = {
   eligible: boolean;
   connected: boolean;
   /** Present when connected and Shotviva answered; null when it could not be read just now. */
-  balance: { credits: number; freeCredits: number; paidUntil: string | null; topUpUrl: string } | null;
+  /** topUpUrl: Shotviva's top-up page, only when it is https on Shotviva's own domain (else null and no button). */
+  balance: { credits: number; freeCredits: number; paidUntil: string | null; topUpUrl: string | null } | null;
 };
 
 /** For the integrations page. A link the user revoked on Shotviva comes back as link_revoked: the id is cleared (only if
@@ -129,7 +130,8 @@ export async function readShotvivaStatus(deps: ShotvivaDeps & { profileId: strin
   try {
     const account = await client.account(accountId);
     return { available: true, eligible, connected: true, balance: { credits: account.credits_remaining,
-      freeCredits: account.free_credits_remaining, paidUntil: account.paid_until, topUpUrl: account.top_up_url } };
+      freeCredits: account.free_credits_remaining, paidUntil: account.paid_until,
+      topUpUrl: shotvivaPageUrl(account.top_up_url, client.origin) } };
   } catch (error) {
     if (error instanceof ShotvivaError && error.code === 'link_revoked') {
       await clearLink(deps.admin, deps.profileId, accountId);

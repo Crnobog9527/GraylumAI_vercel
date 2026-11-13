@@ -9,6 +9,7 @@ const state = vi.hoisted(() => ({
   params: new URLSearchParams(),
   profile: {} as Record<string, unknown>,
   onTabChange: undefined as undefined | ((tab: string) => void),
+  sidebarAdmin: [] as boolean[],
 }));
 
 vi.mock('next/navigation', () => ({ useSearchParams: () => state.params }));
@@ -27,8 +28,9 @@ vi.mock('@/hooks/use-profile-prefetch', () => ({ useProfilePrefetch: () => undef
 vi.mock('@/components/profile/ProfileShell', () => ({ ProfileShell: ({ children }: { children: ReactNode }) => <>{children}</> }));
 vi.mock('@/components/layout/GlobalBanner', () => ({ default: () => null }));
 vi.mock('@/components/profile/ProfileSidebar', () => ({
-  default: ({ activeTab, onTabChange }: { activeTab: string; onTabChange: (tab: string) => void }) => {
+  default: ({ activeTab, onTabChange, isAdmin }: { activeTab: string; onTabChange: (tab: string) => void; isAdmin?: boolean }) => {
     state.onTabChange = onTabChange;
+    state.sidebarAdmin.push(Boolean(isAdmin));
     return <nav data-active-tab={activeTab} />;
   },
 }));
@@ -59,6 +61,7 @@ const realProfile = { id: 'u1', email: 'a@example.com', nickname: '小王', memb
 
 beforeEach(() => {
   state.params = new URLSearchParams();
+  state.sidebarAdmin = [];
   state.profile = { data: realProfile, isLoading: false, error: null, isFetching: false, refetch: vi.fn() };
 });
 
@@ -150,5 +153,29 @@ describe('the Cookie settings card', () => {
     const links = read('../../../../components/analytics/ConsentPreferenceLinks.tsx');
     expect(links).toContain("'zh-Hans': 'Cookie 设置'");
     expect(links).toContain('openConsentPreferences');
+  });
+});
+
+// Owner 2026-11-13: an admin signed in to the profile center had no way into the admin console (the workbench header that carried
+// the link is no longer on these pages). The link is shown to admins only; /admin itself still checks the role on the server.
+describe('admin console entry', () => {
+  it('is offered to an admin on the desktop menu and the phone list', () => {
+    state.profile = { ...state.profile, data: { ...realProfile, role: 'admin' } };
+    const html = renderToStaticMarkup(<ProfilePage />);
+    // The closed drawer renders nothing; the desktop menu is the one sidebar drawn here.
+    expect(state.sidebarAdmin).toEqual([true]);
+    expect(html).toContain('data-testid="profile-hub-admin-entry"');
+    expect(html).toContain('href="/admin"');
+  });
+
+  it('is not offered to anyone else', () => {
+    for (const role of ['user', undefined]) {
+      state.sidebarAdmin = [];
+      state.profile = { ...state.profile, data: { ...realProfile, role } };
+      const html = renderToStaticMarkup(<ProfilePage />);
+      expect(state.sidebarAdmin).toEqual([false]);
+      expect(html).not.toContain('profile-hub-admin-entry');
+      expect(html).not.toContain('管理后台');
+    }
   });
 });

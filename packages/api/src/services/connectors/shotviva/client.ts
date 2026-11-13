@@ -34,6 +34,17 @@ export function shotvivaOrigin(value: string | undefined): string | null {
   } catch { return null; }
 }
 
+/** A link Shotviva sends for the user to open (top_up_url): https on Shotviva's own host or a subdomain of it, else null. The
+ * contract only says it is a URL; a page link must never point anywhere else. */
+export function shotvivaPageUrl(value: string | null | undefined, origin: string): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value), host = new URL(origin).hostname.replace(/^www\./, '');
+    if (url.protocol !== 'https:' || url.username || url.password || url.port) return null;
+    return url.hostname === host || url.hostname.endsWith(`.${host}`) ? url.toString() : null;
+  } catch { return null; }
+}
+
 async function readBounded(response: Response, limit: number): Promise<string> {
   if (Number(response.headers.get('content-length')) > limit) throw new ShotvivaError('unavailable', response.status);
   if (!response.body) return '';
