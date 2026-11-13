@@ -39,7 +39,9 @@ export async function listImageTemplates(deps: ShotvivaDeps & { profileId: strin
   if (!linked.accountId) return { ok: false, code: 'not_linked' };
   try {
     const { templates } = await linked.client.templates(linked.accountId);
-    return { ok: true, templates: templates.filter(template => template.fields.images.min === 0) };
+    // Owner 2026-11-13 ("上线前要支持" a photo plus a template): every template the partner catalog lists, photo or not. A template
+    // that needs several photos is web-only at Shotviva and never listed here; the contract takes one photo, as `image`.
+    return { ok: true, templates };
   } catch (error) {
     if (error instanceof ShotvivaError && error.code === 'link_revoked') await clearLink(deps.admin, deps.profileId, linked.accountId);
     return { ok: false, code: error instanceof ShotvivaError ? error.code : 'unavailable' };
@@ -49,6 +51,8 @@ export async function listImageTemplates(deps: ShotvivaDeps & { profileId: strin
 /** `callId` is the turn's tool call id: the idempotency key, so a resent call is the same job and is charged once. */
 export async function generateImage(deps: ShotvivaDeps & {
   profileId: string; callId: string; templateId: string; copy: Record<string, string>; aspectRatio?: string;
+  /** One chat photo for Shotviva to fetch: a Graylum address with a few-minutes signed token (chatPhotos/grant.ts). */
+  image?: string;
   generateTimeoutMs?: number;
 }): Promise<ImageOutcome> {
   const failed = (code: ImageFailure, extra: Partial<{ topUpUrl: string | null; jobId: string | null; refunded: boolean }> = {}) =>
@@ -63,7 +67,8 @@ export async function generateImage(deps: ShotvivaDeps & {
   } catch { return failed('unavailable'); }
   const { client } = linked;
   const accountId = linked.accountId;
-  const request = { template_id: deps.templateId, inputs: { copy: deps.copy, ...(deps.aspectRatio ? { aspect_ratio: deps.aspectRatio } : {}) } };
+  const request = { template_id: deps.templateId, inputs: { copy: deps.copy, ...(deps.aspectRatio ? { aspect_ratio: deps.aspectRatio } : {}) },
+    ...(deps.image ? { image: deps.image } : {}) };
   const settle = (answer: Awaited<ReturnType<typeof client.generate>>): ImageOutcome => answer.status === 'succeeded' && answer.image_url
     ? { status: 'succeeded', jobId: answer.job_id, imageUrl: answer.image_url, viewUrl: viewUrl(client.origin, answer.job_id),
         creditsCharged: answer.credits_charged, creditsRemaining: answer.credits_remaining,

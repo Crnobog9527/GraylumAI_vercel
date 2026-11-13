@@ -48,7 +48,7 @@ export async function POST(request: NextRequest) {
     rateLimited: async actorId => !(await checkRateLimit(actorId, 'ai_stream')).success,
     databaseHost: { declared: databaseHost, actual: new URL(url).host },
     chat: { admin, clients: turnClients(admin), slots: redisCounterStore(), newWork: newWorkGate(admin, environment),
-      tools: chatToolDeps(admin, () => userClient(request, url, anon)) },
+      tools: chatToolDeps(admin, () => userClient(request, url, anon), new URL(request.url).origin) },
     userClient: () => userClient(request, url, anon),
     handReview: reviewId => handReviewToServer({ scheduleAfter: task => after(task), origin: new URL(request.url).origin,
       supabaseAdmin: admin }, reviewId),

@@ -174,7 +174,12 @@ describe('INTEGRATION-SHOTVIVA: the image tools of a free chat', () => {
     const built = await build(setup, false);
     const tool = built.tools.find(item => item.name === 'generate_image')!;
     expect(JSON.parse(await tool.execute({ template_id: 'freeform', prompt: 'a cup' }, 'call-1'))).toMatchObject({ code: 'quota_exhausted' });
-    expect(deps.calls).toHaveBeenCalledWith(actorId, sessionId);
+    expect(deps.calls).toHaveBeenCalledWith(actorId, sessionId, { turnId: undefined, kept: null });
+    // This message's photos as they are kept, with its turn: a photo sent now can be used now (Owner 2026-11-13).
+    const kept = Promise.resolve([{ path: 'p', turnId: 42, index: 0 }]);
+    await setup.build({ turnId: 42 } as never, { slots: freeSlots, currentMessage: 'x', deadline: Date.now() + 1000, callGate: async () => {},
+      onStop: () => {}, gated: false, onCall: { emit: () => {}, q: '100' }, photos: kept });
+    expect(deps.calls).toHaveBeenLastCalledWith(actorId, sessionId, { turnId: 42, kept });
     const broken = await prepare({ skills, images: { ready: vi.fn(async () => { throw new Error('down'); }), calls: vi.fn() } });
     expect(broken.plan.trimmed).toContainEqual({ name: 'generate_image', reason: 'disabled' });
   });

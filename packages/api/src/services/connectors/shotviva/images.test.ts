@@ -81,12 +81,12 @@ describe('generateImage', () => {
 });
 
 describe('templates and jobs', () => {
-  it('lists only templates that need no photo (reference images are not in the first version)', async () => {
+  it('lists every template, those that take a photo too (Owner 2026-11-13: a photo plus a template before launch)', async () => {
     const template = (id: string, min: number) => ({ id, name: id, category: 'c', cover_before_url: null, cover_after_url: null,
       credits_cost: 1, fields: { images: { min, max: min }, copy: [], aspect_ratios: ['1:1'] } });
     const client = sv({ templates: vi.fn(async () => ({ templates: [template('freeform', 0), template('headshot', 1)] })) });
     expect(await listImageTemplates({ admin: db().admin, baseUrl: 'x', client, profileId: me }))
-      .toEqual({ ok: true, templates: [template('freeform', 0)] });
+      .toEqual({ ok: true, templates: [template('freeform', 0), template('headshot', 1)] });
     expect(await listImageTemplates({ admin: db(null).admin, baseUrl: 'x', client, profileId: me })).toEqual({ ok: false, code: 'not_linked' });
   });
 
@@ -143,5 +143,19 @@ describe('fetchJobImage', () => {
   it('a job that is not finished (or not the caller\'s) has no image', async () => {
     const running = sv({ job: vi.fn(async () => { throw new ShotvivaError('not_found', 404); }) });
     expect(await get(running, png())).toEqual({ ok: false, status: 404 });
+  });
+});
+
+// Owner 2026-11-13: a chat photo becomes the template's photo, sent as the contract's one `image` address.
+describe('generateImage with a photo', () => {
+  it('sends the photo address as `image`, inside the same idempotent request', async () => {
+    const client = sv();
+    const image = 'https://auth-staging.graylum.com/api/chat-photos/shared?p=x&t=y';
+    expect((await run(client, db(), { templateId: 'headshot', copy: {}, image })).status).toBe('succeeded');
+    expect((client as unknown as { generate: ReturnType<typeof vi.fn> }).generate).toHaveBeenCalledWith(SV,
+      { template_id: 'headshot', inputs: { copy: {} }, image }, { idempotencyKey: KEY, timeoutMs: 120_000 });
+    const plain = sv();
+    await run(plain);
+    expect((plain as unknown as { generate: ReturnType<typeof vi.fn> }).generate.mock.calls[0]![1]).not.toHaveProperty('image');
   });
 });

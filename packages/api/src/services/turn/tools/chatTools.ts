@@ -28,7 +28,7 @@ import { NO_ACCESS, sourceDescription, workspaceTurnReader, type WorkspaceAccess
 import { planTurnTools, READ_SOURCE_CALLS, RESEARCH_INPUT_BYTES, type ResearchSetup } from './plan';
 import { researchInstructions, READ_SOURCE_DESCRIPTION, turnTools, type SourceReader } from './index';
 import type { PreparedSkills } from './skills';
-import { IMAGE_TOOL_NAMES, IMAGE_TOOLS_INSTRUCTIONS, imageToolBytes, type ImageToolCalls } from './imageTools';
+import { IMAGE_TOOL_NAMES, IMAGE_TOOLS_INSTRUCTIONS, imageToolBytes, type ConversationPhoto, type ImageToolCalls } from './imageTools';
 import type { ToolCallDeps, ToolPlan, TurnToolName } from './types';
 
 /*
@@ -54,7 +54,8 @@ export type ChatToolDeps = {
   /** INTEGRATION-SHOTVIVA: present when this deployment has the Shotviva connector configured (then the image tools are offered on
    *  every turn); `ready` says whether this account may use them this turn, `calls` makes them. */
   images?: { ready: (actorId: string) => Promise<true | 'not_entitled' | 'not_linked' | 'disabled'>;
-    calls: (actorId: string, sessionId: string) => ImageToolCalls };
+    /** `current`: this message's turn and its photos as they are kept (chat.ts), so a photo sent now can be used now. */
+    calls: (actorId: string, sessionId: string, current: { turnId: number; kept: Promise<readonly ConversationPhoto[]> | null }) => ImageToolCalls };
 };
 
 export type ChatToolsSetup = {
@@ -78,6 +79,8 @@ export type ChatToolsSetup = {
     onStop: (stop: TurnStop) => void; gated: boolean; onCall: NonNullable<Parameters<typeof turnTools>[0]['onCall']>;
     /** Told when each tool starts and ends (toolStage.ts), so the page can list the steps of the reply. */
     announce?: (event: StepEvent) => void;
+    /** This message's chat photos as they are kept (chat.ts keepTurnPhotos), for the image tools. */
+    photos?: Promise<readonly ConversationPhoto[]> | null;
     replay?: TurnReplay }): Promise<ReturnType<typeof turnTools>>;
 };
 
@@ -195,7 +198,8 @@ export async function prepareChatTools(input: { admin: SupabaseClient; read: Tur
           return prepared === undefined ? [] : [[entry.name, prepared] as const];
         })) } : {}),
         ...(sourceOffered ? { sourceDescription: description, readSource: chatReader() } : {}),
-        ...(imagesOffered && input.tools.images ? { images: input.tools.images.calls(input.actorId, input.sessionId) } : {}) });
+        ...(imagesOffered && input.tools.images ? { images: input.tools.images.calls(input.actorId, input.sessionId,
+          { turnId: calls.turnId, kept: extra.photos ?? null }) } : {}) });
       // A stop raised inside a tool (paused for credits, a tombstone) reaches the turn, not the SDK's error wrapper.
       const skillNames: ReadonlySet<string> = new Set(allowedSkills(catalog, extra.gated).map(entry => entry.name));
       const tools = withStepEvents(built.tools, extra.announce, skillNames, extra.onStop);
