@@ -111,3 +111,62 @@
 .readerBody { min-width: 0; }
 .segment :is(h4,:where([data-demo-heading="h4"])) { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: #222; white-space: normal; }
 @media (max-width: 640px) { .reader { grid-template-columns: minmax(0, 1fr); } .toc { position: static; max-height: 30dvh; } }
+
+/*
+ * A phone (under 640px; Owner 2026-11-12, phone plan A). 我的文档 as an app lays it out: the upload button a full-width
+ * pill, the kinds of file as pills that slide sideways, each file a card whose buttons are a thumb's height, text boxes
+ * and menus at 16px so the phone does not zoom in on them, and reading or deleting a file in a sheet that rises from the
+ * foot of the screen. Nothing is added or removed and no word changes; a computer and a tablet see what they saw.
+ */
+@media (max-width: 639px) {
+  .root { margin: 0 16px; padding: 4px 0 28px; }
+  .topRow { gap: 12px; margin-bottom: 18px; }
+  .panel { padding: 16px; border-radius: 18px; }
+  .root .panel :is(h2,:where([data-demo-heading="h2"])) { font-size: 16px; font-weight: 600; }
+  .hint, .closed, .warn, .spaceText, .error { font-size: 13px; line-height: 1.6; }
+  .purposes label { min-height: 44px; padding: 0 14px; border-radius: 99px; font-size: 14px; }
+  .pick { justify-content: center; width: 100%; min-height: 50px; border-radius: 99px; font-size: 15.5px; }
+  .queueItem { padding: 12px; border-radius: 14px; font-size: 13.5px; }
+  .queueItem small { font-size: 12.5px; }
+  .linkButton { min-height: 44px; font-size: 13.5px; }
+  .filters { gap: 8px; margin-inline: -16px; padding: 0 16px; overflow-x: auto; scrollbar-width: none; }
+  .filters::-webkit-scrollbar { display: none; }
+  .filters button { flex: none; min-height: 40px; padding: 0 14px; background: #f4f2ee; font-size: 13.5px; white-space: nowrap; }
+  .filters button[aria-pressed='true'] { background: #1f1e1c; color: #fff; }
+  .table { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; border: 0; border-radius: 0; overflow: visible; }
+  .row, .row:last-child { min-height: 0; padding: 14px 16px; border: 1px solid #ececec; border-radius: 18px; font-size: 13.5px; }
+  .name span { font-size: 15px; font-weight: 550; }
+  .name small { font-size: 12.5px; }
+  .row select { min-height: 44px; padding: 0 10px; border-radius: 12px; font-size: 16px; }
+  .actions { gap: 8px; }
+  .actions button { flex: 1 1 0; min-height: 44px; border-radius: 99px; font-size: 14px; white-space: nowrap; }
+  .empty { font-size: 13.5px; }
+  .more { font-size: 13px; }
+  .more button { min-height: 44px; padding: 0 18px; border-radius: 99px; font-size: 14px; }
+
+  /* Reading a file, and confirming its removal: a sheet from the foot of the screen. */
+  .backdrop { place-items: end stretch; padding: 0; }
+  .dialog {
+    position: relative; width: 100%; max-height: calc(100dvh - 28px - env(safe-area-inset-top, 0px));
+    border-radius: 24px 24px 0 0; padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .dialog::before {
+    content: ''; position: absolute; z-index: 1; top: 8px; left: 50%; width: 36px; height: 5px; margin-left: -18px;
+    border-radius: 99px; background: #d9d9d9;
+  }
+  .dialogHead { padding: 24px 16px 12px; }
+  .dialogHead button { display: grid; place-items: center; flex: none; width: 44px; height: 44px; margin: -8px -8px -8px 0; }
+  .dialogBody { padding: 14px 16px 20px; font-size: 14.5px; }
+  .segment { padding: 14px; border-radius: 14px; font-size: 15px; }
+  .root .segment :is(h4,:where([data-demo-heading="h4"])), .dialog .segment :is(h4,:where([data-demo-heading="h4"])) { font-size: 15px; }
+  .segmentNav button { min-height: 44px; padding: 0 16px; border-radius: 99px; font-size: 14px; }
+  .toc { font-size: 13.5px; }
+  .toc button { min-height: 40px; }
+  .impact { font-size: 14px; }
+  .dialogActions { display: grid; grid-template-columns: 1fr 2fr; gap: 10px; }
+  .dialogActions button { min-height: 48px; border-radius: 99px; font-size: 15px; }
+}
+@media (max-width: 639px) and (prefers-reduced-motion: no-preference) {
+  .dialog { animation: documents-sheet-rise .26s cubic-bezier(.32, .72, 0, 1); }
+}
+@keyframes documents-sheet-rise { from { translate: 0 100%; } }

@@ -32,10 +32,12 @@ beforeAll(async () => {
         if (id !== entry) return;
         return `import {createRoot} from 'react-dom/client';
           import {GlobalHeader} from '@/components/opc/rail-view';
-          import styles from ${JSON.stringify(src + 'components/opc/workspace-frame.module.css')};
+          import ${JSON.stringify(src + 'components/opc/workspace-frame.module.css')};
           const language=<button type="button" aria-label="语言：简体中文" style={{display:'inline-flex',alignItems:'center',gap:4,padding:'4px 8px',fontSize:12,lineHeight:'16px'}}>
             <svg width="16" height="16" aria-hidden="true"/><span>简</span></button>;
-          createRoot(document.getElementById('root')).render(<div className={styles.workspace}><GlobalHeader area="chat" onOpenNav={()=>{}} end={language}/></div>);`;
+          // As the profile center draws it (ProfileShell.tsx): the bar on its own, outside the workbench's frame. Inside the frame a phone
+          // no longer shows these links: the bottom bar replaces them, and the conversation pages have no site bar at all.
+          createRoot(document.getElementById('root')).render(<div><GlobalHeader area="library" onOpenNav={()=>{}} end={language}/></div>);`;
       } }],
     build: { write: false, minify: false, cssCodeSplit: false, lib: { entry, name: 'GlobalHeaderPhoneTest', formats: ['iife'] } },
   });

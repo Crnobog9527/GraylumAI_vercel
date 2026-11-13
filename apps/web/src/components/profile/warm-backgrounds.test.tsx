@@ -37,6 +37,9 @@ describe('the workbench canvas (conversation pages)', () => {
     // ground of its own, opaque, so the canvas behind the shell does not show through it (announcement.test.tsx holds its look).
     expect(frame).toMatch(/\.announcement\{[^}]*background:#fff1cf/);
     expect(frame).not.toMatch(/\.announcement\{[^}]*background:#efefef/);
+    // …the landing page's light along it (gold, peach, lilac), in the 40px it always had.
+    expect(frame).toMatch(/\.announcement\{[^}]*height:40px/);
+    expect(frame).toMatch(/\.announcement::before\{[^}]*background:linear-gradient\(100deg,#fff1cf 0%,#ffe2d6 16\.66%,#efe7fd 33\.33%/);
   });
 
   it('gives only the new-conversation page a breath of light at its head; it stays white beneath', () => {
