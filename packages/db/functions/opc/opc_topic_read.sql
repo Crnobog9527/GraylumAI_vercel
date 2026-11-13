@@ -16,7 +16,7 @@ BEGIN
  SELECT * INTO w FROM opc_topic_workspaces WHERE draft_id=p_draft_id AND actor_id=p_actor_id;
  SELECT * INTO v FROM artifact_versions WHERE id=w.source_version_id;
  SELECT * INTO o FROM opc_topic_openings WHERE draft_id=p_draft_id;
- -- CONTENT-CONVERSATION-2 (0532): the version shown to the user is the one the library rail and the strategy history show, its
+ -- CONTENT-CONVERSATION-2 (0541): the version shown to the user is the one the library rail and the strategy history show, its
  -- ordinal in an account's strategy history (opc_account_strategy_history 'version'), not the project's publish counter: staging
  -- validation batch 6 saw "绑定 v10" here against "当前 v9" in the rail. The first account of this user whose history holds the bound
  -- version gives it; an account that cannot be read is skipped. With none, the count of allowed versions of the bound version's

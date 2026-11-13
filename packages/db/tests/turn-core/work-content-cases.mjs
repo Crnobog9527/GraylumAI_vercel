@@ -89,7 +89,7 @@ export async function workContentCases(t){
   assert.deepEqual([source.status,source.contentId],['ready',story.id]);
   assert.deepEqual(await call('opc_work_source($1,$2,$3)',[w.a.actor,w.a.session,'script']),{status:'none'});
  }
- // CONTENT-CONVERSATION-2 (0532): a topic-window turn is given the final script and that script's newest storyboard as a list
+ // CONTENT-CONVERSATION-2 (0541): a topic-window turn is given the final script and that script's newest storyboard as a list
  // (opc_work_check 'sources', frozen as policy.workSources); a storyboard and editing advice are saved from it, the check after the
  // open covers every listed source, and deleting one reaches the turns given it.
  {
@@ -122,7 +122,7 @@ export async function workContentCases(t){
   const after=await open(w.a,{session:w.session,pol:policy(list(sources))});
   assert.equal(await verify(after.turnId),false,'a listed source was deleted');
   await close(w.a,after.turnId,'failed',{messages:[],delivered:false});
-  report.checks.push('CONTENT-CONVERSATION-2 0532: a video topic window is given its final script and storyboard as a list; storyboard and editing saved from it; verify and content delete cover every listed source');
+  report.checks.push('CONTENT-CONVERSATION-2 0541: a video topic window is given its final script and storyboard as a list; storyboard and editing saved from it; verify and content delete cover every listed source');
  }
  // Video: a claim reads its own revision, holds it from other requests, freezes it; the package saves once.
  {

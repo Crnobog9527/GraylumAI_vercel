@@ -1,7 +1,7 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC.
 -- All rights reserved. This code is proprietary and confidential.
 -- CONTENT-CONVERSATION-2 PR1 (Owner 2026-11-14: the topic window becomes a conversation like free chat; the fixed
--- "storyboard and editing" choice goes, the user asks in the conversation). Number 0532 assigned by the controller.
+-- "storyboard and editing" choice goes, the user asks in the conversation). Number 0541 assigned by the controller.
 -- In a topic window the model loads a writing Skill during the turn (load_skill), so the host cannot know before the open whether
 -- a storyboard or editing advice will be written. A video item's turn is therefore given both possible sources up front and the
 -- turn freezes them as policy.workSources = [{contentId, kind, ...}] (script first, then its storyboard when there is one):
@@ -57,7 +57,7 @@ BEGIN
   SELECT * INTO m FROM runtime_scope_material
    WHERE session_id=s.id AND NOT revoked AND erased_at IS NULL ORDER BY revision DESC LIMIT 1;
  END IF;
- -- CONTENT-CONVERSATION-2 (0532): a video item's conversation is given its current final script and that script's newest storyboard on
+ -- CONTENT-CONVERSATION-2 (0541): a video item's conversation is given its current final script and that script's newest storyboard on
  -- every turn, so a writing Skill the model loads during the turn can write a storyboard or editing advice from them and the reply can
  -- be saved as one (opc_content_from_turn reads the kind it needs from policy.workSources). Not for a turn that claimed video material
  -- (the old package flow keeps its own source); a storyboard of an older script is not given (opc_content_source_pick's STALE refusal).
@@ -96,7 +96,7 @@ BEGIN
  -- A storyboard reads the script, editing the storyboard, as supplied to the turn that wrote it (policy.workSource).
  IF p_kind IN ('storyboard','editing') THEN
   frozen:=CASE WHEN t.policy#>>'{workSource,kind}'=CASE p_kind WHEN 'storyboard' THEN 'script' ELSE 'storyboard' END THEN (t.policy#>>'{workSource,contentId}')::uuid END;
-  -- CONTENT-CONVERSATION-2 (0532): a topic-window turn was given its sources as a list (opc_work_check); the one of the kind this
+  -- CONTENT-CONVERSATION-2 (0541): a topic-window turn was given its sources as a list (opc_work_check); the one of the kind this
   -- save needs is the frozen source. The single workSource of a turn that chose a derived method is read as before.
   frozen:=coalesce((SELECT (e->>'contentId')::uuid FROM jsonb_array_elements(CASE WHEN jsonb_typeof(t.policy->'workSources')='array' THEN t.policy->'workSources' ELSE '[]'::jsonb END) e
    WHERE e->>'kind'=CASE p_kind WHEN 'storyboard' THEN 'script' ELSE 'storyboard' END LIMIT 1),frozen);
@@ -130,7 +130,7 @@ BEGIN
  SELECT * INTO t FROM turns WHERE actor_id=p_actor_id AND id=p_turn_id;
  IF t.id IS NULL THEN RETURN false; END IF;
  IF t.policy ? 'workSource' AND NOT opc_content_allowed(p_actor_id,(t.policy#>>'{workSource,contentId}')::uuid) THEN RETURN false; END IF;
- -- CONTENT-CONVERSATION-2 (0532): every source a topic-window turn was given must still be allowed.
+ -- CONTENT-CONVERSATION-2 (0541): every source a topic-window turn was given must still be allowed.
  IF EXISTS(SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(t.policy->'workSources')='array' THEN t.policy->'workSources' ELSE '[]'::jsonb END) e
    WHERE NOT opc_content_allowed(p_actor_id,(e->>'contentId')::uuid)) THEN RETURN false; END IF;
  IF t.policy ? 'workMaterial' THEN
@@ -203,7 +203,7 @@ BEGIN
    OR EXISTS(SELECT 1 FROM opc_video_material_bindings b WHERE b.actor_id=a AND b.session_id=t.session_id AND b.source_script_id=ANY(refs)
     AND b.material_revision::text=t.policy#>>'{workMaterial,revision}')
    OR t.policy#>>'{workSource,contentId}'=ANY(refs::text[])
-   -- CONTENT-CONVERSATION-2 (0532): a topic-window turn given a script or storyboard among its sources.
+   -- CONTENT-CONVERSATION-2 (0541): a topic-window turn given a script or storyboard among its sources.
    OR EXISTS(SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(t.policy->'workSources')='array' THEN t.policy->'workSources' ELSE '[]'::jsonb END) e WHERE e->>'contentId'=ANY(refs::text[]))
    OR t.session_id IN (SELECT rs.id FROM runtime_sessions rs WHERE rs.actor_id=a AND content_erasure_references(rs.scope,refs)))
   ORDER BY t.id);
@@ -262,7 +262,7 @@ BEGIN
  SELECT * INTO w FROM opc_topic_workspaces WHERE draft_id=p_draft_id AND actor_id=p_actor_id;
  SELECT * INTO v FROM artifact_versions WHERE id=w.source_version_id;
  SELECT * INTO o FROM opc_topic_openings WHERE draft_id=p_draft_id;
- -- CONTENT-CONVERSATION-2 (0532): the version shown to the user is the one the library rail and the strategy history show, its
+ -- CONTENT-CONVERSATION-2 (0541): the version shown to the user is the one the library rail and the strategy history show, its
  -- ordinal in an account's strategy history (opc_account_strategy_history 'version'), not the project's publish counter: staging
  -- validation batch 6 saw "绑定 v10" here against "当前 v9" in the rail. The first account of this user whose history holds the bound
  -- version gives it; an account that cannot be read is skipped. With none, the count of allowed versions of the bound version's
