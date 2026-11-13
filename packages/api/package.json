@@ -33,6 +33,7 @@
     "./src/services/scheduledJobRuns": "./src/services/scheduledJobRuns.ts",
     "./src/services/ticketAttachmentCleanup": "./src/services/ticketAttachmentCleanup.ts",
     "./src/services/ticketAutoClose": "./src/services/ticketAutoClose.ts",
+    "./src/services/profileAvatar/storage": "./src/services/profileAvatar/storage.ts",
     "./src/services/providerUtils": "./src/services/providerUtils.ts",
     "./src/services/diagnostics": "./src/services/diagnostics.ts",
     "./src/services/stripe": "./src/services/stripe.ts",

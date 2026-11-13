@@ -2,16 +2,18 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Columns3, Loader2 } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { trpc } from '@/trpc/client';
 import { estimateFusion, startCompare } from '@/lib/turn-fusion';
 import { turnCompareLive } from './turn-compare-live';
+import { COMPARE_NEEDS_QUESTION, registerCompareHost } from './compare-entry';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ReportPaywallDialog } from '@/components/paywall/ReportPaywallDialog';
 import { compareErrorText, initialPick, isDefiniteRefusal, isUpgradeRefusal, pickStatus, togglePick, type CompareOptions } from './compare-view';
 import styles from './compare.module.css';
+import sheet from '@/components/design/bottom-sheet.module.css';
 import { READ_RETRY } from '@/trpc/read-retry';
 import { QueryNotice } from '@/components/opc/query-notice';
 
@@ -20,18 +22,21 @@ type Estimate = { credits: number; columns: Array<{ modelId: string; credits: nu
   refundCapReached: boolean; overBudget: boolean };
 
 /**
- * The composer's "多模型对比" button and its picker (FUSION-COMPARE §3.1, §3.3). Hidden when the switch is off; shown as Gold-only
- * (opening the upgrade page) for a plan without compare. The picker opens with the administrator's default group ticked;
- * the user may untick or pick others within [minModels, maxModels]; "最多消耗 X 积分" is priced by the server for exactly this
- * request and the start carries it, so the group never holds more than the user agreed to.
+ * The page's side of "多模型对比" (FUSION-COMPARE §3.1, §3.3). The entry itself is in the left rail (Owner 2026-11-12); this
+ * mounts next to a message box and answers it: with a question written it opens the picker for this conversation, as the
+ * button that used to stand here did; with an empty box it says so under the box and puts the caret there. It draws
+ * nothing until asked. A plan without compare never gets here: the rail opens the paywall itself.
+ * The picker opens with the administrator's default group ticked; the user may untick or pick others within
+ * [minModels, maxModels]; "最多消耗 X 积分" is priced by the server for exactly this request and the start carries it, so
+ * the group never holds more than the user agreed to.
  */
-export function CompareButton({ sessionId, resolveSession, question, skill, disabled, blockedReason, onStarted, onMaybeStarted }: {
+export function CompareHost({ sessionId, resolveSession, question, skill, disabled, blockedReason, onStarted, onMaybeStarted }: {
   /** The conversation to compare in; absent on the blank new-conversation page, where `resolveSession` creates it on demand. */
   sessionId?: string;
   /** Creates (idempotently, free of charge) or finds the empty conversation a first-message compare hangs on. */
   resolveSession?: () => Promise<string>;
   question: string; skill?: CompareSkill; disabled?: boolean;
-  /** Why a compare cannot start with this message (shown as the button's hint), for example an @ library reference. */
+  /** Why a compare cannot start with this message (shown under the box when asked), for example an @ library reference. */
   blockedReason?: string;
   onStarted: (compareId: string, names: Record<string, string>, sessionId: string) => void;
   /** A start whose outcome is unknown (the response was lost): the page re-reads the conversation's compares. */
@@ -42,7 +47,9 @@ export function CompareButton({ sessionId, resolveSession, question, skill, disa
   const [resolved, setResolved] = useState<string | null>(null);
   const [resolving, setResolving] = useState(false);
   const [sessionError, setSessionError] = useState('');
-  // The Gold paywall opens on this page (Owner 2026-10-25); the question stays where it is.
+  // The rail asked while the box was empty or held something a compare cannot take: the reason shows until that changes.
+  const [asked, setAsked] = useState(false);
+  // The paywall the picker itself can lead to (the server refused the start for the plan); the question stays where it is.
   const [paywall, setPaywall] = useState(false);
   // The start request id outlives the dialog: a start that is waiting for credits, or whose outcome is unknown, is continued
   // by the same id when the picker is opened again with the same choice (a new id would meet FUSION_COMPARE_ACTIVE).
@@ -59,20 +66,24 @@ export function CompareButton({ sessionId, resolveSession, question, skill, disa
     catch { setSessionError('暂时没能开始对话，请稍后再试。输入已保留。'); }
     finally { setResolving(false); }
   }
-  // A read that still fails after its retries is said, not hidden: the entry does not just vanish from the composer.
+  const ready = Boolean(data?.enabled) && !disabled && !resolving && Boolean(question.trim()) && !blockedReason;
+  // What the rail's entry does on this page. Always the newest state: the handler is registered once and reads this.
+  const act = useRef<() => void>(() => undefined);
+  act.current = () => {
+    if (!data?.enabled) return;
+    if (ready) { setAsked(false); void openPicker(); return; }
+    setAsked(true);
+    // The caret goes to the message box: writing the question is the next thing to do.
+    document.querySelector<HTMLElement>('main [contenteditable="true"]')?.focus();
+  };
+  useEffect(() => registerCompareHost(() => act.current()), []);
+  // Said only after the entry was used, and only while it still holds.
+  const reason = asked ? (blockedReason ?? (question.trim() ? '' : COMPARE_NEEDS_QUESTION)) : '';
+  // A read that still fails after its retries is said, not hidden.
   if (options.isError && !data) return <QueryNotice error={options.error} label="多模型对比" retry={() => options.refetch()} />;
-  if (!data || (!data.enabled && data.reason === 'disabled')) return null;
-  if (!data.enabled) {
-    return <>
-      <button type="button" className={styles.entry} title="多模型对比是 Gold 会员功能"
-        onClick={() => setPaywall(true)}><Columns3 size={16} /> 多模型对比 · Gold 专享</button>
-      {paywall && <ReportPaywallDialog scene="compare" onClose={() => setPaywall(false)} />}
-    </>;
-  }
+  if (!data?.enabled) return null;
   return <>
-    <button type="button" className={styles.entry} disabled={disabled || resolving || !question.trim() || Boolean(blockedReason)}
-      title={blockedReason ?? (question.trim() ? undefined : '先写好问题再对比')}
-      onClick={() => void openPicker()}><Columns3 size={16} /> 多模型对比</button>
+    {reason && <span role="status" className={styles.entryHint}>{reason}</span>}
     {sessionError && <span role="status" className={styles.error}>{sessionError}</span>}
     {open && activeSession && <ComparePicker options={data} sessionId={activeSession} question={question} skill={skill}
       onClose={() => setOpen(false)} onMaybeStarted={onMaybeStarted} startId={startId}
@@ -140,7 +151,7 @@ function ComparePicker({ options, sessionId, question, skill, onClose, onUpgrade
 
   return (
     <Dialog open onOpenChange={value => { if (!value) onClose(); }}>
-      <DialogContent tone="light" className={styles.picker}>
+      <DialogContent tone="light" className={`${styles.picker} ${sheet.panel} ${sheet.anchored}`}>
         <DialogHeader>
           <DialogTitle>多模型对比</DialogTitle>
           <DialogDescription>
@@ -169,7 +180,7 @@ function ComparePicker({ options, sessionId, question, skill, onClose, onUpgrade
             : <>最多消耗 <strong>{estimate.credits}</strong> 积分，按各模型实际用量分别结算；没生成出回答的不收费。</>}</p>}
         {error && <p role="alert" className={styles.error}>{error.text}{error.upgrade && <>
           {' '}<button type="button" className="underline" onClick={onUpgrade}>去升级</button></>}</p>}
-        <DialogFooter>
+        <DialogFooter className={sheet.bar}>
           <Button variant="outline" onClick={onClose}>取消</Button>
           <Button disabled={!status.ready || blocked || start.isPending} onClick={() => void begin()}>
             {start.isPending && <Loader2 size={14} className={styles.spin} />}开始对比</Button>

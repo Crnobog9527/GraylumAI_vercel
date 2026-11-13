@@ -1,0 +1,55 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/*
+ * The profile center on a phone (639px and below; Owner 2026-11-12, mobile plan A, screen A5 "我的"): one page that lists
+ * the account, the credits and the five sections; a section opens as a page of its own with a way back in its top left.
+ * Above 639px none of this shows and the profile center is what it was (the section menu on the left, or its drawer).
+ */
+.hub, .back { display: none; }
+
+@media (max-width: 639px) {
+  .hub { display: grid; gap: 14px; padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px)); }
+  /* While the list is the page, the section behind it is not shown; while a section is open, the drawer's button is not. */
+  .behindHub, .drawerTrigger { display: none !important; }
+
+  .title { margin: 2px 4px 0; color: #1f1f1f; font-size: 28px; font-weight: 700; letter-spacing: -.02em; line-height: 36px; }
+  .card {
+    display: flex; align-items: center; gap: 12px; min-width: 0; padding: 14px; border-radius: 22px;
+    background: #fff; box-shadow: 0 0 0 1px #ececec, 0 1px 4px rgba(2, 4, 26, .04);
+  }
+  .who { flex: 1; min-width: 0; }
+  .who b { display: block; overflow: hidden; color: #1f1f1f; font-size: 17px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+  .who small { display: block; margin-top: 2px; color: #6b6b6b; font-size: 13px; line-height: 18px; }
+  .pill {
+    display: inline-flex; flex: none; align-items: center; justify-content: center; min-height: 44px; padding: 0 16px; border: 0;
+    border-radius: 999px; background: #242424; color: #fff; font-size: 14px; font-weight: 600; text-decoration: none;
+  }
+  .credits { background: #fff8e6; box-shadow: 0 0 0 1px #f3e3b6; }
+  .credits .who small { margin: 0; }
+  .credits .who b { font-size: 26px; font-weight: 700; line-height: 32px; font-variant-numeric: tabular-nums; }
+  .credits .pill { background: #ffbb17; color: #1f1f1f; }
+
+  .caption { margin: 6px 6px -6px; color: #6b6b6b; font-size: 13px; line-height: 18px; }
+  .rows { display: grid; margin: 0; padding: 0; overflow: hidden; border-radius: 20px; background: #fff; box-shadow: 0 0 0 1px #ececec; list-style: none; }
+  .rows li + li { border-top: 1px solid #f0f0f0; }
+  .row {
+    display: flex; align-items: center; gap: 12px; width: 100%; min-height: 52px; padding: 0 14px; border: 0; background: none;
+    color: #1f1f1f; font-size: 16px; text-align: left; text-decoration: none;
+  }
+  .row:active { background: #f6f6f6; }
+  .row > svg:first-child { flex: none; color: #444; }
+  .row > span { flex: 1; min-width: 0; }
+  .row > small { flex: none; color: #6b6b6b; font-size: 14px; }
+  .row > svg:last-child { flex: none; color: #b0b0b0; }
+  .row:disabled { color: #6b6b6b; }
+  .quiet { color: #6b6b6b; }
+
+  /* A section's own top row: back to the list on the left, the section's name in the middle. */
+  .back {
+    display: grid; grid-template-columns: 44px 1fr 44px; align-items: center; margin: -8px -8px 10px;
+  }
+  .back button {
+    display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border: 0; border-radius: 12px; background: none; color: #1f1f1f;
+  }
+  .back button:active { background: #ececec; }
+  .back h1 { margin: 0; overflow: hidden; color: #1f1f1f; font-size: 17px; font-weight: 650; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
+}

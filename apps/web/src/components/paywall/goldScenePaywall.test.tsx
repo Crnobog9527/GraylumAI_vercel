@@ -6,10 +6,13 @@ vi.mock('@/trpc/client', () => ({ trpc: { publishMonitor: { features: { useQuery
 vi.mock('@/lib/profile-tabs', () => ({ profileTabHref: (tab: string) => `/app/profile?tab=${tab}` }));
 vi.mock('./MethodCheckoutForm', () => ({ MethodCheckoutForm: () => <div data-testid="checkout-form" /> }));
 import { ReportPaywallView, type PaywallCheckout } from './ReportPaywallDialog';
-import { GOLD_SCENE_COPY, GOLD_SCENE_DELIVERABLES } from './goldScenePaywallCopy';
+import { GOLD_SCENE_COPY, GOLD_SCENE_DELIVERABLES, goldSceneCopy } from './goldScenePaywallCopy';
+import { fusionPlanLevel } from './paywallPlans';
 
 const plan = (level: 'pro' | 'gold', monthly: number) => ({ id: level + '-id', name: level === 'pro' ? 'Pro 会员' : 'Gold 会员', level,
-  price: { monthly, yearly: monthly * 10 }, credits: { monthly: 1000, monthlyBonus: 0 }, discount: 0, checkoutReady: { monthly: true, yearly: true } });
+  price: { monthly, yearly: monthly * 10 }, credits: { monthly: 1000, monthlyBonus: 0 }, discount: 0, checkoutReady: { monthly: true, yearly: true },
+  // As the plan catalog sends them: today only Gold carries the jury and the model comparison.
+  allowFusionReview: level === 'gold', allowFusionCompare: level === 'gold' });
 const checkout = {
   plans: [plan('pro', 29), plan('gold', 59)], loading: false, catalogFailed: false, unpaidSubscription: false, quoteOptions: {},
   founderSeats: 0, founderSoldOut: false, method: { pending: false, entry: null, methodsFor: () => [] },
@@ -48,4 +51,49 @@ it('a Pro member (or an account not yet known) is sent to the subscription page 
   expect(html).toContain('/app/profile?tab=subscription');
   const free = renderToStaticMarkup(<ReportPaywallView checkout={checkout} onClose={() => {}} scene="compare" memberLevel="free" />);
   expect(free).toContain('checkout-form');
+});
+
+// Owner 2026-11-12 (the rail's 多模型对比 and 评审团 entries): the paywall says which plan the tool needs from the plan catalog's own
+// entitlement switches, never from a fixed "Gold"; while the catalog does not say, it names no plan.
+it('names the plan that carries the tool, by the catalog', () => {
+  expect(fusionPlanLevel(checkout.plans, 'compare')).toBe('gold');
+  expect(fusionPlanLevel(checkout.plans, 'jury')).toBe('gold');
+  const proToo = { ...checkout, plans: checkout.plans.map(item => ({ ...item, allowFusionCompare: true })) } as unknown as PaywallCheckout;
+  expect(fusionPlanLevel(proToo.plans, 'compare')).toBe('pro');
+  const html = renderToStaticMarkup(<ReportPaywallView checkout={proToo} onClose={() => {}} scene="compare" />);
+  expect(html).toContain('开通 Pro，使用多模型对比');
+  expect(html).toContain('多模型对比 · Pro 专享');
+  // Every plan that carries the tool can be bought for it.
+  expect(html).toContain('value="pro"');
+  expect(html).toContain('value="gold"');
+  // The jury is still Gold's alone in this catalog.
+  const jury = renderToStaticMarkup(<ReportPaywallView checkout={proToo} onClose={() => {}} scene="jury" />);
+  expect(jury).toContain('开通 Gold，请评审团审阅报告');
+  expect(jury).not.toContain('value="pro"');
+});
+
+it('names no plan while the catalog does not say which one carries the tool', () => {
+  const silent = { ...checkout, plans: checkout.plans.map(item => ({ ...item, allowFusionReview: undefined, allowFusionCompare: undefined })) } as unknown as PaywallCheckout;
+  expect(fusionPlanLevel(silent.plans, 'compare')).toBeNull();
+  for (const scene of ['compare', 'jury'] as const) {
+    const copy = goldSceneCopy(scene, null);
+    expect(JSON.stringify(copy)).not.toMatch(/Gold|Pro/);
+    expect(copy.eyebrow).toContain('更高级别会员专享');
+    expect(copy.title).toContain('开通更高级别会员，');
+    const html = renderToStaticMarkup(<ReportPaywallView checkout={silent} onClose={() => {}} scene={scene} />);
+    expect(html).toContain(copy.title);
+    expect(html).toContain(copy.dossierLede);
+    const member = renderToStaticMarkup(<ReportPaywallView checkout={silent} onClose={() => {}} scene={scene} memberLevel="pro" />);
+    expect(member).toContain('升级到更高级别会员在订阅页完成');
+    expect(member).toContain('去订阅页升级到更高级别会员');
+  }
+});
+
+it('the three things the entry\'s paywall must say are all there: what it is, why upgrade, which plan', () => {
+  const html = renderToStaticMarkup(<ReportPaywallView checkout={checkout} onClose={() => {}} scene="jury" memberLevel="free" />).replace(/<[^>]+>/g, ' ');
+  expect(html).toContain('让评审团帮你把报告再审一遍');
+  expect(html).toContain('开通后你可以');
+  for (const [title] of GOLD_SCENE_DELIVERABLES.jury) expect(html).toContain(title);
+  expect(html).toContain('评审团 · Gold 专享');
+  expect(html).toContain('评审团是 Gold 会员功能');
 });

@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { createLibraryErasureAdapter } from '../library/erasure';
+import { chainErasureStorage, createAvatarErasureAdapter } from '../profileAvatar/erasure';
 import { expireDataUseConsentAudit } from '../dataUse/consent';
 import { randomUUID } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -86,7 +87,10 @@ async function runOne(client: SupabaseClient, deadline: number, drainDeadline: n
     };
     const host = createAccountErasureHost({
       profileId: claim.profileId, requestId: claim.requestId, client, deadline,
-      additionalStorage: createLibraryErasureAdapter(client, { profileId: claim.profileId, requestId: claim.requestId, token }),
+      // Library documents, then the profile avatar (PROFILE-AVATAR): both must be gone before Auth is deleted.
+      additionalStorage: chainErasureStorage(
+        createLibraryErasureAdapter(client, { profileId: claim.profileId, requestId: claim.requestId, token }),
+        createAvatarErasureAdapter(client)),
       storage: createErasureStorageTransport(client, { boundedPrefix: true }), auth: createErasureAuthAdapter(client, claim.profileId),
       verifyRetainedHistory: proof, verifyQuiescence: proof, deferStorageProof: true, scopedManifest: true, executorToken: token,
     });

@@ -156,13 +156,26 @@
 .card time { font-weight: 600; font-variant-numeric: tabular-nums; }
 .cardLine { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* Agenda (phones): one list of days, each post a card. */
-.agenda { flex: 1; min-height: 0; margin: 0; padding: 8px 16px 32px; overflow-y: auto; list-style: none; }
-.agendaDay { padding: 10px 0; border-bottom: 1px solid var(--sc-border); }
-.agendaDay h2 { display: flex; align-items: baseline; gap: 8px; margin: 0 0 8px; font-size: 13px; font-weight: 600; }
-.agendaDay h2 span { color: var(--sc-gold-text); font-size: 12px; font-weight: 500; }
-.agendaList { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
-.page .agendaCard { position: static; width: 100%; min-height: 48px; padding: 8px 10px 8px 12px; font-size: 13px; }
+/* Phones: the whole month as a grid (dots for posts), the picked day's posts listed below; the two scroll together. */
+.phone { flex: 1; min-height: 0; padding: 4px 14px 32px; overflow-y: auto; }
+.phoneGrid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); row-gap: 2px; padding-bottom: 10px;
+  border-bottom: 1px solid var(--sc-border); }
+.phoneHead { padding: 6px 0; color: var(--sc-secondary); font-size: 12px; text-align: center; }
+.page .phoneDay {
+  display: flex; flex-direction: column; align-items: center; gap: 3px; min-width: 0; height: 52px; padding: 5px 0 0; border: 0;
+  border-radius: 10px; background: none; color: var(--sc-text); cursor: pointer;
+}
+.phoneNumber { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 15px; font-size: 15px; font-variant-numeric: tabular-nums; }
+.phoneDay[data-today] .phoneNumber { background: var(--sc-gold); font-weight: 700; }
+.phoneDay[aria-pressed='true'] .phoneNumber { background: var(--sc-text); color: #fff; font-weight: 700; }
+.dots { display: flex; align-items: center; gap: 3px; height: 6px; }
+.dot { width: 6px; height: 6px; border-radius: 3px; background: var(--chip-bar); }
+.dots b { color: var(--sc-secondary); font-size: 10px; font-weight: 600; line-height: 6px; }
+.phoneDayList h2 { display: flex; align-items: baseline; gap: 8px; margin: 14px 0 8px; font-size: 14px; font-weight: 600; }
+.phoneDayList h2 span { color: var(--sc-gold-text); font-size: 12px; font-weight: 500; }
+.phoneCards { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.phone > .notice { margin: 18px 0 0; }
+.page .phoneCard { position: static; width: 100%; min-height: 56px; padding: 9px 12px 9px 14px; font-size: 13px; }
 
 /* Detail dialog */
 .detail { display: grid; gap: 12px; font-size: 13px; }

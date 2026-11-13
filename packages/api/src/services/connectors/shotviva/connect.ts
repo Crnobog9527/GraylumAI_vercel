@@ -18,7 +18,7 @@ const AUTHORIZE_PATH = '/connect/graylum';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export type ShotvivaConnectCode = 'SHOTVIVA_UNAVAILABLE' | 'SHOTVIVA_MEMBERSHIP_REQUIRED' | 'SHOTVIVA_ACCOUNT_CLOSED'
-  | 'SHOTVIVA_STATE_INVALID' | 'SHOTVIVA_CODE_INVALID' | 'SHOTVIVA_ACCOUNT_IN_USE';
+  | 'SHOTVIVA_STATE_INVALID' | 'SHOTVIVA_CODE_INVALID';
 export class ShotvivaConnectError extends Error {
   constructor(readonly code: ShotvivaConnectCode) { super(code); }
 }
@@ -84,7 +84,7 @@ function sameState(cookie: string | undefined, profileId: string, state: string 
 
 /** Step 2: Shotviva's redirect back. The state must match the cookie of the same signed-in user (so a link started by
  * someone else, or by another account in this browser, is refused); the code is exchanged once; the id is written only
- * on an open account, and one Shotviva account belongs to one Graylum account. */
+ * on an open account. */
 export async function finishShotvivaConnect(deps: ShotvivaDeps & {
   profileId: string; cookie: string | undefined; state: string | null; code: string | null;
 }) {
@@ -104,7 +104,6 @@ export async function finishShotvivaConnect(deps: ShotvivaDeps & {
   }
   const written = await deps.admin.from('profiles').update({ shotviva_account_id: accountId })
     .eq('id', deps.profileId).eq('status', 'active').eq('is_deleted', 'false').select('id');
-  if (written.error?.code === '23505') throw new ShotvivaConnectError('SHOTVIVA_ACCOUNT_IN_USE');
   if (written.error) throw new ShotvivaConnectError('SHOTVIVA_UNAVAILABLE');
   if (!written.data?.length) throw new ShotvivaConnectError('SHOTVIVA_ACCOUNT_CLOSED');
   return { accountId };

@@ -11,7 +11,7 @@ describe('light first paint', () => {
     '/app', '/app/positioning', '/app/positioning/abc', '/app/positioning/abc/topics', '/app/positioning/abc/review/r1',
     '/app/runtime', '/app/library', '/app/publish-monitor', '/app/workbench/marketplace', '/app/workbench/search', '/app/runtime/',
     '/app/profile', '/app/profile/', '/app/publish-monitor/connect', '/app/publish-monitor/publish', '/app/publish-monitor/',
-    '/app/publish-schedule', '/app/publish-schedule/',
+    '/app/publish-schedule', '/app/publish-schedule/', '/app/chats', '/app/tools', '/app/tools/',
   ])('%s is light', path => expect(isLightAppPath(path)).toBe(true));
 
   it.each([

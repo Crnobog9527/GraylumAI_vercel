@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { CSSProperties, KeyboardEvent, ReactNode, Ref, SyntheticEvent } from 'react';
 import Link from 'next/link';
-import { ChevronDown, Ellipsis, Grid2X2, Pencil, Pin, Sparkles, X } from 'lucide-react';
+import { ChevronDown, Columns3, Ellipsis, Grid2X2, Pencil, Pin, Scale, Sparkles, X } from 'lucide-react';
 import { HoverPrefetchLink } from './hover-prefetch-link';
 import styles from './workspace-frame.module.css';
 
@@ -12,7 +12,11 @@ import styles from './workspace-frame.module.css';
  * page renders the same markup from the fixtures in `components/chat-display/fixtures/rail.ts`.
  */
 
-export type RailArea = 'chat' | 'library' | 'topics' | 'marketplace' | 'search' | 'start' | 'review' | 'schedule';
+/**
+ * Which page the shell is around. `tools` is the phone's 功能 page and `history` its 对话 page (the rail's own list, shown as
+ * the page): both exist for a phone's bottom bar (phone-tabs.tsx) and look like any other area on a computer.
+ */
+export type RailArea = 'chat' | 'library' | 'topics' | 'marketplace' | 'search' | 'start' | 'review' | 'schedule' | 'tools' | 'history';
 type Click = (event: SyntheticEvent<HTMLElement>) => void;
 
 /** Top bar: logo, "首页 / 对话 / 个人中心", and the phone menu button. */
@@ -44,12 +48,17 @@ export function AnnouncementBar({ notice, returnParam = '', onClose }: { notice?
  * These fixed entries fetch their page ahead while the pointer rests on them (HoverPrefetchLink, SITE-SPEED); every other
  * link of the shell, the rows of the lists included, fetches on the click (#1392).
  */
-export function RailView({ area, returnParam = '', onCloseMobile, launched = false, dataReview = false, children }: {
+export function RailView({ area, returnParam = '', onCloseMobile, launched = false, dataReview = false, onCompare, onJury, children }: {
   area: RailArea; returnParam?: string; onCloseMobile?: () => void; launched?: boolean; dataReview?: boolean;
+  /** The member tools (Owner 2026-11-12): each entry shows when its handler is given. Anyone may press them; the frame decides
+   *  between the tool and its paywall (rail-gold-tools.tsx). */
+  onCompare?: () => void; onJury?: () => void;
   children: ReactNode;
 }) {
   return <aside className={styles.rail} aria-label="工作区导航">
     <div className={styles.railMobile}><button aria-label="关闭导航" onClick={onCloseMobile}>关闭工作列表</button></div>
+    {/* The phone's 对话 page: the rail is the page, under its name (workspace-frame.module.css shows it on a phone only). */}
+    {area==='history'&&<h1 className={styles.phoneTitle}>对话</h1>}
     <HoverPrefetchLink className={styles.newConversation} href="/app/positioning">
       <img className={styles.newConversationIcon} src="/opc-reference/new-chat.svg" alt=""/>新对话</HoverPrefetchLink>
     <nav className={styles.railNav} aria-label="工作区功能">
@@ -59,6 +68,8 @@ export function RailView({ area, returnParam = '', onCloseMobile, launched = fal
         <img className={styles.navIcon} src="/opc-reference/magnifying-glass.svg" alt=""/>搜索</HoverPrefetchLink>
       <HoverPrefetchLink href={'/app/library'+returnParam} aria-current={area==='library'?'page':undefined}>
         <img className={styles.navIcon} src="/opc-reference/books.svg" alt=""/>资料库</HoverPrefetchLink>
+      {onCompare&&<button type="button" onClick={onCompare}><Columns3 className={styles.navIcon} strokeWidth={1.5} aria-hidden="true"/>多模型对比</button>}
+      {onJury&&<button type="button" onClick={onJury}><Scale className={styles.navIcon} strokeWidth={1.5} aria-hidden="true"/>评审团</button>}
       {launched ? <>
         {/* Shown as available, like the other items, but not controls: there is nothing to open yet (no href, not focusable). */}
         <a><img className={styles.navIcon} src="/opc-reference/calendar-blank.svg" alt=""/>发布排期</a>

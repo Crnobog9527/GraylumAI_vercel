@@ -45,8 +45,10 @@ const stubs: Array<[(id: string) => boolean, string]> = [
         conversations:{useQuery:()=>q([{sessionId:'${SESSION}',title:'周末选题讨论',lastActivityAt:'2026-10-13T00:00:00Z'},
           ...(location.hash==='#rename-slow'?[{sessionId:'${OTHER}',title:'第二个对话',lastActivityAt:'2026-10-12T00:00:00Z'}]:[])])},
         workUiChange:{useMutation:m},accountUiChange:{useMutation:m}},
-      user:{getUserProfile:{useQuery:()=>q(null)}},publishMonitor:{features:{useQuery:()=>q(undefined)}},ticket:{createTicket:{useMutation:m}},
-      fusionReview:{mine:{useQuery:()=>q([])}}};`],
+      user:{getUserProfile:{useQuery:()=>q(null)},getEntitlements:{useQuery:()=>q(undefined)}},
+      publishMonitor:{features:{useQuery:()=>q(undefined)}},ticket:{createTicket:{useMutation:m}},
+      // The rail's two tool entries read these; both are left off here, so the rail is the one these cases were written for.
+      fusionCompare:{options:{useQuery:()=>q(undefined)}},fusionReview:{mine:{useQuery:()=>q([])},available:{useQuery:()=>q({enabled:false})}}};`],
   [id => id.endsWith('/hooks/use-credits'), 'export const useCreditsBalance=()=>({data:undefined});'],
   [id => id.endsWith('/lib/supabase'), 'export const createClient=()=>({auth:{signOut:async()=>{}}});'],
   [id => id === 'next/navigation', `export const usePathname=()=>'/app/runtime';export const useRouter=()=>({push(){},replace(url){window.replaced.push(url)}});`],

@@ -19,7 +19,7 @@ const other = '00000000-0000-4000-8000-000000000002';
 const SV = '00000000-0000-4000-8000-0000000000aa';
 const CODE = 'c'.repeat(32);
 
-/** One profile row with PostgREST's update ... where semantics, and a unique Shotviva id across profiles. */
+/** One profile row with PostgREST's update ... where semantics. */
 function db(row: Partial<{ shotviva_account_id: string | null; status: string; is_deleted: string }> = {},
   taken: string[] = []) {
   const state = { shotviva_account_id: null as string | null, status: 'active', is_deleted: 'false', ...row };
@@ -119,12 +119,6 @@ describe('callback', () => {
     expect(d.state.shotviva_account_id).toBeNull();
     const down = sv({ link: vi.fn(async () => { throw new ShotvivaError('unavailable', null); }) });
     expect(await code(finish(db(), {}, down))).toBe('SHOTVIVA_UNAVAILABLE');
-  });
-
-  it('a Shotviva account already connected to another Graylum account is refused', async () => {
-    const d = db({}, [SV]);
-    expect(await code(finish(d, {}))).toBe('SHOTVIVA_ACCOUNT_IN_USE');
-    expect(d.state.shotviva_account_id).toBeNull();
   });
 
   it('a free member, or an account closed meanwhile, is not connected', async () => {

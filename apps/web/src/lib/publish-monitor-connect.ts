@@ -24,8 +24,8 @@ export function sameOrigin(request: NextRequest): boolean {
   return origin !== null && origin === request.nextUrl.origin;
 }
 
-/** Maintenance blocks these routes the same way the tRPC route blocks ordinary procedures. */
-async function maintenanceOn(): Promise<boolean> {
+/** Maintenance blocks these routes the same way the tRPC route blocks ordinary procedures (also the avatar upload). */
+export async function maintenanceOn(): Promise<boolean> {
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!key) return true;
   const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, key);
