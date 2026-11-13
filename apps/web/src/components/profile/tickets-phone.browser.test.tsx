@@ -156,3 +156,28 @@ it('a computer keeps its layout: tabs side by side at their own width, 关闭工
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 45000);
+
+it('the keyboard opens a ticket: Tab reaches each row, Enter and Space open it (before, a row could only be clicked)', async () => {
+  const { page, errors, writes } = await open(1280, 800);
+  try {
+    const rows = page.getByRole('button', { name: /TK-2026111/ });
+    await ui(rows).toHaveCount(2);
+    await rows.first().focus();
+    await ui(rows.first()).toBeFocused();
+    await page.keyboard.press('Enter');
+    await ui(page.getByTestId('ticket-detail-view')).toBeVisible();
+    await page.getByRole('button', { name: '返回工单列表' }).click();
+    await page.getByRole('button', { name: /TK-20261112/ }).focus();
+    await page.keyboard.press(' ');
+    await ui(page.getByRole('heading', { name: /示例工单 2/ })).toBeVisible();
+    // From the switch above the list, Tab goes on to the first row.
+    await page.getByRole('button', { name: '返回工单列表' }).click();
+    await page.getByRole('button', { name: /已关闭/ }).focus();
+    await page.getByRole('button', { name: /现有工单/ }).click();
+    await page.keyboard.press('Tab');
+    await page.keyboard.press('Tab');
+    await ui(rows.first()).toBeFocused();
+    expect(writes).toEqual([]);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 45000);

@@ -154,12 +154,21 @@ export const TicketListView = memo(function TicketListView({
                 key={ticket.id}
                 data-testid="ticket-list-item"
                 onClick={() => onSelectTicket(ticket)}
+                // A button for the keyboard and screen readers too: Tab reaches it, Enter or Space opens the ticket.
+                role="button"
+                tabIndex={0}
+                onKeyDown={event => {
+                  if (event.key !== 'Enter' && event.key !== ' ') return;
+                  event.preventDefault();
+                  onSelectTicket(ticket);
+                }}
                 // The border is a class, not an inline style (an inline border would override the hover colour), and both
                 // colours are `!` (important): globals.css sets `* { border-color }` outside any @layer, which beats every
                 // border-colour utility, so without it neither the list colour nor the hover colour applies.
                 className={`${phone.item} p-4 rounded-xl cursor-pointer transition-[border-color,transform,box-shadow] duration-200 `
                   + 'motion-reduce:transition-none border border-[var(--border-primary)]! hover:translate-x-1 '
-                  + 'hover:border-[rgba(255,215,0,0.3)]! hover:shadow-[0_8px_24px_rgba(0,0,0,0.18)]'}
+                  + 'hover:border-[rgba(255,215,0,0.3)]! hover:shadow-[0_8px_24px_rgba(0,0,0,0.18)] '
+                  + 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--text-primary)]'}
                 style={{ background: 'var(--bg-primary)' }}
               >
                 <div className="flex items-start justify-between gap-4">
