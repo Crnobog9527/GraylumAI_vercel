@@ -118,11 +118,18 @@ describe('fetchJobImage', () => {
     expect(image).toMatchObject({ ok: true, contentType: 'image/png' });
     expect(send).toHaveBeenCalledWith(expect.any(URL), expect.objectContaining({ redirect: 'error' }));
     expect((await get(done('https://shotviva.test/files/x.png'), png())).ok).toBe(true);
+    // Shotviva's presigned address is virtual-host style: <bucket>.<account>.r2.cloudflarestorage.com (staging, 2026-11-13).
+    expect((await get(done('https://shotviva-media.0123abcd.r2.cloudflarestorage.com/out.png?X-Amz-Signature=s'), png())).ok).toBe(true);
   });
 
   it('any other host, plain http, credentials, a wrong type or an oversized body is refused', async () => {
     for (const url of ['https://evil.test/x.png', 'http://abc.r2.cloudflarestorage.com/x.png', 'https://u:p@abc.r2.cloudflarestorage.com/x',
-      'https://abc.r2.cloudflarestorage.com.evil.test/x', 'not a url']) {
+      'https://abc.r2.cloudflarestorage.com.evil.test/x', 'not a url',
+      // Two labels is the most R2 signs; three, another domain, plain http or credentials are refused.
+      'https://a.bucket.account.r2.cloudflarestorage.com/x', 'https://bucket.account.r2.cloudflarestorage.evil.test/x',
+      'https://bucket.account.evil.test/x', 'http://bucket.account.r2.cloudflarestorage.com/x',
+      'https://u:p@bucket.account.r2.cloudflarestorage.com/x', 'https://bucket.account.r2-cloudflarestorage.com/x',
+      'https://bucket..r2.cloudflarestorage.com/x']) {
       const send = png();
       expect(await get(done(url), send), url).toEqual({ ok: false, status: 502 });
       expect(send).not.toHaveBeenCalled();
