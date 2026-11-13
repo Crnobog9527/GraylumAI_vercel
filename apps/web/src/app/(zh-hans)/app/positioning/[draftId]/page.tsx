@@ -34,7 +34,7 @@ import { useLiveReply, useMentorTurnPath } from "./use-live-reply";
 import { PublishFootnote, PublishNext, ReportEntry, reportPublishes } from "./report-panel";
 import { DraftArchiveGate, ReadonlyDraftView, retryUnlessMissing } from './readonly-draft-view';
 import { InformationExport } from "./InformationExport";
-import { enterTopicWorkspace, topicsEntryShown } from "./topic-consent";
+import { enterTopicWorkspace, useTopicsEntry } from "./topic-consent";
 import { EXISTING_WELCOME } from "../start-entry";
 import { isStepSummaryInput, offersStepSummary, STEP_SUMMARY_INPUT, STEP_SUMMARY_LABEL, stepSummaryRequest, summaryRefusal,
   summaryShown } from "./step-summary";
@@ -54,11 +54,7 @@ export default function PositioningDraft({ params }: { params: Promise<{ draftId
 function PositioningDraftContent({draftId}:{draftId:string}){
   const router = useRouter();
   const utils = trpc.useUtils();
-  const read = trpc.opc.read.useQuery({ draftId }, { retry: retryUnlessMissing });
-  // The topics window keeps working on the version in effect while a revision is open (its workspace is bound to that version), so its
-  // entry stays (staging validation #1269); only a positioning with neither a formal report nor a bound workspace has none.
-  const topicWorkspace = trpc.opc.topicWorkspace.useQuery({ draftId },
-    { enabled: Boolean(draftId && read.data && !read.data.conversationDeleted), staleTime: 30_000 });
+  const read = trpc.opc.read.useQuery({ draftId }, { retry: retryUnlessMissing }), topicsEntry = useTopicsEntry(draftId, read.data);
   const library = trpc.opc.library.useQuery({search:'',from:null,to:null});
   const discussionAccounts = ((library.data?.businesses??[]) as Array<{accounts:Array<{strategyDraftId?:string;pendingStrategyDraftId?:string|null;displayName?:string;account:string;platform:string}>}>).flatMap(business=>business.accounts).filter(account=>account.pendingStrategyDraftId===draftId||account.strategyDraftId===draftId);
   const discussionAccount = discussionAccounts.length===1?discussionAccounts[0]:undefined;
@@ -832,7 +828,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
           .then(failure => { if (!failure) setConsentOpen(true); })} // Only with the finalized version read back.
         confirmed={!hasUnconfirmedRequired && !hasPendingConfirmation && !(d.accountRevision ? nextReviewStep : steps.some(x => !snap.steps[x.id].valid))} />}
       </div><p><PublishFootnote workflow={snap.workflow}/></p>
-      {topicsEntryShown(d.report?.available, topicWorkspace.data?.bound) && <Link href={`/app/positioning/${draftId}/topics`}>进入选题工作对话 →</Link>}
+      {topicsEntry && <Link href={`/app/positioning/${draftId}/topics`}>进入选题工作对话 →</Link>}
       </footer>}
       {consentOpen && (
         <div

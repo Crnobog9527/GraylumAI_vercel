@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { trpc } from "@/trpc/client";
 
 /**
  * "继续生成第一周选题": the explicit consent that enters the bound topic workspace. Without React so the rule is testable: the
@@ -40,4 +41,11 @@ export async function enterTopicWorkspace(deps: {
  */
 export function topicsEntryShown(reportAvailable: boolean | undefined, workspaceBound: boolean | undefined): boolean {
   return Boolean(reportAvailable || workspaceBound);
+}
+
+/** The report page's one call: reads whether the topics window is bound (only for a draft whose conversation still exists). */
+export function useTopicsEntry(draftId: string, read: { conversationDeleted?: boolean; report?: { available?: boolean } | null } | undefined) {
+  const workspace = trpc.opc.topicWorkspace.useQuery({ draftId },
+    { enabled: Boolean(draftId && read && !read.conversationDeleted), staleTime: 30_000 });
+  return topicsEntryShown(read?.report?.available, workspace.data?.bound);
 }

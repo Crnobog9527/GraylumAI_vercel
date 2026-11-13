@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
+vi.mock("@/trpc/client", () => ({ trpc: {} }));
 import { enterTopicWorkspace, topicsEntryShown, TOPIC_SKILL_MISSING_NOTICE, TOPIC_SOURCE_CHANGED_NOTICE, TOPIC_UNVERIFIED_NOTICE } from "./topic-consent";
 
 const run = (answer: () => Promise<{ bound: boolean; sourceVersionId?: string | null }>) => {
@@ -54,7 +55,8 @@ describe("UI-FINISH: the report page's entry to the topics window", () => {
   });
   it("is what the page uses, not the report of the open round alone", () => {
     const page = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
-    expect(page).toContain("topicsEntryShown(d.report?.available, topicWorkspace.data?.bound)");
+    expect(page).toContain("topicsEntry = useTopicsEntry(draftId, read.data)");
+    expect(page).toContain("{topicsEntry && <Link href={`/app/positioning/${draftId}/topics`}>");
     expect(page).not.toContain("{d.report?.available && <Link href={`/app/positioning/${draftId}/topics`}>");
   });
 });
