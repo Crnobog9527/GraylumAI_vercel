@@ -20,7 +20,7 @@ import { ReportPaywallDialog } from '@/components/paywall/ReportPaywallDialog';
  * `attachment` is shown inside the same frame, above the text box (the mentor's open question card).
  */
 export function WorkComposer({value,onChange,onSend,disabled=false,sendDisabled=false,label='消息',placeholder='消息',maxLength=20000,sessionId,skillId='',onSkillChange,note,attachment,
- references=COMPOSER_REFERENCES_ENABLED,referenceList,onReferencesChange,images}: {
+ references=COMPOSER_REFERENCES_ENABLED,referenceList,onReferencesChange,images,tools}: {
  value:string;onChange:(value:string)=>void;onSend:(skillId?:string)=>void;disabled?:boolean;sendDisabled?:boolean;label?:string;placeholder?:string;maxLength?:number;
  sessionId?:string;skillId?:string;onSkillChange?:(id:string)=>void;note?:string;attachment?:ReactNode;
  /** UI-B (default off): `@` picks library documents. Pages whose send cannot carry them pass false. */
@@ -29,6 +29,8 @@ export function WorkComposer({value,onChange,onSend,disabled=false,sendDisabled=
  referenceList?:readonly LibraryReference[];onReferencesChange?:(references:LibraryReference[])=>void;
  /** PUBLISH-MONITOR B2 (free chat only): screenshots for this message. The "+" picker and a paste into the box add image files here. */
  images?:ChatImages;
+ /** More entries for the row of tools (a phone's "多模型对比", fusion-compare/ComparePhoneEntry.tsx). */
+ tools?:ReactNode;
 }) {
  const [menu,setMenu]=useState<'files'|'skills'|null>(null),[query,setQuery]=useState(''),[localSkill,setLocalSkill]=useState(''),[error,setError]=useState(''),[reading,setReading]=useState(false);
  const root=useRef<HTMLDivElement>(null);
@@ -89,7 +91,7 @@ export function WorkComposer({value,onChange,onSend,disabled=false,sendDisabled=
   ?`图片（截图、PNG、JPG、WebP，最多 ${CHAT_MAX_IMAGES} 张）只随这条消息发给模型，不会保存；也可以直接拖进对话或粘贴。`:'';
  const attached=images?<>{attachment}<ComposerImages state={images} disabled={disabled}/></>:attachment;
  return <>{paywall&&<ReportPaywallDialog scene="coach" minLevel={paywall} onClose={()=>setPaywall(null)}/>}
- <ComposerView rootRef={root} attachment={attached} referenceMenu={referencePicker.menu} menu={menu} disabled={disabled} reading={reading}
+ <ComposerView rootRef={root} attachment={attached} referenceMenu={referencePicker.menu} menu={menu} disabled={disabled} reading={reading} tools={tools}
   editor={<ComposerEditor ref={box} label={label} placeholder={placeholder} value={value} maxLength={maxLength}
    disabled={disabled||reading} onChange={onChange} onEscape={()=>setMenu(null)}
    onEnter={()=>{if(!cannotSend)onSend(selected);}} className={styles.editor} references={referencePicker.hooks} knownReferences={referenceList}/>}

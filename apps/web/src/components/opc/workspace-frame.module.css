@@ -156,3 +156,26 @@
  .workspace[data-area=history] .newConversation{height:48px;margin:12px 0 6px;border-radius:99px;font-size:15px}
  .workspace[data-area=history] .thread,.workspace[data-area=history] .strategy{padding:12px 12px}
 }
+/*
+ * A phone's conversation and topics pages (the areas without the bottom bar; Owner 2026-11-12, phone plan A, screens A3 and C1).
+ * The page is the whole screen: no site bar and no announcement above it, one row with the way back to the list of conversations,
+ * and the page ends where the on-screen keyboard begins (--keyboard-inset, use-keyboard-inset.ts), so the message box at its foot
+ * is never under the keyboard. The right panel (the positioning checklist, a conversation's results) rises from the bottom edge.
+ */
+@media(max-width:639px){
+ .workspace:not([data-tabs]) .global,.workspace:not([data-tabs]) .announcement{display:none}
+ .workspace:not([data-tabs]) .shell,.workspace:not([data-tabs]) .shell.withRight,.workspace:not([data-tabs]) .shell.noNotice{
+  height:calc(100dvh - var(--consent-bar-space, 0px) - var(--keyboard-inset, 0px));padding:0}
+ .workspace:not([data-tabs]) .center{border-radius:0;box-shadow:none}
+ .workspace:not([data-tabs]) .mobileBar{display:flex;align-items:center;flex:none;height:48px;padding:0 52px 0 2px;border-bottom:1px solid #f0f0f0;background:#fff}
+ .mobileBar a{display:inline-flex;align-items:center;gap:1px;min-height:44px;padding:0 12px 0 6px;border-radius:12px;color:#1f1f1f;font-size:16px;text-decoration:none}
+ .mobileBar a:active{background:#f1f1f2}
+ .workspace:not([data-tabs]) .mobileRightToggle{top:2px;right:4px;width:44px;height:44px;border-radius:12px;background:none}
+ .workspace:not([data-tabs]) .shell.withRight>.right{top:auto;right:0;bottom:var(--consent-bar-space, 0px);left:0;width:100%;
+  height:min(78dvh,calc(100dvh - 56px - var(--consent-bar-space, 0px)));border-radius:24px 24px 0 0;box-shadow:0 0 0 100vmax rgba(0,0,0,.4);
+  padding-bottom:env(safe-area-inset-bottom, 0px)}
+}
+@media(max-width:639px) and (prefers-reduced-motion:no-preference){
+ .workspace:not([data-tabs]) .shell.withRight.mobileRightOpen>.right{animation:phoneSheetRise .26s cubic-bezier(.32,.72,0,1)}
+}
+@keyframes phoneSheetRise{from{transform:translateY(100%)}to{transform:translateY(0)}}

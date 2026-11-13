@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { BookOpen, Grid2X2, LogOut, Menu, PanelRightClose, Sparkles, UserRound, X } from 'lucide-react';
+import { ChevronLeft, Grid2X2, LogOut, PanelRightClose, Sparkles, UserRound, X } from 'lucide-react';
 import { trpc } from '@/trpc/client';
 import { sidebarCreditsLabel } from './credits-label';
 import { useCreditsBalance } from '@/hooks/use-credits';
@@ -27,6 +27,7 @@ import {
  RailWorkThread, type RailArea,
 } from './rail-view';
 import { PhoneTabs, type PhoneTab } from './phone-tabs';
+import { useKeyboardInset } from './use-keyboard-inset';
 import { useAccountDiscussion } from './use-account-discussion';
 import { LanguageSwitch } from '@/components/layout/LanguageSwitch';
 import styles from './workspace-frame.module.css';
@@ -51,6 +52,8 @@ export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,acti
  // A phone's bottom bar (Owner 2026-11-12, phone plan A). The conversation and topics pages do not show it: there the message box
  // sits at the foot of the screen. Everywhere else it replaces the drawer, so the button that opened the drawer goes (CSS, data-tabs).
  const phoneTab:PhoneTab|null=area==='chat'||area==='topics'?null:area==='start'||area==='history'?'chats':'tools';
+ // The conversation pages fill a phone's screen and keep the message box above the on-screen keyboard (use-keyboard-inset.ts).
+ useKeyboardInset(!phoneTab);
  const [mobileNav,setMobileNav]=useState(false),[mobileRight,setMobileRight]=useState(false);
  // Reveal before the next animation frame, when the checklist requests field focus.
  useLayoutEffect(()=>{if(revealRight)setMobileRight(true);},[revealRight]);
@@ -281,7 +284,9 @@ export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,acti
    </RailView>
    <section className={styles.center}>
    {right&&<button type="button" className={styles.mobileRightToggle} aria-label="展开右边栏" onClick={()=>{if(!rightOpen)onToggleRight?.();setMobileRight(true);}}><PanelRightClose size={18}/></button>}
-   <div className={styles.mobileBar}><button aria-label="打开导航" onClick={()=>setMobileNav(true)}><Menu size={19}/></button><span>Graylum · 工作区</span>{right&&<button onClick={()=>{if(!rightOpen)onToggleRight?.();setMobileRight(true);}} aria-label="打开成果"><BookOpen size={18}/></button>}</div>
+   {/* A phone's conversation page fills the screen (Owner 2026-11-12, phone plan A, screen A3): its top row is the way back to the
+       list of conversations. The button that opens the right panel stands at this row's right end (mobileRightToggle above). */}
+   {!phoneTab&&<div className={styles.mobileBar}><Link prefetch={false} href="/app/chats"><ChevronLeft size={24} aria-hidden="true"/>对话</Link></div>}
     {children}
    </section>
    {right&&rightOpen&&<aside className={styles.right} aria-label="当前成果"><div className={styles.rightToggle}><button aria-label="收起成果面板" onClick={()=>{if(window.matchMedia('(max-width:639px)').matches)setMobileRight(false);else onToggleRight?.();}}><PanelRightClose size={18}/></button></div>{right}</aside>}

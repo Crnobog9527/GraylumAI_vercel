@@ -8,6 +8,8 @@ import { expect, it } from 'vitest';
 it('the compare card turns into one column with tabs at the same phone width as the shell (639px and below)', () => {
   const css = readFileSync(fileURLToPath(new URL('./compare.module.css', import.meta.url)), 'utf8');
   const widths = [...css.matchAll(/@media\s*\(\s*max-width:\s*(\d+)px\s*\)/g)].map(match => match[1]);
-  expect(widths).toEqual(['639']);
+  // Every width in the file is that one (the card's columns, and the phone's entry in the message box's row of tools).
+  expect(widths.length).toBeGreaterThan(0);
+  expect([...new Set(widths)]).toEqual(['639']);
   expect(css).toMatch(/@media\(max-width:639px\)\{\s*\.tabs\{display:flex/);
 });

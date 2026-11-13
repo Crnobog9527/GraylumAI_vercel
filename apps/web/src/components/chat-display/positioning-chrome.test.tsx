@@ -53,7 +53,7 @@ it('marks only the selected step and its neighbours as near, which is all a phon
   const { readFileSync } = await import('node:fs');
   const css = readFileSync(new URL('../opc/positioning-result.module.css', import.meta.url), 'utf8');
   // The phone rule hides every tab that is not near; the tabs carry no !important override of ui/Button.
-  expect(css).toMatch(/@media\(max-width:700px\)\{\.stepTabs\{[^}]*\}\.stepTab\{[^}]*\}\.stepTab:not\(\[data-near\]\)\{display:none\}\}/);
+  expect(css).toMatch(/@media\(max-width:639px\)\{\.stepTabs\{[^}]*\}\.stepTab\{[^}]*\}\.stepTab:not\(\[data-near\]\)\{display:none\}\}/);
   const tabRules = css.split('\n').filter(line => line.startsWith('.stepTab')).join('\n');
   expect(tabRules).not.toContain('!important');
   expect(readFileSync(new URL('./positioning-chrome.tsx', import.meta.url), 'utf8')).not.toContain('ui/button');

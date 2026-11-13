@@ -16,6 +16,7 @@ import composerStyles from '@/components/opc/work-composer.module.css';
 import { trpc } from '@/trpc/client';
 import { RUNTIME_CHOICES_STALE_MS } from '@/lib/runtime-choices';
 import { CompareHost } from '@/components/fusion-compare/ComparePicker';
+import { ComparePhoneEntry } from '@/components/fusion-compare/ComparePhoneEntry';
 import { CompareThread, useCompareThread } from '@/components/fusion-compare/CompareThread';
 import {
   clearForSend, forgetPending, markPendingRestored, openingDraftWithReferences, readPending, rememberPending,
@@ -187,7 +188,7 @@ export function TurnWorkspace({ sessionId }: { sessionId: string }) {
           onMaybeStarted={() => void compare.refresh()}/>
         <WorkComposer value={input} onChange={update} onSend={() => void send()} sendDisabled={chat.busy} sessionId={sessionId}
           skillId={skillId} onSkillChange={chooseSkill} referenceList={references} onReferencesChange={updateReferences}
-          images={images}/>
+          images={images} tools={<ComparePhoneEntry/>}/>
       </div></footer>
     </main>
   </WorkspaceFrame>;
