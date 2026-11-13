@@ -17,7 +17,7 @@ import type { TurnDatabase } from '../db';
  */
 
 /** Tools a turn may offer. Research names come from research/tools/names.ts. */
-export type FreeToolName = 'read_source' | 'load_skill' | 'read_skill_file' | ImageToolName;
+export type FreeToolName = 'read_source' | 'load_skill' | 'read_skill_file' | 'request_minutes' | ImageToolName;
 /** INTEGRATION-SHOTVIVA: image generation through the linked Shotviva account (free here; Shotviva charges its own credits). */
 export type ImageToolName = 'list_image_templates' | 'generate_image';
 export type GeneralResearchToolName = 'social_search' | 'social_account' | 'web_search' | 'web_fetch';

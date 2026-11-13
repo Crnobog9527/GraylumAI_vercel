@@ -33,6 +33,7 @@ import { planTurnTools, READ_SOURCE_CALLS, RESEARCH_INPUT_BYTES, type ResearchSe
 import { researchInstructions, READ_SOURCE_DESCRIPTION, turnTools, type SourceReader } from './index';
 import type { PreparedSkills } from './skills';
 import { IMAGE_TOOL_NAMES, IMAGE_TOOLS_INSTRUCTIONS, imageToolBytes, type ConversationPhoto, type ImageToolCalls } from './imageTools';
+import { REQUEST_MINUTES_INSTRUCTIONS, REQUEST_MINUTES_TOOL, requestMinutesToolBytes } from './requestMinutes';
 import type { ToolCallDeps, ToolPlan, TurnToolName } from './types';
 
 /*
@@ -62,6 +63,8 @@ export type ChatToolDeps = {
   images?: { ready: (actorId: string) => Promise<true | 'not_entitled' | 'not_linked' | 'disabled'>;
     /** `current`: this message's turn and its photos as they are kept (chat.ts), so a photo sent now can be used now. */
     calls: (actorId: string, sessionId: string, current: { turnId: number; kept: Promise<readonly ConversationPhoto[]> | null }) => ImageToolCalls };
+  /** CONTENT-CONVERSATION-2 PR3b: offer request_minutes (the chat's way to start the minutes of a free chat or a topic window). */
+  minutes?: boolean;
 };
 
 export type ChatToolsSetup = {
@@ -80,7 +83,7 @@ export type ChatToolsSetup = {
   selection(chosen: ChatSelection): { note: string; skill?: WorkSkill; social?: true; contentSource?: 'script' | 'storyboard' } | { refused: string };
   /** Context fields of the request format (providerRequest.ts): the tools it may carry. */
   context: { tools: string[]; research?: { freeChat: string }; skillCatalog?: SkillCatalogEntry[]; libraryRetrieval?: boolean; workspaceContext?: boolean;
-    imageGeneration?: boolean };
+    imageGeneration?: boolean; minutesSignal?: boolean };
   build(calls: ToolCallDeps, extra: { slots: CounterStore; currentMessage: string; deadline: number; callGate: (subcalls: number) => Promise<void>;
     onStop: (stop: TurnStop) => void; gated: boolean; onCall: NonNullable<Parameters<typeof turnTools>[0]['onCall']>;
     /** Told when each tool starts and ends (toolStage.ts), so the page can list the steps of the reply. */
@@ -124,14 +127,17 @@ export async function prepareChatTools(input: { admin: SupabaseClient; read: Tur
   const offered: TurnToolName[] = [];
   const workspaceOn = Boolean(input.tools.workspace);
   for (const group of [library || workspaceOn ? ['read_source' as const] : [], skills?.catalog.length ? ['load_skill' as const] : [],
-    researchOn ? [...GENERAL_RESEARCH_TOOLS] as TurnToolName[] : [], input.tools.images ? [...IMAGE_TOOL_NAMES] as TurnToolName[] : []])
+    researchOn ? [...GENERAL_RESEARCH_TOOLS] as TurnToolName[] : [], input.tools.images ? [...IMAGE_TOOL_NAMES] as TurnToolName[] : [],
+    // Last, so it never takes the place of another tool under the profile's ceiling.
+    input.tools.minutes ? [REQUEST_MINUTES_TOOL as TurnToolName] : []])
     if (offered.length + group.length <= input.maxTools) offered.push(...group);
-  const imagesOffered = offered.includes('generate_image');
+  const imagesOffered = offered.includes('generate_image'), minutesOffered = offered.includes(REQUEST_MINUTES_TOOL);
   const research = offered.filter(name => (GENERAL_RESEARCH_TOOLS as readonly string[]).includes(name)) as typeof GENERAL_RESEARCH_TOOLS[number][];
   const skillOffered = offered.includes('load_skill'), sourceOffered = offered.includes('read_source');
   const description = workspaceOn ? sourceDescription(Boolean(library)) : READ_SOURCE_DESCRIPTION;
   const definitionBytes = (research.length ? researchToolBytes(research, false, true) : 0) + (skillOffered ? loadSkillToolBytes() : 0)
-    + (sourceOffered ? Buffer.byteLength(description) + 256 : 0) + (imagesOffered ? imageToolBytes() : 0);
+    + (sourceOffered ? Buffer.byteLength(description) + 256 : 0) + (imagesOffered ? imageToolBytes() : 0)
+    + (minutesOffered ? requestMinutesToolBytes() : 0);
   const catalog = skillOffered ? skills!.catalog : [];
   const catalogText = skillCatalogInstructions(catalog);
   const libraryText = libraryAddendum(false, sourceOffered && Boolean(library));
@@ -148,7 +154,8 @@ export async function prepareChatTools(input: { admin: SupabaseClient; read: Tur
       ...(access.posts ? { posts: access.posts.windowDays > 0 ? { bytes: OWN_POSTS_RESERVE, calls: OWN_POSTS_READS }
         : { bytes: 1200, calls: READ_SOURCE_CALLS } } : {}) } } : {}),
     requiredBytes: input.requiredBytes + definitionBytes + Buffer.byteLength(catalogText + libraryText + (voice?.text ?? '')
-      + workspaceText + WORKSPACE_STRATEGY_INSTRUCTIONS + postsText + (imagesOffered ? IMAGE_TOOLS_INSTRUCTIONS : '')),
+      + workspaceText + WORKSPACE_STRATEGY_INSTRUCTIONS + postsText + (imagesOffered ? IMAGE_TOOLS_INSTRUCTIONS : '')
+      + (minutesOffered ? REQUEST_MINUTES_INSTRUCTIONS : '')),
     ...(imagesOffered && imagesReady !== null ? { imagesReady } : {}),
     // A turn whose research is usable may use the research ceiling; otherwise the interactive one (Owner 10-17 / 10-27).
     inputBytes: Math.min(input.quotedBytes, input.interactiveBytes),
@@ -163,7 +170,7 @@ export async function prepareChatTools(input: { admin: SupabaseClient; read: Tur
     plan, research: setup, inputLimit, definitionBytes,
     coachCapture: Boolean(plan.sourceRoom?.posts && access.posts?.coach && access.posts.windowDays > 0),
     sharedInstructions: gated => researchInstructions(plan) + libraryText + skillCatalogInstructions(allowedSkills(catalog, gated))
-      + (imagesOffered ? IMAGE_TOOLS_INSTRUCTIONS : ''),
+      + (imagesOffered ? IMAGE_TOOLS_INSTRUCTIONS : '') + (minutesOffered ? REQUEST_MINUTES_INSTRUCTIONS : ''),
     userInstructions: (voice?.text ?? '') + workspaceText + (plan.sourceRoom?.strategy ? WORKSPACE_STRATEGY_INSTRUCTIONS : '')
       + (plan.sourceRoom?.posts ? postsText : ''), ...(voice?.versionId ? { voiceVersionId: voice.versionId } : {}),
     selection(chosen) {
@@ -187,7 +194,7 @@ export async function prepareChatTools(input: { admin: SupabaseClient; read: Tur
     context: { tools: [...plan.offered], ...(research.length ? { research: { freeChat: FREE_CHAT_RESEARCH } } : {}),
       ...(skillOffered ? { skillCatalog: skills!.catalog } : {}),
       ...(sourceOffered && library ? { libraryRetrieval: true } : {}), ...(workspaceRead ? { workspaceContext: true } : {}),
-      ...(imagesOffered ? { imageGeneration: true } : {}) },
+      ...(imagesOffered ? { imageGeneration: true } : {}), ...(minutesOffered ? { minutesSignal: true } : {}) },
     async build(calls, extra) {
       const chatReader = () => {
         const shelf = !library ? undefined : typeof input.tools.library === 'function' ? input.tools.library(input.actorId, input.sessionId)

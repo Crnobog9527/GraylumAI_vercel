@@ -28,3 +28,11 @@ export function minutesFileName(iso: string): string {
   const pad = (n: number) => String(n).padStart(2, '0');
   return `纪要-${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}.md`;
 }
+
+/** CONTENT-CONVERSATION-2 PR3b: the step a reply leaves when it asked for the minutes (turn/tools/requestMinutes.ts). */
+export const REQUEST_MINUTES_STEP = '整理纪要';
+export const asksForMinutes = (steps: ReadonlyArray<{ tool: string; label?: string }> | null | undefined) =>
+  Boolean(steps?.some(step => step.tool === 'other' && step.label === REQUEST_MINUTES_STEP));
+/** The minutes request a chat reply asks for: the same id for the same turn, in every tab and after every reload (a valid UUID v4
+ *  shape whose last group is the turn id, which is unique). */
+export const chatMinutesRequestId = (turnId: number) => `c2a1e5c0-0000-4000-8000-${turnId.toString(16).padStart(12, '0')}`;

@@ -3,6 +3,7 @@ import { GENERAL_RESEARCH_TOOLS, POSITIONING_RESEARCH_TOOLS } from '../../resear
 import { COACH_REVIEW_ID } from './coachReview';
 import { IMAGE_STEP_REASONS, type ImageStepReason, type StepEvent, type StepKind, type StepState } from '../sse';
 import type { ToolStatus } from '../../research/tools/envelope';
+import { REQUEST_MINUTES_LABEL, REQUEST_MINUTES_TOOL } from './requestMinutes';
 
 /*
  * What the page is told about the tools of a reply (the reply has no text until a tool answers and the next model call starts).
@@ -44,6 +45,8 @@ export function stepStart(name: string, args: Record<string, unknown>, skillTitl
   // The method's own file (the mentor's references) is part of reading the method.
   if (name === 'read_skill_file') return { tool: 'load_skill' };
   if (name === 'generate_image') return { tool: 'image' };
+  // CONTENT-CONVERSATION-2 PR3b: the page starts the minutes from this step (its label is fixed, never user text).
+  if (name === REQUEST_MINUTES_TOOL) return { tool: 'other', label: REQUEST_MINUTES_LABEL };
   return { tool: 'other' };
 }
 
