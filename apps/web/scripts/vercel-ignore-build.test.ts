@@ -85,5 +85,9 @@ describe('VERCEL-COST-2: the script against a real repository', () => {
     // Production builds only when the controller creates the release deployment (runbook §14); staging builds on every merge.
     expect(config.git.deploymentEnabled.main).toBe(false);
     expect(config.git.deploymentEnabled.staging).toBe(true);
+    // Vercel applies the root .vercelignore before the Ignored Build Step: an ignored .git left the script with no history,
+    // so it built every time ("git is not available here", staging #2003).
+    const vercelignore = readFileSync(fileURLToPath(new URL('../../../.vercelignore', import.meta.url)), 'utf8').split('\n').map(line => line.trim());
+    expect(vercelignore.filter(line => /^\/?\.git\/?\*?$/.test(line))).toEqual([]);
   });
 });
