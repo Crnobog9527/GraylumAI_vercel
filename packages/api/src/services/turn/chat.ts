@@ -428,7 +428,7 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
         // The steps the reply showed: written in the close's own transaction, in a savepoint of their own (turn_close, 0507).
         ...(stepLog.size ? { steps: savedSteps(stepLog.values()) } : {}) } } : {}) });
     markStage('close');
-    // A deleted voice voids only the reply: the user's message (and its photos) was kept (0529).
+    // A deleted voice voids only the reply: the user's message (and its photos) was kept (0535).
     if (closed.closeKind === 'erased') {
       messageKept = voiceRevokedOnly(closed);
       return emit({ type: 'error', code: erasedCode(closed), turnId: opened.turnId });
@@ -462,7 +462,7 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
       const plan = CLOSES[code] ?? { kind: 'failed' as const, refundAll: true };
       if (answered) noteUnsavedAnswer('chat', opened.turnId, code);
       // A close that fails here is left to recovery (the turn stays open, its freeze kept); logged, never thrown at the client.
-      // An erased close is handed the user's message: turn_close keeps it only when the deleted voice is the reason (0529).
+      // An erased close is handed the user's message: turn_close keeps it only when the deleted voice is the reason (0535).
       const ended = await swallow('turn_close_failed', close(plan.kind, { refundAll: plan.refundAll, failureCode: code.toLowerCase(),
         ...(plan.kind === 'erased' ? { messages: [{ role: 'user' as const, content: text }] } : {}) }), undefined, { category: 'ai' });
       if (plan.kind === 'erased' && voiceRevokedOnly(ended)) {

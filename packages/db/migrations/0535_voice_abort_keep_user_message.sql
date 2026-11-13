@@ -10,7 +10,7 @@
 --   * voice_delete_versions: whole current definition. It hid (visible=false) the messages of every turn bound to the deleted
 --     version, i.e. every past reply in free chat written while the voice was on; it now does so only for turns not yet
 --     closed. Replies already shown stay (Master Plan 5, D7); the voice text itself was never stored in the history.
--- Number 0529 assigned by the controller.
+-- Number 0535 assigned by the controller.
 -- Compatibility: signatures, privileges and return shapes unchanged; old code passes no user message to an erased close and
 -- reads the same answer. Repeatable: CREATE OR REPLACE only.
 -- Recovery: re-apply the current definitions (turn_close from 0508_mentor_turn_steps_history.sql,
@@ -84,7 +84,7 @@ BEGIN
   tomb := turn_tombstones(p_actor_id, t.session_id, t.policy);
   IF v_kind IN ('completed','stopped') AND ((tomb->>'sessionTombstoned')::boolean OR (tomb->>'accountErasing')::boolean
     OR (tomb->>'voiceSourceRevoked')::boolean) THEN v_kind := 'erased'; END IF;
-  -- VOICE-ABORT-FIX (0529): erased only because the writing voice it used was deleted (the conversation and the account are
+  -- VOICE-ABORT-FIX (0535): erased only because the writing voice it used was deleted (the conversation and the account are
   -- still there). Only this round's reply is void: the user's own message is kept below, so the conversation is not emptied.
   voice_only := v_kind = 'erased' AND t.session_id IS NOT NULL AND (tomb->>'voiceSourceRevoked')::boolean
     AND NOT (tomb->>'sessionTombstoned')::boolean AND NOT (tomb->>'accountErasing')::boolean;
@@ -231,7 +231,7 @@ BEGIN
  DELETE FROM voice_profile_versions WHERE actor_id=a AND id=ANY(ids);
  GET DIAGNOSTICS n=ROW_COUNT;
  -- Owner 10-23: a deletion is effective at once for the turns still running with this version; replies already shown stay
- -- in the conversation (D7; VOICE-ABORT-FIX 0529: this used to hide every past turn bound to the version). The
+ -- in the conversation (D7; VOICE-ABORT-FIX 0535: this used to hide every past turn bound to the version). The
  -- open turns bound to it are locked first, so a turn that closes waits for this commit, re-reads its tombstones, closes
  -- erased and saves nothing. The callers hold the account row (library_actor), which turn_close takes before its turn row,
  -- so a turn row held here is only ever held by a call write (turn row only): waiting on it cannot deadlock.

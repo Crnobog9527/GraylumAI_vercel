@@ -259,7 +259,7 @@ try{
   assert.deepEqual(after.calls,before.calls,'receipts keep their billing fields');
   report.checks.push('account erasure: scrub_runtime leaves a session with an open turn until it closes (the close still works), scrub_turns empties messages and closed-turn bodies, an open turn is counted remaining until it closes erased; body_remaining counts what is left; receipts keep billing');
  }
- // 9. Voice source revocation (Owner 10-23, D7; VOICE-ABORT-FIX 0529): deleting a version voids only the turns still running with
+ // 9. Voice source revocation (Owner 10-23, D7; VOICE-ABORT-FIX 0535): deleting a version voids only the turns still running with
  // it; replies already shown stay in the conversation, whichever version wrote them.
  {
   const a=await account(),version=randomUUID(),kept=randomUUID();
@@ -332,7 +332,7 @@ try{
    assert.equal(await one('select role v from session_messages where session_id=$1',[a.session]),'user');
   }
   // The app's own erased close (a call write found the deletion first, chat.ts): handed the user's message, it keeps that and
-  // nothing else; the same close of a deleted conversation keeps nothing (0529). The charge is the deletion abort's, unchanged.
+  // nothing else; the same close of a deleted conversation keeps nothing (0535). The charge is the deletion abort's, unchanged.
   {
    const a=await account(),version=randomUUID();
    await c.query(`insert into voice_profile_versions(id,actor_id,request_id,version,status,profile,confirmed_at)

@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { erasedCode, voiceRevokedOnly } from './db';
 
-/* VOICE-ABORT-FIX: an erased close caused only by a deleted writing voice kept the user's message (0529) and is worded as such;
+/* VOICE-ABORT-FIX: an erased close caused only by a deleted writing voice kept the user's message (0535) and is worded as such;
  * a deleted conversation or an erasing account still wins, and an unreadable answer is never taken for a revoked voice. */
 describe('erased close: deleted voice or deleted conversation', () => {
   const quiet = { sessionTombstoned: false, accountErasing: false, voiceSourceRevoked: false };
