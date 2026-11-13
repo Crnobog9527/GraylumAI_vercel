@@ -17,8 +17,8 @@ type Tile = { name: string; note?: string; icon: ReactNode; tint: 'warm' | 'lila
  * A phone's 功能 page (Owner 2026-11-12, phone plan A): everything the rail's function links lead to on a computer, as
  * one page of large tiles reached from the bottom bar. Nothing here is new: each tile is one of the rail's own entries
  * and behaves as it does there. 发布排期 and 数据复盘 are links once their admin switch is on and wait ("待接入") until
- * then; 多模型对比 and 评审团 show, run or open their paywall exactly as in the rail (useRailGoldTools); 集成 is kept a
- * place for until its page exists. The notes under a name are words the product already uses for it.
+ * then; 多模型对比 and 评审团 show, run or open their paywall exactly as in the rail (useRailGoldTools); 集成 opens the
+ * integrations page (INTEGRATION-SHOTVIVA PR C). The notes under a name are words the product already uses for it.
  */
 export default function ToolsPage() {
   const router = useRouter();
@@ -32,7 +32,7 @@ export default function ToolsPage() {
       ...(open ? { href: '/app/publish-monitor' } : { waiting: true }) },
     ...(gold.onCompare ? [{ name: '多模型对比', icon: <Columns3 />, tint: 'plain' as const, press: gold.onCompare }] : []),
     ...(gold.onJury ? [{ name: '评审团', icon: <Scale />, tint: 'plain' as const, press: gold.onJury }] : []),
-    { name: '集成', icon: <Plug />, tint: 'plain', waiting: true },
+    { name: '集成', icon: <Plug />, tint: 'plain', href: '/app/integrations' },
   ];
   return (
     <WorkspaceFrame area="tools">
