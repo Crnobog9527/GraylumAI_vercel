@@ -10,7 +10,7 @@ const answer = (code: 'RATE_LIMITED' | 'SMS_UNAVAILABLE', status: number, retryA
 
 /**
  * PHONE-OTP: asks Supabase for an SMS code after our per-number and per-IP limits; the browser then calls verifyOtp.
- * First every attempt from the IP is counted (deep review 11-11 item 7), whatever happens next: a failed hCaptcha
+ * First every attempt from the IP is counted (deep review 11-11 item 7), whatever happens next: a request Supabase refuses
  * gives back the per-number row in the database but not this count. One IP therefore cannot keep a stranger's number
  * in its 60-second cooldown, and the per-number limits stay as they are.
  */

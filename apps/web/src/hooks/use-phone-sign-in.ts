@@ -3,8 +3,6 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { parseMainlandPhone, SMS_CODE_LENGTH, SMS_RESEND_SECONDS } from '@repo/api/src/shared/mainlandPhone';
-import { invisibleCaptchaOptions } from '@/lib/invisibleCaptcha';
-import { getSafeErrorMessage } from '@/lib/safe-error-message';
 import {
   PHONE_SEND_MESSAGES, phoneVerifyErrorMessage, requestPhoneCode,
 } from '@/lib/phoneAuth';
@@ -13,7 +11,7 @@ import { createClient } from '@/lib/supabase';
 export type PhoneStep = 'phone' | 'code';
 
 /**
- * PHONE-OTP sign-in in the browser: number + both PIPL boxes → invisible hCaptcha → our send route → six-digit code →
+ * PHONE-OTP sign-in in the browser: number + both PIPL boxes → our send route → six-digit code →
  * verifyOtp, which signs in (a new number signs up). No password. The session lands in this browser like email sign-in.
  */
 export function usePhoneSignIn(redirectTarget: string) {
@@ -41,17 +39,12 @@ export function usePhoneSignIn(redirectTarget: string) {
     setPending('send');
     setError(null);
     try {
-      const captcha = await invisibleCaptchaOptions();
-      const failure = await requestPhoneCode({
-        phone: parsed.e164, createUser: true, privacyConsent: privacy, transferConsent: transfer, captchaToken: captcha.captchaToken,
-      });
+      const failure = await requestPhoneCode({ phone: parsed.e164, createUser: true, privacyConsent: privacy, transferConsent: transfer });
       if (failure) return setError(failure);
       setSentAt(Date.now());
       setNow(Date.now());
       setCode('');
       setStep('code');
-    } catch (captchaError) {
-      setError(getSafeErrorMessage(captchaError, '人机验证未完成，请重试。'));
     } finally {
       setPending(null);
     }

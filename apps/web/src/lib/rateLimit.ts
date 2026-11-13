@@ -132,7 +132,7 @@ function getRateLimiter(type: RateLimitType): Ratelimit | null {
       break;
 
     // Deep review 11-11 item 7: every SMS code request from one IP, counted before the per-number limits in the
-    // database and never given back, so failed hCaptcha attempts count too. The database gives a request refused
+    // database and never given back, so refused attempts count too. The database gives a request refused
     // before the SMS hook back, so without this a failing loop from one IP cost nothing and kept the number busy.
     case 'phone_send':
       limiter = new Ratelimit({

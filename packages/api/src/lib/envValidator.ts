@@ -166,7 +166,6 @@ const envSchema = z.object({
   NEXT_PUBLIC_LIBRARY_PDF_EXTRACTION: optionalString,
   NEXT_PUBLIC_LIBRARY_SCAN_RECOGNITION: optionalString,
   NEXT_PUBLIC_GA4_MEASUREMENT_ID: optionalString,
-  NEXT_PUBLIC_HCAPTCHA_SITEKEY: optionalString,
   NEXT_PUBLIC_VERCEL_ANALYTICS_CATEGORY: optionalString,
 
   // 平台注入和测试专用

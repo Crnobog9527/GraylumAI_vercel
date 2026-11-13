@@ -2,7 +2,7 @@
 import type { SmsLimitStatus } from './smsLimits';
 
 /** What the send route answers; the login page maps each to one plain line (apps/web lib/phoneAuth.ts). */
-export type PhoneSendCode = 'PHONE_INVALID' | 'CONSENT_REQUIRED' | 'CAPTCHA_FAILED' | 'SMS_COOLDOWN'
+export type PhoneSendCode = 'PHONE_INVALID' | 'CONSENT_REQUIRED' | 'SMS_COOLDOWN'
   | 'SMS_DAILY_LIMIT' | 'RATE_LIMITED' | 'SMS_FAILED' | 'SMS_UNAVAILABLE';
 
 /**
@@ -10,7 +10,6 @@ export type PhoneSendCode = 'PHONE_INVALID' | 'CONSENT_REQUIRED' | 'CAPTCHA_FAIL
  * the send), so the request is not given back. Anything Supabase refuses on its own comes first.
  */
 const BEFORE_HOOK: Record<string, PhoneSendCode> = {
-  captcha_failed: 'CAPTCHA_FAILED',
   over_sms_send_rate_limit: 'SMS_COOLDOWN',
   over_request_rate_limit: 'RATE_LIMITED',
   validation_failed: 'PHONE_INVALID',

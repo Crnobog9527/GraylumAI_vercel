@@ -13,7 +13,7 @@ import type { SenderChoice } from './sms/sender';
 /**
  * POST /api/auth/phone/send (PHONE-OTP). The login page runs in the browser, so this is the one server
  * step: our limits first (they also note the visitor's IP, which the Send SMS hook payload does not carry),
- * then Supabase, which checks hCaptcha and calls the hook. A refusal before the hook gives the request
+ * then Supabase, which calls the hook. A refusal before the hook gives the request
  * back, so failed checks cannot use up a stranger's five codes a day. The code itself is checked in the
  * browser with verifyOtp, like email sign-in.
  */
@@ -23,6 +23,7 @@ export const phoneSendInput = z.object({
   createUser: z.boolean().default(true),
   privacyConsent: z.boolean().default(false),
   transferConsent: z.boolean().default(false),
+  /** BOT-GUARD: no captcha any more; a page loaded before the change may still send one, which is ignored. */
   captchaToken: z.string().max(8192).optional(),
 }).strict();
 
@@ -63,7 +64,6 @@ export async function sendPhoneCode(raw: unknown, deps: PhoneSendDeps): Promise<
     options: {
       channel: 'sms',
       shouldCreateUser: input.createUser,
-      captchaToken: input.captchaToken,
       // Applied only when this creates the account: the two PIPL boxes it ticked, as separate records.
       ...(input.createUser ? { data: { phone_privacy_consent_at: consentAt, phone_transfer_consent_at: consentAt } } : {}),
     },
@@ -77,5 +77,5 @@ export async function sendPhoneCode(raw: unknown, deps: PhoneSendDeps): Promise<
   logger.warn('auth', 'phone_send_refused', {
     phone: maskPhone(phone.digits), code: error.code ?? null, status: error.status ?? null, result: outcome.code,
   });
-  return fail(outcome.code, outcome.code === 'SMS_FAILED' ? 502 : outcome.code === 'CAPTCHA_FAILED' ? 400 : 429);
+  return fail(outcome.code, outcome.code === 'SMS_FAILED' ? 502 : 429);
 }

@@ -13,8 +13,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { DialogCaptcha } from '@/components/auth/DialogCaptcha';
-import { keepDialogOpenForCaptcha } from '@/lib/dialogCaptcha';
 import { buildErasureImpactLines, erasureBlocked, renewalUsesStripePortal, type ImpactLine } from '@/lib/account-erasure';
 import { useAccountErasure } from '@/hooks/use-account-erasure';
 
@@ -68,7 +66,7 @@ export function AccountErasureCard({ user }: { user: { id?: string; email?: stri
       </div>
 
       <Dialog open={erasure.open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg" style={panelStyle} onInteractOutside={keepDialogOpenForCaptcha}>
+        <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg" style={panelStyle}>
           <DialogHeader>
             <DialogTitle style={{ color: 'var(--text-primary)' }}>
               {erasure.step === 'done' ? '账号已注销' : '注销账号'}
@@ -94,12 +92,6 @@ export function AccountErasureCard({ user }: { user: { id?: string; email?: stri
 
           {erasure.step === 'verify' && !oauth && (
             <div className="space-y-3 py-2">
-              <DialogCaptcha
-                key={erasure.captchaKey}
-                onToken={erasure.setCaptchaToken}
-                onExpired={erasure.captchaExpired}
-                onUnavailable={erasure.captchaUnavailable}
-              />
               {phone && (
                 <Button variant="outline" size="sm" disabled={erasure.busy} onClick={erasure.sendCode} style={ghostStyle}>
                   {erasure.codeSent ? '重新发送验证码' : '发送验证码'}
