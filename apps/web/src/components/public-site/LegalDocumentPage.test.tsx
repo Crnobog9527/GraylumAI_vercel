@@ -25,3 +25,14 @@ it('carries the font licence notice under the terms, outside the English documen
   expect(terms.indexOf('MiSans')).toBeGreaterThan(terms.indexOf('Sheridan County, Wyoming'));
   expect(renderToStaticMarkup(<LegalDocumentPage name="privacy" />)).not.toContain('MiSans');
 });
+
+// Review of #1988: the zh-TW pages use MiSans too; their footer's legal links lead to /terms, which carries the notice in
+// Traditional Chinese as well.
+it('carries the font licence notice in Traditional Chinese too, reachable from the zh-TW footer', async () => {
+  const terms = renderToStaticMarkup(<LegalDocumentPage name="terms" />);
+  expect(terms).toContain('<p lang="zh-TW">本網站使用 MiSans 字體，版權歸小米所有。');
+  expect(terms).toMatch(/<a href="\/fonts\/misans\/LICENSE.pdf"[^>]*>字體授權協議<\/a>/);
+  const { PublicShell } = await import('./PublicShell');
+  const footer = renderToStaticMarkup(<PublicShell locale="zh-TW"><p>x</p></PublicShell>);
+  expect(footer).toContain('href="/terms"');
+});

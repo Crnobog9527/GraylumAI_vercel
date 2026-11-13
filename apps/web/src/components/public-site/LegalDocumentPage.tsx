@@ -7,6 +7,7 @@
 import { readLegalDoc, type LegalDocName } from '@/lib/legal-docs';
 import { SiteShell } from './SiteShell';
 import { LegalDocNav } from './LegalDocNav';
+import article from './article.module.css';
 import styles from './legal-document.module.css';
 
 /**
@@ -21,6 +22,8 @@ export const FONT_LICENCE_NOTICE = {
   link: '字体许可协议',
   href: '/fonts/misans/LICENSE.pdf',
 } as const;
+/** The same notice for the zh-TW pages, which use MiSans too and whose footer links here (法律條款). */
+export const FONT_LICENCE_NOTICE_ZH_TW = { text: '本網站使用 MiSans 字體，版權歸小米所有。', link: '字體授權協議' } as const;
 
 /**
  * One formal legal document (privacy, terms, cookies, refund) in the public site chrome. The text is the Owner's own English
@@ -30,17 +33,21 @@ export function LegalDocumentPage({ name }: { name: LegalDocName }) {
   const html = readLegalDoc(name);
   return (
     <SiteShell locale="zh-Hans">
-      <article className="mx-auto max-w-3xl px-4 py-10 sm:px-6 md:py-14">
-        <p className="mb-6 rounded-lg border border-[#2b2b2b] bg-[#141414] px-4 py-3 text-sm text-[#9a9a9a]">
+      <article className={article.article}>
+        <p className={article.note}>
           本页是英文法律文本，以英文为准。如有疑问，请联系 support@graylum.com。
         </p>
-        <div lang="en" data-legal-doc className={styles.doc} dangerouslySetInnerHTML={{ __html: html }} />
+        <div lang="en" data-legal-doc data-zone="voice" className={styles.doc} dangerouslySetInnerHTML={{ __html: html }} />
         {name === 'terms' ? (
-          <section aria-labelledby="font-licence" className="mt-12 border-t border-[#262626] pt-6 text-sm leading-7 text-[#9a9a9a]">
-            <h2 id="font-licence" className="mb-2 text-base font-semibold text-white">{FONT_LICENCE_NOTICE.title}</h2>
+          <section aria-labelledby="font-licence" className={styles.fontNotice} data-zone="final">
+            <h2 id="font-licence">{FONT_LICENCE_NOTICE.title}</h2>
             <p>
               {FONT_LICENCE_NOTICE.text}{' '}
-              <a href={FONT_LICENCE_NOTICE.href} className="underline underline-offset-4 hover:text-white">{FONT_LICENCE_NOTICE.link}</a>
+              <a href={FONT_LICENCE_NOTICE.href}>{FONT_LICENCE_NOTICE.link}</a>
+            </p>
+            <p lang="zh-TW">
+              {FONT_LICENCE_NOTICE_ZH_TW.text}{' '}
+              <a href={FONT_LICENCE_NOTICE.href}>{FONT_LICENCE_NOTICE_ZH_TW.link}</a>
             </p>
           </section>
         ) : null}
