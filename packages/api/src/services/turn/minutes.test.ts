@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { TurnStop } from './call';
 import type { ChatDeps } from './chat';
-import { minutesTranscript, runMinutesTurn } from './minutes';
+import { FREE_MINUTES_INSTRUCTIONS, minutesTranscript, runMinutesTurn, TOPIC_MINUTES_INSTRUCTIONS } from './minutes';
 import type { TurnEvent } from './sse';
 
 /*
@@ -131,5 +131,12 @@ describe('kind=minutes on the turn core (CONTENT-CONVERSATION-2)', () => {
     expect(all.text.startsWith('用户：m0')).toBe(true);
     const two = minutesTranscript(many, Buffer.byteLength('用户：m4\n\nAI：m3\n\n'));
     expect(two).toEqual({ text: 'AI：m3\n\n用户：m4', messages: 2 });
+  });
+
+  // Validation of #2009: Chinese minutes once came with English headings copied from the format.
+  it('asks for the headings in the reply language and names the Chinese ones', () => {
+    for (const text of [FREE_MINUTES_INSTRUCTIONS, TOPIC_MINUTES_INSTRUCTIONS]) expect(text).toContain('never copy the English heading names');
+    expect(FREE_MINUTES_INSTRUCTIONS).toContain('讨论了什么、定了什么、还没定的、下一步');
+    expect(TOPIC_MINUTES_INSTRUCTIONS).toContain('简报更新、稿件已定的部分、还没定的、下一步');
   });
 });
