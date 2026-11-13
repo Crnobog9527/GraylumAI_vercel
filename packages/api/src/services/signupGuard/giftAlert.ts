@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
+import { swallow } from '../../lib/swallow';
 import { notifyOwner } from '../ownerAlerts';
 import { OWNER_ALERT_TURN_BUDGET_MS } from '../ownerAlerts/notify';
 
@@ -22,5 +23,6 @@ export async function noteOpeningGrant(answer: unknown, notify: typeof notifyOwn
   if (!gift.success) return;
   const level = giftLevel(gift.data.granted, gift.data.cap);
   if (!level) return;
-  await notify('signup_gift_level', { ...gift.data, level }, { budgetMs: OWNER_ALERT_TURN_BUDGET_MS }).catch(() => undefined);
+  await swallow('signup_gift_alert_failed', notify('signup_gift_level', { ...gift.data, level }, { budgetMs: OWNER_ALERT_TURN_BUDGET_MS }),
+    undefined, { category: 'system' });
 }
