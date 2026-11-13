@@ -41,6 +41,10 @@ export type IntegrationModule = {
   connector?: 'shotviva';
 };
 
+/** A photo and what came of it, as the large view shows them: what the two are about, and each side with its name. */
+export type IntegrationPair = { title: string; note: string; cutout: boolean;
+  sides: readonly [IntegrationSample, IntegrationSample] };
+
 export const INTEGRATIONS: readonly IntegrationModule[] = [
   {
     id: 'shotviva',
@@ -104,6 +108,21 @@ export const INTEGRATIONS: readonly IntegrationModule[] = [
     connector: 'shotviva',
   },
 ];
+
+/**
+ * A sample picture's large version, for looking at it closely (Owner 2026-11-13: "要支持用户点击以后看大图"): the same picture
+ * exported again from the product's own file, 960×1200 where the file allows, kept beside the small ones under large/.
+ */
+export const largePicture = (src: string): string => src.replace(/\/([^/]+)$/, '/large/$1');
+
+/** What a module's pictures open into, in the order they stand on the page: 能做什么's two, then the two of each kind of use. */
+export function showcasePairs(module: IntegrationModule): IntegrationPair[] {
+  const { showcase } = module;
+  if (!showcase) return [];
+  return [{ title: '能做什么', note: module.features[0] ?? '', cutout: false, sides: [showcase.before, showcase.after] },
+    ...showcase.uses.map(use => ({ title: use.label, note: use.note, cutout: !!use.cutout,
+      sides: [{ ...use.before, label: '原图' }, { ...use.after, label: '成品' }] as const }))];
+}
 
 /** A module's link with the source marked (controller 2026-11-12: Shotviva's partner marker from=graylum, plus utm_* which
  * Shotviva's analytics keeps; not ?ref=, which is the affiliate commission and would be an internal settlement). The one link

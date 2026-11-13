@@ -65,6 +65,12 @@ describe('the integrations page', () => {
     // The pictures of 能做什么 come before its words, and those of 什么时候适合用 before its two lines.
     expect(html.indexOf('coffee-noir-bar')).toBeLessThan(html.indexOf('每个模板都保留你拍的主体'));
     expect(html.indexOf('poster-after')).toBeLessThan(html.indexOf('一次上新很多商品'));
+    // Each picture is a button that opens it large, named 看大图 and what the picture is (Owner 2026-11-13: "点击以后看大图").
+    const buttons = [...html.matchAll(/<button type="button" class="[^"]*" aria-label="看大图：([^"]+)"><img src="[^"]+" alt="([^"]+)"/g)];
+    expect(buttons.length).toBe(pictures.length);
+    for (const button of buttons) expect(button[1]).toBe(button[2]);
+    // The large files are not in the introduction at all: they belong to the large view.
+    expect(html).not.toContain('/large/');
     // What the poster in the last picture says is the picture's: no date or discount in words.
     expect(html.replace(/<[^>]+>/g, '')).not.toMatch(/折|月\s*\d|\d\s*日/);
   });

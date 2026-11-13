@@ -2,10 +2,12 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { ArrowRight, ArrowUpRight, Check, Image as ImageIcon } from 'lucide-react';
+import { ArrowRight, ArrowUpRight, Check, Image as ImageIcon, Maximize2 } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import sheet from '@/components/design/bottom-sheet.module.css';
-import { trackedLink, type IntegrationModule, type IntegrationPicture, type IntegrationSample, type IntegrationUse } from '@/lib/integrations/catalog';
+import { showcasePairs, trackedLink, type IntegrationModule, type IntegrationPicture, type IntegrationSample,
+  type IntegrationUse } from '@/lib/integrations/catalog';
+import { IntegrationViewer, type Viewing } from './IntegrationViewer';
 import type { ShotvivaState } from './use-shotviva';
 import styles from './integrations.module.css';
 
@@ -21,10 +23,14 @@ export function IntegrationIcon({ module }: { module: IntegrationModule }) {
  * dialog with the product's mark and name in a head that stays put, the connection first, then what it does and when to use it,
  * said mostly by the product's own sample pictures, then what connecting changes in Graylum, and the one tracked link in a foot
  * that stays put. On a phone it is a sheet from the bottom edge (design/bottom-sheet.module.css). The words are the catalog's.
+ * A sample picture is a button: pressing it opens the photo and its result large, over this dialog (IntegrationViewer).
  */
 export function IntegrationDetail({ module, open, onOpenChange, shotviva }: {
   module: IntegrationModule; open: boolean; onOpenChange: (open: boolean) => void; shotviva?: ShotvivaState;
 }) {
+  const [viewing, setViewing] = useState<Viewing | null>(null);
+  /** The picture whose press opened the large view; focus returns to it. */
+  const [opener, setOpener] = useState<HTMLElement | null>(null);
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent tone="light" className={`${styles.detail} ${sheet.panel} ${sheet.anchored}`} aria-describedby={`${module.id}-tagline`}>
@@ -35,17 +41,24 @@ export function IntegrationDetail({ module, open, onOpenChange, shotviva }: {
         <div className={styles.scroll} data-scrolls="">
           <DialogDescription id={`${module.id}-tagline`} className={styles.tagline}>{module.tagline}</DialogDescription>
           {module.philosophy && <p className={styles.philosophy}>{module.philosophy}</p>}
-          <IntegrationDetailBody module={module} {...(shotviva ? { shotviva } : {})}/>
+          <IntegrationDetailBody module={module} onView={(to, from) => { setOpener(from); setViewing(to); }} {...(shotviva ? { shotviva } : {})}/>
         </div>
         <IntegrationViewLink module={module} {...(shotviva ? { shotviva } : {})}/>
+        {/* Inside this dialog, so that it is the layer above it: Esc and a press outside close the large view alone. */}
+        {viewing && <IntegrationViewer pairs={showcasePairs(module)} at={viewing} opener={opener} onMove={setViewing}
+          onClose={() => setViewing(null)}/>}
       </DialogContent>
     </Dialog>
   );
 }
 
 /** Under the product's own two paragraphs: the connection, then the introduction row by row, pictures before words. */
-export function IntegrationDetailBody({ module, shotviva }: { module: IntegrationModule; shotviva?: ShotvivaState }) {
+export function IntegrationDetailBody({ module, shotviva, onView }: {
+  module: IntegrationModule; shotviva?: ShotvivaState; onView?: (viewing: Viewing, from: HTMLElement) => void;
+}) {
   const { showcase } = module;
+  /** Opens pair `pair` (0: 能做什么's; then the kinds of use, in order) on its photo or its result. */
+  const view = (pair: number, side: 0 | 1) => (from: HTMLElement) => onView?.({ pair, side }, from);
   return <>
     {module.connector === 'shotviva' && shotviva && <ShotvivaConnection shotviva={shotviva} icon={module.icon}/>}
     <div className={styles.rows}>
@@ -54,14 +67,16 @@ export function IntegrationDetailBody({ module, shotviva }: { module: Integratio
         <div className={styles.what}>
           {/* The same thing twice: as the phone took it, and as a template gave it back. */}
           {showcase && <div className={styles.turn}>
-            <Shot sample={showcase.before}/><ArrowRight className={styles.turnArrow} aria-hidden="true"/><Shot sample={showcase.after}/>
+            <Shot sample={showcase.before} onView={view(0, 0)}/><ArrowRight className={styles.turnArrow} aria-hidden="true"/>
+            <Shot sample={showcase.after} onView={view(0, 1)}/>
           </div>}
           <div className={styles.rowBody}><Lines lines={module.features} lead={!!showcase}/></div>
         </div>
       </section>
       <section className={styles.row}>
         <h3>什么时候适合用</h3>
-        {showcase && <ul role="list" className={styles.uses}>{showcase.uses.map(use => <li key={use.label}><Use use={use}/></li>)}</ul>}
+        {showcase && <ul role="list" className={styles.uses}>{showcase.uses.map((use, index) =>
+          <li key={use.label}><Use use={use} onView={side => view(index + 1, side)}/></li>)}</ul>}
         <Lines lines={module.whenToUse}/>
       </section>
       {module.inGraylum && <section className={styles.row}>
@@ -97,18 +112,36 @@ const BLANK = 'data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAI
 const LARGE = [336, 420] as const;
 const SMALL = [200, 250] as const;
 
+/** A sample picture as a button that opens it large; its name says so, then what the picture is. */
+function Zoom({ picture, size, onView }: { picture: IntegrationPicture; size: readonly [number, number]; onView: Press }) {
+  return (
+    <button type="button" className={styles.zoom} aria-label={`看大图：${picture.alt}`} onClick={event => onView(event.currentTarget)}>
+      <Picture picture={picture} size={size}/>
+    </button>
+  );
+}
+/** What a pressed picture does, told which button it was. */
+type Press = (from: HTMLElement) => void;
+/** The small mark in a picture's corner that says it opens. */
+const ZoomMark = () => <Maximize2 className={styles.zoomMark} aria-hidden="true"/>;
+
 /** One sample picture with its few words under it. */
-function Shot({ sample }: { sample: IntegrationSample }) {
-  return <figure className={styles.shot}><Picture picture={sample} size={LARGE}/><figcaption>{sample.label}</figcaption></figure>;
+function Shot({ sample, onView }: { sample: IntegrationSample; onView: Press }) {
+  return (
+    <figure className={styles.shot}>
+      <span className={styles.frame}><Zoom picture={sample} size={LARGE} onView={onView}/><ZoomMark/></span>
+      <figcaption>{sample.label}</figcaption>
+    </figure>
+  );
 }
 
 /** One kind of use: the photo and what came of it in one frame, left to right, then its name and one line. */
-function Use({ use }: { use: IntegrationUse }) {
+function Use({ use, onView }: { use: IntegrationUse; onView: (side: 0 | 1) => Press }) {
   return (
     <figure className={styles.use}>
       <div className={styles.split} data-cutout={use.cutout ? 'true' : undefined}>
-        <Picture picture={use.before} size={SMALL}/><Picture picture={use.after} size={SMALL}/>
-        <ArrowRight className={styles.seam} aria-hidden="true"/>
+        <Zoom picture={use.before} size={SMALL} onView={onView(0)}/><Zoom picture={use.after} size={SMALL} onView={onView(1)}/>
+        <ArrowRight className={styles.seam} aria-hidden="true"/><ZoomMark/>
       </div>
       <figcaption><b>{use.label}</b><span>{use.note}</span></figcaption>
     </figure>

@@ -2,7 +2,7 @@
 import { readdirSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { connectMessage, INTEGRATIONS, trackedLink, type IntegrationModule } from './catalog';
+import { connectMessage, INTEGRATIONS, largePicture, showcasePairs, trackedLink, type IntegrationModule } from './catalog';
 
 /** Every sample picture of a module: the two of 能做什么, then the photo and the result of each kind of use. */
 const pictures = (module: IntegrationModule) => (module.showcase
@@ -99,11 +99,38 @@ describe('integration modules', () => {
     }
   });
 
-  it('the public folder holds no sample picture that the page does not show', () => {
+  it('the public folder holds no sample picture that the page does not show: the small ones, and under large/ the same ones large', () => {
     for (const module of INTEGRATIONS.filter(item => item.showcase)) {
       const folder = fileURLToPath(new URL(`../../../public/integrations/${module.id}`, import.meta.url));
-      expect(readdirSync(folder).sort()).toEqual(pictures(module).map(picture => picture.src.split('/').pop()).sort());
+      const names = pictures(module).map(picture => picture.src.split('/').pop()).sort();
+      expect(readdirSync(folder).filter(name => name !== 'large').sort()).toEqual(names);
+      expect(readdirSync(`${folder}/large`).sort()).toEqual(names);
     }
+  });
+
+  it('each sample picture has a large version beside it (Owner 2026-11-13: 点击以后看大图), no heavier than 150KB and several times the small one', () => {
+    for (const module of INTEGRATIONS) {
+      for (const sample of pictures(module)) {
+        expect(largePicture(sample.src)).toBe(sample.src.replace(`/${module.id}/`, `/${module.id}/large/`));
+        const size = (src: string) => statSync(fileURLToPath(new URL(`../../../public${src}`, import.meta.url))).size;
+        expect(size(largePicture(sample.src)), sample.src).toBeLessThanOrEqual(150 * 1024);
+        // A large file is a different, larger export, never the small one copied.
+        expect(size(largePicture(sample.src)), sample.src).toBeGreaterThan(size(sample.src) * 1.5);
+      }
+    }
+  });
+
+  it('what the pictures open into: 能做什么\'s pair with its own two names and line, then each use as 原图 and 成品, in the page\'s order', () => {
+    const shotviva = INTEGRATIONS[0]!;
+    const pairs = showcasePairs(shotviva);
+    expect(pairs.map(pair => pair.title)).toEqual(['能做什么', '菜品图', '商品图', '房源图', '一键白底图', '一键抠图', '精准编辑图片文字']);
+    expect(pairs[0]).toMatchObject({ note: shotviva.features[0], cutout: false, sides: [shotviva.showcase!.before, shotviva.showcase!.after] });
+    for (const [index, use] of shotviva.showcase!.uses.entries()) {
+      expect(pairs[index + 1]).toEqual({ title: use.label, note: use.note, cutout: !!use.cutout,
+        sides: [{ ...use.before, label: '原图' }, { ...use.after, label: '成品' }] });
+    }
+    expect(pairs.filter(pair => pair.cutout).map(pair => pair.title)).toEqual(['一键抠图']);
+    expect(showcasePairs({ ...shotviva, showcase: undefined })).toEqual([]);
   });
 
   it('the page says in plain words what came back from Shotviva', () => {
