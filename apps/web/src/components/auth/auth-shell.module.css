@@ -112,3 +112,31 @@
 .check > input { width: 18px; height: 18px; margin-top: 2px; flex-shrink: 0; accent-color: var(--pub-ink); }
 .code { letter-spacing: 0.5em; text-align: center; font-size: 22px; font-variant-numeric: tabular-nums; }
 .fine { margin: 0; font-size: 13px; line-height: 1.6; color: var(--pub-muted); }
+
+/*
+ * A phone (under 640px; Owner 2026-11-12, phone plan A: "把它当成一个原生的网页 APP 界面来做", in the landing page's look).
+ * These pages were written for a phone first (16px fields 48px tall, the 52px pill, 100dvh), so little changes: the
+ * landing page's morning light lies behind the top of the screen; the card is a soft panel on it instead of a ruled box;
+ * the card starts under the name and stays there (it was centred in the screen's height, so its top moved whenever
+ * its height did, as on switching 登录 / 注册 or 手机号 / 邮箱); the two choices in the pill are a thumb's height; and
+ * the page keeps clear of the notch and the home indicator. No word, field or step changes, and a computer and a tablet
+ * see what they saw.
+ */
+@media (max-width: 639px) {
+  .shell { position: relative; isolation: isolate; overflow-x: clip; }
+  .shell::before {
+    content: ''; position: absolute; inset: 0 0 auto; z-index: -1; height: 440px; pointer-events: none;
+    background:
+      radial-gradient(70% 55% at 50% 26%, rgba(255, 187, 23, .2), transparent 72%),
+      radial-gradient(60% 50% at 0% 8%, rgba(190, 170, 255, .24), transparent 72%),
+      radial-gradient(60% 50% at 100% 14%, rgba(255, 160, 140, .2), transparent 72%);
+  }
+  .header { padding: calc(12px + env(safe-area-inset-top, 0px)) 16px 8px; }
+  .stage { padding: 8px 16px calc(40px + env(safe-area-inset-bottom, 0px)); }
+  .column { margin: 0 auto; }
+  .card {
+    padding: 24px 20px 26px; border-color: rgba(20, 19, 18, .07); border-radius: 22px; background: rgba(255, 255, 255, .88);
+    box-shadow: 0 30px 50px -36px rgba(120, 70, 0, .45);
+  }
+  .segmentItem { min-height: 44px; }
+}
