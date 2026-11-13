@@ -26,6 +26,9 @@ export function PricingPlans({ plans: source, links, offers }: {
   return <PricingOffersProvider offers={offers}><PricingPlansInner plans={source} links={links} offers={offers} /></PricingOffersProvider>;
 }
 
+/** On a phone (under 640px) a plan's button is 48px high with 16px words: the one thing on the card a thumb has to hit. */
+const PHONE_CTA = 'max-sm:py-3 max-sm:text-base';
+
 function PricingPlansInner({ plans: source, links, offers }: {
   plans: readonly PaywallPlanSource[]; links: PricingLinks; offers?: PricingOffers;
 }) {
@@ -44,7 +47,7 @@ function PricingPlansInner({ plans: source, links, offers }: {
       <div role="radiogroup" aria-label="计费周期" className="mx-auto grid w-full max-w-xs grid-cols-2 gap-1 rounded-lg p-1"
         style={{ background: 'var(--bg-tertiary)' }}>
         {(['monthly', 'yearly'] as const).map(cycle => (
-          <label key={cycle} className={cn('flex cursor-pointer items-center justify-center gap-1.5 rounded-md px-3 py-2',
+          <label key={cycle} className={cn('flex cursor-pointer items-center justify-center gap-1.5 rounded-md px-3 py-2 max-sm:min-h-11',
             'text-sm font-medium', cycle === 'yearly' && !yearly && 'cursor-not-allowed opacity-50')}
             style={billing === cycle ? { background: 'var(--bg-secondary)', color: 'var(--text-primary)' }
               : { color: 'var(--text-secondary)' }}>
@@ -63,7 +66,7 @@ function PricingPlansInner({ plans: source, links, offers }: {
           <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>{COPY.freeFit}</p>
           <p><b className="text-3xl" style={{ color: 'var(--text-primary)' }}>$0</b></p>
           <PointList points={freeLimit ? [COPY.freePoints[0], `${freeLimit}定位档案`, ...COPY.freePoints.slice(1)] : COPY.freePoints} />
-          <Link className="mt-2 rounded-lg border px-4 py-2 text-center text-sm font-medium" style={{ borderColor: 'var(--border-primary)',
+          <Link className={cn('mt-2 rounded-lg border px-4 py-2 text-center text-sm font-medium', PHONE_CTA)} style={{ borderColor: 'var(--border-primary)',
             color: 'var(--text-primary)' }} href={links.signup}>{COPY.freeCta}</Link>
         </section>
         {plans.map(plan => <PaidPlanCard key={plan.id} plan={plan} billing={billing} membershipHref={links.membership} offers={offers}
@@ -108,11 +111,11 @@ function PaidPlanCard({ plan, billing, membershipHref, offers, founderUsd }: {
       {quote ? <p data-testid={`pricing-tax-${plan.level}`} className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
         {COPY.planTaxNote}</p> : null}
       {ready ? (
-        <Link className="mt-1 rounded-lg px-4 py-2 text-center text-sm font-semibold"
+        <Link className={cn('mt-1 rounded-lg px-4 py-2 text-center text-sm font-semibold', PHONE_CTA)}
           style={{ background: 'var(--text-primary)', color: 'var(--bg-primary)' }}
           href={buyHref(membershipHref, plan.level, billing)}>{COPY.memberCta}</Link>
       ) : (
-        <Link className="mt-1 rounded-lg border px-4 py-2 text-center text-sm font-medium"
+        <Link className={cn('mt-1 rounded-lg border px-4 py-2 text-center text-sm font-medium', PHONE_CTA)}
           style={{ borderColor: 'var(--border-primary)', color: 'var(--text-primary)' }} href="/contact">{COPY.contactCta}</Link>
       )}
       {ready ? <small className="text-center text-xs" style={{ color: 'var(--text-tertiary)' }}>{COPY.memberCtaNote}</small> : null}

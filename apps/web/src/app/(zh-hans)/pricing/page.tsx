@@ -30,7 +30,7 @@ export default async function PricingPage() {
   const plans = membershipPlansStatus === 'available' ? membershipPlans : [];
   return (
     <MarketingShell tone="light">
-      <div className="mx-auto grid max-w-6xl gap-12 px-4 py-16 sm:px-6 md:py-20 lg:px-8">
+      <div className="mx-auto grid max-w-6xl gap-12 px-4 py-10 sm:px-6 sm:py-16 md:py-20 lg:px-8">
         <header className="grid gap-3 text-center">
           <h1 className="text-3xl font-bold md:text-4xl" style={{ color: 'var(--text-primary)' }}>{COPY.title}</h1>
           <p className="mx-auto max-w-2xl text-base" style={{ color: 'var(--text-secondary)' }}>{COPY.lede}</p>
