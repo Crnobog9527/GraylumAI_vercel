@@ -44,10 +44,10 @@ function PricingPlansInner({ plans: source, links, offers }: {
   }
   return (
     <div className="grid gap-8">
-      <div role="radiogroup" aria-label="计费周期" className="mx-auto grid w-full max-w-xs grid-cols-2 gap-1 rounded-lg p-1"
+      <div role="radiogroup" aria-label="计费周期" className="mx-auto grid w-full max-w-xs grid-cols-2 gap-1 rounded-full p-1"
         style={{ background: 'var(--bg-tertiary)' }}>
         {(['monthly', 'yearly'] as const).map(cycle => (
-          <label key={cycle} className={cn('flex cursor-pointer items-center justify-center gap-1.5 rounded-md px-3 py-2 max-sm:min-h-11',
+          <label key={cycle} className={cn('flex cursor-pointer items-center justify-center gap-1.5 rounded-full px-3 py-2 max-sm:min-h-11',
             'text-sm font-medium', cycle === 'yearly' && !yearly && 'cursor-not-allowed opacity-50')}
             style={billing === cycle ? { background: 'var(--bg-secondary)', color: 'var(--text-primary)' }
               : { color: 'var(--text-secondary)' }}>
@@ -61,19 +61,20 @@ function PricingPlansInner({ plans: source, links, offers }: {
       </div>
 
       <div className="grid gap-4 md:grid-cols-3">
-        <section data-testid="pricing-plan-free" className="grid content-start gap-3 rounded-[var(--pub-radius-card,18px)] border p-5" style={card}>
+        <section data-testid="pricing-plan-free" data-card=""
+          className="grid content-start gap-3 rounded-[var(--pub-radius-card,18px)] border p-5" style={card}>
           <h2 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>{COPY.freeName}</h2>
           <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>{COPY.freeFit}</p>
           <p><b className="text-3xl" style={{ color: 'var(--text-primary)' }}>$0</b></p>
           <PointList points={freeLimit ? [COPY.freePoints[0], `${freeLimit}定位档案`, ...COPY.freePoints.slice(1)] : COPY.freePoints} />
-          <Link className={cn('mt-2 rounded-lg border px-4 py-2 text-center text-sm font-medium', PHONE_CTA)} style={{ borderColor: 'var(--border-primary)',
+          <Link className={cn('mt-2 rounded-full border px-4 py-2.5 text-center text-sm font-medium', PHONE_CTA)} style={{ borderColor: 'var(--border-primary)',
             color: 'var(--text-primary)' }} href={links.signup}>{COPY.freeCta}</Link>
         </section>
         {plans.map(plan => <PaidPlanCard key={plan.id} plan={plan} billing={billing} membershipHref={links.membership} offers={offers}
           founderUsd={founderUsd} />)}
       </div>
 
-      <div className="rounded-[var(--pub-radius-card,18px)] border p-4" style={card}>
+      <div data-card="" className="rounded-[var(--pub-radius-card,18px)] border p-4" style={card}>
         <PaywallCompareTable plans={plans} />
       </div>
     </div>
@@ -86,8 +87,8 @@ function PaidPlanCard({ plan, billing, membershipHref, offers, founderUsd }: {
   const quote = paywallQuote(plan, billing, { goldFirstMonthUsd: offers?.goldFirstMonth, founderUsd });
   const ready = quote?.checkoutReady === true;
   return (
-    <section data-testid={`pricing-plan-${plan.level}`} className="grid content-start gap-3 rounded-[var(--pub-radius-card,18px)] border p-5"
-      style={{ ...card, borderColor: plan.level === 'gold' ? 'var(--warning)' : card.borderColor }}>
+    <section data-testid={`pricing-plan-${plan.level}`} data-card="" className="grid content-start gap-3 rounded-[var(--pub-radius-card,18px)] border p-5"
+      style={{ ...card, borderColor: plan.level === 'gold' ? 'var(--plan-gold-border, var(--warning))' : card.borderColor }}>
       <h2 className="flex items-center gap-2 text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
         {LABEL[plan.level]}
         {plan.level === 'gold' ? <span className="rounded-full px-2 py-0.5 text-xs font-medium"
@@ -111,11 +112,11 @@ function PaidPlanCard({ plan, billing, membershipHref, offers, founderUsd }: {
       {quote ? <p data-testid={`pricing-tax-${plan.level}`} className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
         {COPY.planTaxNote}</p> : null}
       {ready ? (
-        <Link className={cn('mt-1 rounded-lg px-4 py-2 text-center text-sm font-semibold', PHONE_CTA)}
-          style={{ background: 'var(--text-primary)', color: 'var(--bg-primary)' }}
+        <Link className={cn('mt-1 rounded-full px-4 py-2.5 text-center text-sm font-semibold', PHONE_CTA)}
+          style={{ background: 'var(--plan-cta-bg, var(--text-primary))', color: 'var(--bg-primary)' }}
           href={buyHref(membershipHref, plan.level, billing)}>{COPY.memberCta}</Link>
       ) : (
-        <Link className={cn('mt-1 rounded-lg border px-4 py-2 text-center text-sm font-medium', PHONE_CTA)}
+        <Link className={cn('mt-1 rounded-full border px-4 py-2.5 text-center text-sm font-medium', PHONE_CTA)}
           style={{ borderColor: 'var(--border-primary)', color: 'var(--text-primary)' }} href="/contact">{COPY.contactCta}</Link>
       )}
       {ready ? <small className="text-center text-xs" style={{ color: 'var(--text-tertiary)' }}>{COPY.memberCtaNote}</small> : null}

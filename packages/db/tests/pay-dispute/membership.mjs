@@ -6,6 +6,7 @@ import pg from 'pg';
 import {renewalReplayCases} from './renewal-replay.mjs';
 import {turnMoneyCases} from './turn-money.mjs';
 import {confirmLostCases} from './confirm-lost.mjs';
+import {wonBackfillCases} from './won-backfill.mjs';
 export async function membershipCases({c,v,profile,pack,receive,withdraw,ops,report}) {
  const facts=async user=>{await c.query('SET ROLE service_role');try{return await v('SELECT pay_common_membership_facts($1) v',[user]);}finally{await c.query('RESET ROLE');}};
  const member=async(start,end,cycle='monthly',level='pro',offer='standard')=>{
@@ -225,5 +226,6 @@ export async function membershipCases({c,v,profile,pack,receive,withdraw,ops,rep
  await renewalReplayCases({c,v,receive,withdraw,ops,report,member,facts,start,nextEnd});
  await turnMoneyCases({c,v,receive,withdraw,ops,report,member,facts,start,nextEnd});
  await confirmLostCases({c,v,profile,pack,receive,withdraw,ops,report,member,start,end});
+ await wonBackfillCases({c,v,receive,withdraw,ops,report,member});
 
 }

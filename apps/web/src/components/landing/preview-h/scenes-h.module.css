@@ -10,15 +10,15 @@
 .window, .aside {
   border: 1px solid rgba(255, 255, 255, .85);
   background: rgba(255, 255, 255, .62);
-  backdrop-filter: blur(var(--h-blur)) saturate(1.6);
   -webkit-backdrop-filter: blur(var(--h-blur)) saturate(1.6);
+  backdrop-filter: blur(var(--h-blur)) saturate(1.6);
   box-shadow: inset 0 1px 0 #fff, 0 0 0 1px rgba(var(--h-shade), .05), 0 28px 56px -36px rgba(var(--h-shade), .36);
 }
 
 /* The nine titles: a glass rail on desktop, scrolling chips on a phone */
 .toc {
   display: flex; gap: 6px; margin: 0 -16px; padding: 2px 16px 8px; overflow-x: auto; scroll-snap-type: x proximity;
-  scrollbar-width: none; border: 0; background: none; backdrop-filter: none; -webkit-backdrop-filter: none; box-shadow: none;
+  scrollbar-width: none; border: 0; background: none; -webkit-backdrop-filter: none; backdrop-filter: none; box-shadow: none;
 }
 .toc { scroll-padding-inline: 16px; }
 .toc::-webkit-scrollbar { display: none; }
@@ -26,7 +26,7 @@
   .toc {
     position: sticky; top: 86px; flex-direction: column; gap: 2px; margin: 0; padding: 6px; overflow: visible; border-radius: 22px;
     border: 1px solid rgba(255, 255, 255, .85); background: rgba(255, 255, 255, .55);
-    backdrop-filter: blur(var(--h-blur)) saturate(1.6); -webkit-backdrop-filter: blur(var(--h-blur)) saturate(1.6);
+    -webkit-backdrop-filter: blur(var(--h-blur)) saturate(1.6); backdrop-filter: blur(var(--h-blur)) saturate(1.6);
     box-shadow: inset 0 1px 0 #fff, 0 0 0 1px rgba(var(--h-shade), .05), 0 28px 56px -36px rgba(var(--h-shade), .36);
   }
 }
