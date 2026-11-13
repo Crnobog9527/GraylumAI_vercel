@@ -41,7 +41,8 @@ export type ChatToolDeps = {
   /** The account's Skill catalog and each entry's prepared load result (read before turn_open; cached by package hash). */
   skills?: (actorId: string, pin?: WorkSkill) => Promise<{ catalog: SkillCatalogEntry[]; prepared: PreparedSkills; contentSource?: 'script' | 'storyboard' }>;
   /** The confirmed voice of the catalog's writing Skills: a per-user system paragraph, and the version turn_open freezes. */
-  voice?: (actorId: string, catalog: SkillCatalogEntry[]) => Promise<{ text: string; versionId?: string } | undefined>;
+  /** `message`: the user's current message (VOICE-2 PR-2 picks past pieces of another topic for a writing request). */
+  voice?: (actorId: string, catalog: SkillCatalogEntry[], message: string) => Promise<{ text: string; versionId?: string; examples?: string } | undefined>;
   /** Offer read_source over the user's own library (library_turn_read through the read client) while the two library switches are
    *  on; tests may give their own reader. */
   library?: boolean | ((actorId: string, sessionId: string) => SourceReader);
@@ -99,6 +100,7 @@ const REPLY_RESERVE_MS = 60_000;
 export async function prepareChatTools(input: { admin: SupabaseClient; read: TurnClients['read'];
   configuration: Promise<ConfigurationRows>; tools: ChatToolDeps;
   actorId: string; sessionId: string; pin?: WorkSkill; requiredBytes: number; interactiveBytes: number; quotedBytes: number; chosen?: ChatSelection;
+  /** The user's message of this turn (VOICE-2 PR-2: the voice examples depend on it). */ currentMessage?: string;
   modelMultiplier: string; defaultMultiplier: string;
   /** The route profile's tool ceiling: a group that does not fit is not offered at all (payg-three-tools rule). */
   maxTools: number }): Promise<ChatToolsSetup> {
@@ -134,13 +136,13 @@ export async function prepareChatTools(input: { admin: SupabaseClient; read: Tur
   const coachText = COACH_REVIEW_INSTRUCTIONS + COACH_CAPTURE_INSTRUCTIONS;
   const postsText = workspaceRead && access.posts ? OWN_POSTS_INSTRUCTIONS + (access.posts.coach ? coachText : '') : '';
   const voice = input.tools.voice && catalog.length
-    ? await swallow('turn_tools_voice_unavailable', input.tools.voice(input.actorId, catalog), undefined) : undefined;
+    ? await swallow('turn_tools_voice_unavailable', input.tools.voice(input.actorId, catalog, input.currentMessage ?? ''), undefined) : undefined;
   const { plan, research: setup } = await planTurnTools({ admin: input.admin, configuration: input.configuration, offered,
     freeReady: { load_skill: Boolean(skills?.prepared.size) },
     ...(workspaceRead ? { source: { strategyBytes: WORKSPACE_STRATEGY_RESULT_BYTES,
       ...(access.posts ? { posts: access.posts.windowDays > 0 ? { bytes: OWN_POSTS_RESERVE, calls: OWN_POSTS_READS }
         : { bytes: 1200, calls: READ_SOURCE_CALLS } } : {}) } } : {}),
-    requiredBytes: input.requiredBytes + definitionBytes + Buffer.byteLength(catalogText + libraryText + (voice?.text ?? '')
+    requiredBytes: input.requiredBytes + definitionBytes + Buffer.byteLength(catalogText + libraryText + (voice?.text ?? '') + (voice?.examples ?? '')
       + workspaceText + WORKSPACE_STRATEGY_INSTRUCTIONS + postsText + (imagesOffered ? IMAGE_TOOLS_INSTRUCTIONS : '')),
     ...(imagesOffered && imagesReady !== null ? { imagesReady } : {}),
     // A turn whose research is usable may use the research ceiling; otherwise the interactive one (Owner 10-17 / 10-27).
@@ -153,7 +155,8 @@ export async function prepareChatTools(input: { admin: SupabaseClient; read: Tur
   const benchmark = setup && input.tools.benchmarkAccounts ? await swallow('turn_tools_benchmark_accounts_unavailable',
     input.tools.benchmarkAccounts(input.actorId, input.sessionId), []) : [];
   return {
-    plan, research: setup, inputLimit, definitionBytes,
+    // VOICE-2 PR-2: the voice examples ride with the current message (the plan's note, after the cached history), never stored.
+    plan: voice?.examples ? { ...plan, note: plan.note + voice.examples } : plan, research: setup, inputLimit, definitionBytes,
     coachCapture: Boolean(plan.sourceRoom?.posts && access.posts?.coach && access.posts.windowDays > 0),
     sharedInstructions: gated => researchInstructions(plan) + libraryText + skillCatalogInstructions(allowedSkills(catalog, gated))
       + (imagesOffered ? IMAGE_TOOLS_INSTRUCTIONS : ''),

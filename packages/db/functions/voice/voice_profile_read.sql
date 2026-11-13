@@ -8,6 +8,7 @@ CREATE OR REPLACE FUNCTION public.voice_profile_read(a uuid, vid uuid)
  STABLE SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
- SELECT jsonb_build_object('versionId',id,'version',version,'profile',profile) FROM voice_profile_versions
+ SELECT jsonb_build_object('versionId',id,'version',version,'profile',profile,'stats',stats,'documents',coalesce(documents,'[]'))
+ FROM voice_profile_versions
  WHERE id=vid AND actor_id=a AND status IN ('confirmed','superseded');
 $function$;

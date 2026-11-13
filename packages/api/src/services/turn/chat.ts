@@ -207,7 +207,7 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
   if (deps.tools) {
     try {
       tools = await prepareChatTools({ admin, read: deps.clients.read, configuration, tools: deps.tools, actorId: input.actorId,
-        sessionId: input.sessionId, ...(input.chosen ? { chosen: input.chosen } : {}),
+        sessionId: input.sessionId, currentMessage: input.text, ...(input.chosen ? { chosen: input.chosen } : {}),
         ...(work ? { pin: { moduleId: work.moduleId, skillId: work.skillId, revisionId: work.revisionId } } : {}),
         requiredBytes, interactiveBytes, quotedBytes: quote.inputLimit, modelMultiplier: quote.multiplier,
         defaultMultiplier: quote.defaultMultiplier, maxTools: quote.maxTools });

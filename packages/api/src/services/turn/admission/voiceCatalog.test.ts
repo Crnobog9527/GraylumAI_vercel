@@ -40,6 +40,31 @@ describe('admitCatalogVoice', () => {
     expect(voice?.text).toContain(VOICE_HINT_INSTRUCTIONS);
     expect(voice?.text).toContain('after loading one of these Skills: script-writer.');
   });
+  // VOICE-2 PR-2: examples for a writing request, from the version's labels; the administrator's switch falls back to voice-v3.
+  it('a writing request gets past pieces of another topic as a note; other messages and the switch off get none', async () => {
+    const documents = [{documentId: id(40), type: 'post', topics: ['做饭']}, {documentId: id(41), type: 'post', topics: ['健身']}];
+    const calls: Array<[string, unknown]> = [];
+    const db = (setting?: unknown) => ({
+      from: (table: string) => table === 'system_settings'
+        ? {select: () => ({eq: () => ({maybeSingle: async () => ({data: setting === undefined ? null : {value: setting}, error: null})})})}
+        : {select: () => ({in: async (_: string, ids: string[]) => ({error: null, data: ids.map(value => ({id: value, uses_user_voice: true}))})})},
+      rpc: async (name: string, args: unknown) => { calls.push([name, args]);
+        if (name === 'voice_profile_current') return {data: current, error: null};
+        if (name === 'voice_examples_read') return {data: [{documentId: id(41), filename: 'x.md', text: '练完腿走路都打颤。'}], error: null};
+        return {data: {profile, documents, stats: null}, error: null}; },
+    }) as never;
+    const voice = await admitCatalogVoice(db(), id(5), catalog, '写一条关于做饭的小红书');
+    expect(voice?.frozen.guide).toBe('voice-v4');
+    expect(calls.find(([name]) => name === 'voice_examples_read')?.[1]).toEqual({a: id(5), vid: id(9), ids: [id(41)]});
+    expect(voice?.examples).toContain('练完腿走路都打颤。');
+    expect(voice?.text).not.toContain('练完腿走路都打颤。');
+    calls.length = 0;
+    expect((await admitCatalogVoice(db(), id(5), catalog, '今天天气怎么样'))?.examples).toBeUndefined();
+    expect(calls.map(([name]) => name)).not.toContain('voice_examples_read');
+    const off = await admitCatalogVoice(db(false), id(5), catalog, '写一条关于做饭的小红书');
+    expect(off?.frozen.guide).toBe('voice-v3');
+    expect(off?.examples).toBeUndefined();
+  });
   it('no flagged Skill: no database call at all (a catalog without the voice costs no extra round trip)', async () => {
     const calls: string[] = [];
     const spy = {from: () => { calls.push('from'); throw new Error('no module read'); }, rpc: async (name: string) => { calls.push(name); return {data: null, error: null}; }} as never;

@@ -91,9 +91,10 @@ export function chatToolDeps(admin: SupabaseClient, user: () => SupabaseClient, 
       const contentSource = pin && pinned && pinnedListed ? await entryContentSource(sourceOf(pin), pinned, FREE_RESULT_RESERVE_BYTES) : undefined;
       return { catalog, prepared, ...(contentSource ? { contentSource } : {}) };
     },
-    async voice(actorId, catalog) {
-      const voice = await admitCatalogVoice(admin, actorId, catalog);
-      return voice && { text: voice.text, ...(voice.frozen.versionId ? { versionId: voice.frozen.versionId } : {}) };
+    async voice(actorId, catalog, message) {
+      const voice = await admitCatalogVoice(admin, actorId, catalog, message);
+      return voice && { text: voice.text, ...(voice.frozen.versionId ? { versionId: voice.frozen.versionId } : {}),
+        ...(voice.examples ? { examples: voice.examples } : {}) };
     },
     // Before turn_open: the old path's full source check, and the own-data tier (read-only, so no lock on the profile). Free members
     // get window 0 and read the "members only" note; an unknown tier means no post reads this turn.

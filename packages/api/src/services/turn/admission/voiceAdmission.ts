@@ -2,7 +2,8 @@
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { logger } from '../../../lib/logger';
-import { voiceProfile, type VoiceProfile } from '../../voice/profile';
+import { voiceProfile, type VoiceDocumentLabel, type VoiceProfile } from '../../voice/profile';
+import type { VoiceStats } from '../../voice/stats';
 import { VOICE_GUIDE, VOICE_GUIDES, withPrimaryAddenda } from '../agent/primaryInstructions';
 
 /** VOICE (Master Plan 5.3 step 4): what admission freezes for a run that may write in the user's voice. Only the version id:
@@ -15,8 +16,9 @@ type Rpc = { rpc(name: string, args: Record<string, unknown>): PromiseLike<{ dat
 
 /** The confirmed profile, when one of these modules is a writing Skill flagged "使用用户文风" (0337 uses_user_voice) and the
  * user has a confirmed profile with "使用我的文风" on. Any read failure means no voice for this run (never a refused turn). */
-export async function admitVoice(admin: SupabaseClient, actorId: string, moduleIds: string[], flagged = false):
-  Promise<{ frozen: FrozenVoiceProfile; profile?: VoiceProfile } | undefined> {
+export async function admitVoice(admin: SupabaseClient, actorId: string, moduleIds: string[], flagged = false,
+  guide: (typeof VOICE_GUIDES)[number] = VOICE_GUIDE):
+  Promise<{ frozen: FrozenVoiceProfile; profile?: VoiceProfile; stats?: VoiceStats | null; documents?: VoiceDocumentLabel[] } | undefined> {
   if (!moduleIds.length) return undefined;
   try {
     // `flagged`: the caller already read uses_user_voice with the module row (a chosen Skill: no extra round trip).
@@ -33,10 +35,10 @@ export async function admitVoice(admin: SupabaseClient, actorId: string, moduleI
       version: z.number().int().positive().nullable() }).parse(current.data);
     if (!view.enabled) return undefined;
     // On, but nothing confirmed yet: the Skill hints once where to set it up (Owner 2026-10-23, A).
-    if (!view.versionId || !view.version) return { frozen: { guide: VOICE_GUIDE, modules } };
+    if (!view.versionId || !view.version) return { frozen: { guide, modules } };
     const pointer = { versionId: view.versionId, version: view.version };
-    const profile = await readVoiceProfile(admin, actorId, pointer.versionId);
-    return profile ? { frozen: { guide: VOICE_GUIDE, ...pointer, modules }, profile } : undefined;
+    const read = await readVoiceVersion(admin, actorId, pointer.versionId);
+    return read ? { frozen: { guide, ...pointer, modules }, ...read } : undefined;
   } catch (error) {
     logger.warn('api', 'voice_admission_skipped', { code: error instanceof Error ? error.message : 'unknown' });
     return undefined;
@@ -46,13 +48,28 @@ export async function admitVoice(admin: SupabaseClient, actorId: string, moduleI
 /** The text of a frozen version; undefined only when the database answered that it no longer exists (the user deleted it or
  * one of its sources). A failed or unreadable answer is a retryable fault, never "deleted". */
 export async function readVoiceProfile(db: Rpc, actorId: string, versionId: string): Promise<VoiceProfile | undefined> {
+  return (await readVoiceVersion(db, actorId, versionId))?.profile;
+}
+
+/** VOICE-2 (0539/0540): the version's profile with its code-computed stats and document labels (null/empty before 0539). Labels
+ * or stats that do not parse are left out (no examples, no stats line), never a refused turn. */
+export async function readVoiceVersion(db: Rpc, actorId: string, versionId: string):
+  Promise<{ profile: VoiceProfile; stats: VoiceStats | null; documents: VoiceDocumentLabel[] } | undefined> {
   const read = await db.rpc('voice_profile_read', { a: actorId, vid: versionId });
   if (read.error) throw new Error('VOICE_PROFILE_UNAVAILABLE');
   if (read.data === null) return undefined;
-  const parsed = voiceProfile.safeParse((read.data as { profile?: unknown }).profile);
+  const data = read.data as { profile?: unknown; stats?: unknown; documents?: unknown };
+  const parsed = voiceProfile.safeParse(data.profile);
   if (!parsed.success) throw new Error('VOICE_PROFILE_UNAVAILABLE');
-  return parsed.data;
+  const labels = voiceLabels.safeParse(data.documents ?? []), stats = voiceStats.safeParse(data.stats);
+  return { profile: parsed.data, stats: stats.success ? stats.data : null, documents: labels.success ? labels.data : [] };
 }
+const voiceLabels = z.array(z.object({ documentId: z.string().uuid(), type: z.enum(['post', 'article', 'script', 'other']),
+  topics: z.array(z.string()) }).passthrough()).max(200);
+const voiceStats = z.object({ sentences: z.number(), avgSentenceChars: z.number(), shortSentenceShare: z.number(),
+  longSentenceShare: z.number(), openings: z.object({ question: z.number(), number: z.number(), firstPerson: z.number() }),
+  perThousandChars: z.object({ exclamation: z.number(), question: z.number(), ellipsis: z.number(), emoji: z.number() }),
+  avgParagraphsPerDocument: z.number(), avgParagraphChars: z.number(), listShare: z.number(), documents: z.number() }) as z.ZodType<VoiceStats>;
 
 /** At execution: the addendum input for the Skill that actually runs (chosen, or matched), or undefined. A version deleted
  * since admission is not injected; the run continues without it. */
