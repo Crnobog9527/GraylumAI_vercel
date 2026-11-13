@@ -47,7 +47,7 @@ export function RefundPage({ supportEmail }: { supportEmail?: string | null }) {
           </section>
         ))}
         <p className={styles.foot} data-zone="final">
-          {REFUND_PAGE.footnote}<Link href="/terms" className={styles.textLink}>查看服务条款</Link>
+          {REFUND_PAGE.footnote}<Link href="/terms" className={`${styles.textLink} ${styles.footLink}`}>查看服务条款</Link>
           <Link href="/refund-policy" className={styles.textLink}>查看完整退款政策（英文）</Link>
         </p>
       </article>

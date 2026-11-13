@@ -22,6 +22,8 @@ export const FONT_LICENCE_NOTICE = {
   link: '字体许可协议',
   href: '/fonts/misans/LICENSE.pdf',
 } as const;
+/** The same notice for the zh-TW pages, which use MiSans too and whose footer links here (法律條款). */
+export const FONT_LICENCE_NOTICE_ZH_TW = { text: '本網站使用 MiSans 字體，版權歸小米所有。', link: '字體授權協議' } as const;
 
 /**
  * One formal legal document (privacy, terms, cookies, refund) in the public site chrome. The text is the Owner's own English
@@ -42,6 +44,10 @@ export function LegalDocumentPage({ name }: { name: LegalDocName }) {
             <p>
               {FONT_LICENCE_NOTICE.text}{' '}
               <a href={FONT_LICENCE_NOTICE.href}>{FONT_LICENCE_NOTICE.link}</a>
+            </p>
+            <p lang="zh-TW">
+              {FONT_LICENCE_NOTICE_ZH_TW.text}{' '}
+              <a href={FONT_LICENCE_NOTICE.href}>{FONT_LICENCE_NOTICE_ZH_TW.link}</a>
             </p>
           </section>
         ) : null}

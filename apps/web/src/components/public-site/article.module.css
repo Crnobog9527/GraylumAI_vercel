@@ -144,6 +144,7 @@
 .note { margin: 0 0 28px; padding: 12px 16px; border-radius: 12px; background: rgba(255, 244, 214, .7); color: var(--pub-gold-text); font-size: 14px; line-height: 1.7; }
 
 .foot { margin-top: 48px; padding-top: 24px; border-top: 1px solid var(--pub-line); color: var(--pub-body); }
+.footLink { margin-left: 6px; }
 .foot a + a { margin-left: 14px; }
 
 .article a:focus-visible, .article summary:focus-visible { outline: 2px solid var(--pub-ink); outline-offset: 3px; }
@@ -157,4 +158,4 @@
 .icon + .cardTitle, .icon + .h3 { margin-top: 18px; }
 .mail { display: inline-flex; align-items: center; gap: 8px; margin-top: 16px; color: var(--pub-ink); font-size: 17px; font-weight: 600; overflow-wrap: anywhere; text-decoration: underline; text-decoration-color: var(--gl-accent-gold, #ffbb17); text-underline-offset: 5px; }
 @media (max-width: 639px) { .mail { min-height: 48px; } }
-.inset { margin-top: 24px; padding: 18px; border-radius: 14px; background: #f7f6f3; box-shadow: 0 0 0 1px var(--pub-line); }
+.inset { margin-top: 24px; padding: 18px; border-radius: 14px; background: var(--pub-canvas); box-shadow: 0 0 0 1px var(--pub-line); }
