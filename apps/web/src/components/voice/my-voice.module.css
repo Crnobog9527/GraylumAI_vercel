@@ -46,3 +46,24 @@
   .docs label { grid-template-columns: auto minmax(0, 1fr) auto; }
   .docs small { display: none; }
 }
+
+/*
+ * A phone (under 640px; Owner 2026-11-12, phone plan A). 我的文风 as an app lays it out: the same cards, with type large
+ * enough to read, buttons a thumb's height and side by side across the card, and text boxes at 16px so the phone does not
+ * zoom in on them. Nothing is added or removed and no word changes; a computer and a tablet see what they saw.
+ */
+@media (max-width: 639px) {
+  .root { gap: 12px; padding: 4px 0 28px; }
+  .panel { padding: 16px; border-radius: 18px; }
+  .root .panel :is(h2,:where([data-demo-heading="h2"])) { font-size: 16px; font-weight: 600; }
+  .hint, .note, .warn { font-size: 13px; }
+  .working, .fields div, .samples blockquote { font-size: 14.5px; }
+  .badge { padding: 4px 10px; font-size: 12px; }
+  .switch { min-height: 44px; font-size: 14px; }
+  .form label > span, .form legend { font-size: 13.5px; }
+  .form small { font-size: 12px; }
+  .form textarea { padding: 12px; border-radius: 12px; font-size: 16px; }
+  .docs label { min-height: 48px; padding: 8px 12px; border-radius: 14px; font-size: 14px; }
+  .actions { gap: 10px; }
+  .actions button { flex: 1 1 auto; min-height: 48px; padding: 0 16px; border-radius: 99px; font-size: 14.5px; }
+}
