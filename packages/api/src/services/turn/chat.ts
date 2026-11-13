@@ -15,6 +15,7 @@ import { readAdmissionSettings, type NewWorkGateResult, type RuntimeCallGate, ty
 import { DECISIONS_MODEL, judgePositioning, POSITIONING_REFUSAL_CAP, type PositioningGatePolicy } from './admission/positioningGate';
 import { freeChatInstructions } from './agent/primaryInstructions';
 import { withInjectedSource } from './agent/contentSource';
+import { WORK_ITEM_INSTRUCTIONS } from './agent/workItemInstructions';
 import { assertRuntimeRequestCapacity } from './agent/context';
 import { isPositioningRefusal, POSITIONING_FALLBACK_INSTRUCTIONS, POSITIONING_MARKER } from './admission/positioningFallback';
 import { FREE_CHAT_REQUEST_FORMAT, openRouterRequestBody, PLAIN_TEXT_STREAM, type RequestContext } from './provider/providerRequest';
@@ -198,7 +199,10 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
   // The current message with the smallest instructions must fit the input budget, or nothing opens (the request bytes are
   // checked again before sending, with everything in them).
   const guard = settings.ok ? settings.identityGuard ?? true : true;
-  const requiredBytes = Buffer.byteLength(text) + Buffer.byteLength(material) + Buffer.byteLength(withBrandIdentity(freeChatInstructions(false), guard));
+  // A topic window's turn also carries its host rule (CONTENT-CONVERSATION-2), in the site-wide segment.
+  const workRule = work ? WORK_ITEM_INSTRUCTIONS : '';
+  const requiredBytes = Buffer.byteLength(text) + Buffer.byteLength(material) + Buffer.byteLength(withBrandIdentity(freeChatInstructions(false), guard))
+    + Buffer.byteLength(workRule);
   // With tools the research ceiling may hold the message; it is checked again below against what the plan allows.
   if (requiredBytes > (deps.tools ? quote.inputLimit : Math.min(quote.inputLimit, interactiveBytes)))
     return emit({ type: 'error', code: 'TURN_INPUT_TOO_LARGE' });
@@ -233,6 +237,21 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
       }
     } catch { return emit({ type: 'error', code: 'TURN_DATABASE_UNAVAILABLE' }); }
   }
+  // CONTENT-CONVERSATION-2: a video item's saved final script and its storyboard (opc_work_check), given on every turn of the topic
+  // window, so a writing Skill the model loads can write from them and the reply can be saved as a storyboard or editing advice
+  // (opc_content_from_turn reads the frozen list). A turn that chose a derived method keeps its single source above. What does not
+  // fit the input budget is left out, the storyboard first: saving a reply that needed it is then refused by the database.
+  const workSources: Array<{ contentId: string; kind: 'script' | 'storyboard' }> = [];
+  if (work && !workSource) {
+    let added = 0;
+    for (const source of work.sources) {
+      const injected = withInjectedSource('', source.kind, source.version, source.body) + '\n\n';
+      if (requiredBytes + added + Buffer.byteLength(injected) + (tools?.definitionBytes ?? 0) > inputLimit) break;
+      added += Buffer.byteLength(injected);
+      material += injected;
+      workSources.push({ contentId: source.contentId, kind: source.kind });
+    }
+  }
   // The ceiling this turn really has (research usable: the research one; otherwise the interactive one), before anything opens.
   if (tools && requiredBytes + tools.definitionBytes > inputLimit) return emit({ type: 'error', code: 'TURN_INPUT_TOO_LARGE' });
   const toolLimits = tools ? tools.plan.limits : { paidTools: 0, freeTools: 0 };
@@ -261,6 +280,7 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
   let opened;
   try { opened = await db.open({ actorId: input.actorId, sessionId: input.sessionId, requestId: input.requestId, kind: 'chat',
     policy: { ...policy, ...(workSkill ? { workSkill } : {}), ...(workSource ? { workSource } : {}),
+      ...(workSources.length ? { workSources } : {}),
       // Every turn that read a revision: deleting the script it held reaches this turn (content_erasure_scope).
       ...(work && work.materialRevision !== null ? { workMaterial: { revision: work.materialRevision, hash: work.materialHash } } : {}) },
     ...(input.resume ? { resumeOf: input.resume.of } : {}) }); }
@@ -343,7 +363,7 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
     // without a confirmed positioning, the primary model's fallback rule: "Decisions 先判断，主模型兜底"), both cached. The
     // positioning-page redirect is only for an account that has a positioning (as admission.ts).
     const gated = Boolean(gate && !gate.positioned);
-    const shared = withBrandIdentity(freeChatInstructions(!gated), guard) + (tools?.sharedInstructions(gated) ?? '');
+    const shared = withBrandIdentity(freeChatInstructions(!gated), guard) + (tools?.sharedInstructions(gated) ?? '') + workRule;
     const instructions = shared + '\n' + replySettingInstructions(effectiveReplyLocale(opened.replyLanguage))
       + (fallback ? POSITIONING_FALLBACK_INSTRUCTIONS : '') + (tools?.userInstructions ?? '');
     const promptCache = freezeSharedPromptCache({ real: true, model: quote.model, cacheWriteUsdPerMillion:

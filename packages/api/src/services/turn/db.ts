@@ -75,7 +75,10 @@ const reportTurn = z.object({ turnId: z.number().int().positive(), requestId: z.
 export type ReportTurn = z.infer<typeof reportTurn>;
 const workCheck = z.object({ work: z.object({ moduleId: z.string().uuid(), skillId: z.string().uuid(), revisionId: z.string().uuid(),
   brief: z.string().nullable(), material: z.string().nullable(), videoPackage: z.boolean(), materialRevision: z.number().int().nullable(),
-  materialHash: z.string().nullable() }).nullable() });
+  materialHash: z.string().nullable(),
+  // CONTENT-CONVERSATION-2 (0541): a video item's current final script, then that script's newest storyboard; none otherwise.
+  sources: z.array(z.object({ contentId: z.string().uuid(), kind: z.enum(['script', 'storyboard']), version: z.number().int().positive(),
+    body: z.string(), bytes: z.number() })).default([]) }).nullable() });
 const workSource = z.discriminatedUnion('status', [z.object({ status: z.literal('none') }),
   z.object({ status: z.literal('refused'), code: z.string() }),
   z.object({ status: z.literal('ready'), contentId: z.string().uuid(), kind: z.enum(['script', 'storyboard']), version: z.number().int().positive(),

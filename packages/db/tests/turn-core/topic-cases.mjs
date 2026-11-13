@@ -56,6 +56,23 @@ export async function topicCases(t){
   assert.equal(await balance(a),1000);
   report.checks.push('topic source: bound workspace, writable, allowed source, frozen material; refused before anything is frozen');
  }
+ // CONTENT-CONVERSATION-2 (0541): the topic page's "绑定正式定位 v{n}" is the bound version's ordinal in the account strategy history,
+ // the number the library rail shows, not the project's publish counter (staging validation batch 6: v10 against v9).
+ {
+  const a=await account(1000),src=await source(a);
+  // The publish counter runs ahead of what the history counts (the case staging showed).
+  await c.query('alter table artifact_versions disable trigger user');
+  await c.query('update artifact_versions set version=10 where id=$1',[src.version]);
+  await c.query('alter table artifact_versions enable trigger user');
+  const project=await one('select project_id v from opc_accounts where actor_id=$1 and account_key=$2',[a.actor,src.account]);
+  const history=await one('select opc_account_strategy_history($1,$2) v',[a.actor,project]);
+  const entry=history.find(h=>h.id===src.version);
+  assert.ok(entry,'the bound version is in the account history');
+  const shown=(await one('select opc_topic_read($1,$2) v',[a.actor,src.draft])).sourceVersion;
+  assert.equal(shown,entry.version,'the topic page shows the history ordinal');
+  assert.notEqual(shown,10,'not the publish counter');
+  report.checks.push('CONTENT-CONVERSATION-2 0541: the topic page shows the bound version as its strategy-history ordinal (the library rail number), not the publish counter');
+ }
  // 2. A topic turn is one metered chat turn; the draft is saved from its reply, by its request id.
  {
   const a=await account(1000),src=await source(a),proposal=item(src);
