@@ -6,6 +6,8 @@
 
 import MarketingShell from '@/components/landing/MarketingShell';
 import PublicPageHero from '@/components/landing/PublicPageHero';
+import { sectionZone } from '@/components/public-site/ArticlePage';
+import styles from '@/components/public-site/article.module.css';
 import { ACCESSIBILITY_STATEMENT } from '@/lib/accessibility-statement';
 import { getPublicSiteSettings } from '@/lib/public-site';
 import { buildPageMetadata } from '@/lib/seo/metadata';
@@ -23,37 +25,31 @@ export default async function AccessibilityPage() {
 
   return (
     <MarketingShell>
-      <PublicPageHero
-        eyebrow="无障碍声明"
-        title={`${siteName} 的无障碍承诺`}
-        description={ACCESSIBILITY_STATEMENT.intro}
-      />
+      <div className={styles.article}>
+        <PublicPageHero
+          eyebrow="无障碍声明"
+          title={`${siteName} 的无障碍承诺`}
+          description={ACCESSIBILITY_STATEMENT.intro}
+        />
 
-      <section className="bg-[#0A0A0A] py-16 md:py-20">
-        <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8">
-          <div className="space-y-10 rounded-3xl border border-[#2B2B2B] bg-[#141414] p-8 md:p-10">
-            {ACCESSIBILITY_STATEMENT.sections.map((section) => (
-              <section key={section.title}>
-                <h2 className="text-2xl font-semibold text-white">{section.title}</h2>
-                <div className="mt-4 space-y-4 text-sm leading-8 text-[#B5B5B5]">
-                  {section.paragraphs.map((paragraph) => (
-                    <p key={paragraph}>{paragraph}</p>
-                  ))}
-                </div>
-              </section>
+        {ACCESSIBILITY_STATEMENT.sections.map((section, index) => (
+          <section key={section.title} className={styles.section} data-zone={sectionZone(index)}>
+            <h2>{section.title}</h2>
+            {section.paragraphs.map((paragraph) => (
+              <p key={paragraph} className={styles.text}>{paragraph}</p>
             ))}
-            <section>
-              <h2 className="text-2xl font-semibold text-white">反馈与联系</h2>
-              <p className="mt-4 text-sm leading-8 text-[#B5B5B5]">
-                如果你在使用中遇到无法访问的内容，或需要其他形式的信息，请发邮件到{' '}
-                <a className="text-[#FFD700] underline underline-offset-2" href={`mailto:${supportEmail}`}>{supportEmail}</a>
-                ，写明页面地址、你遇到的问题和使用的设备或辅助工具。我们会尽快回复并处理。
-              </p>
-              <p className="mt-4 text-sm leading-8 text-[#B5B5B5]">最近更新：{ACCESSIBILITY_STATEMENT.updated}</p>
-            </section>
-          </div>
-        </div>
-      </section>
+          </section>
+        ))}
+        <section className={styles.section} data-zone="final">
+          <h2>反馈与联系</h2>
+          <p className={styles.text}>
+            如果你在使用中遇到无法访问的内容，或需要其他形式的信息，请发邮件到{' '}
+            <a className={styles.textLink} href={`mailto:${supportEmail}`}>{supportEmail}</a>
+            ，写明页面地址、你遇到的问题和使用的设备或辅助工具。我们会尽快回复并处理。
+          </p>
+          <p className={styles.byline}>最近更新：{ACCESSIBILITY_STATEMENT.updated}</p>
+        </section>
+      </div>
     </MarketingShell>
   );
 }

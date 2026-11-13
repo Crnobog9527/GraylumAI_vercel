@@ -19,6 +19,11 @@ export function turnClients(primary: SupabaseClient, replica?: SupabaseClient): 
 const tombstones = z.object({ sessionTombstoned: z.boolean(), accountErasing: z.boolean(), voiceSourceRevoked: z.boolean() });
 export type Tombstones = z.infer<typeof tombstones>;
 export const tombstoned = (t: Tombstones) => t.sessionTombstoned || t.accountErasing || t.voiceSourceRevoked;
+/** VOICE-ABORT-FIX: a round voided only because the writing voice it used was deleted (the conversation and the account are
+ * still there). Its erased close keeps the user's message (turn_close, 0535); the page says the voice was deleted, not the chat. */
+export const voiceRevokedOnly = (t: Partial<Tombstones> | null | undefined) =>
+  Boolean(t?.voiceSourceRevoked && !t.sessionTombstoned && !t.accountErasing);
+export const erasedCode = (t: Partial<Tombstones> | null | undefined) => voiceRevokedOnly(t) ? 'TURN_VOICE_REVOKED' : 'TURN_TOMBSTONED';
 
 const historyItem = z.object({ seq: z.number().int().positive(), role: z.enum(['user', 'assistant']), content: z.string(),
   contentHash: z.string().regex(/^[0-9a-f]{64}$/) });

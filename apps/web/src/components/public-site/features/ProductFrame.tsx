@@ -20,13 +20,13 @@ export function ProductFrame({ label, caption, className, children }: {
       <div
         role="group" aria-label={label}
         className={cn(
-          light.light, 'overflow-hidden rounded-2xl border border-[#2B2B2B] bg-[var(--gl-canvas)] p-3',
+          light.light, 'overflow-hidden rounded-[18px] border border-[var(--pub-line)] bg-[var(--gl-canvas)] p-3',
           'text-[var(--gl-text)] sm:p-5', className,
         )}
       >
         <AsDemo>{children}</AsDemo>
       </div>
-      <figcaption className="mt-3 text-center text-xs text-[#8A8A8A]">{caption}</figcaption>
+      <figcaption className="mt-3 text-center text-xs text-[var(--pub-muted)]">{caption}</figcaption>
     </figure>
   );
 }

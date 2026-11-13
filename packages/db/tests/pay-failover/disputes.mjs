@@ -30,7 +30,8 @@ export async function disputeCases({admin,service,connect,actor,create,bind,pay}
  const held=-(await admin.query("SELECT amount FROM credit_transactions WHERE source_order_id=$1 AND reason_code='dispute_freeze'",[member.id])).rows[0].amount;
  assert.ok(held>0);
  const withdrawn=(await service.query('SELECT pay_dispute_withdraw($1,$2) v',[actor,first.id])).rows[0].v;
- assert.deepEqual(withdrawn,{restored:held,duplicate:false});
+ // 0537 (CHARGEBACK G2) adds the backfill count and the identities the won-dispute email needs; nothing is due to backfill here.
+ assert.deepEqual(withdrawn,{restored:held,duplicate:false,backfilled:0,userId:member.user_id,orderId:member.id,status:first.status});
  assert.equal((await admin.query('SELECT credits FROM profiles WHERE id=$1',[member.user_id])).rows[0].credits,held);
  assert.equal((await observed(member,{amount:100})).freeze_state,'withdrawn');
  assert.equal((await service.query('SELECT pay_dispute_withdraw($1,$2) v',[actor,first.id])).rows[0].v.duplicate,true);

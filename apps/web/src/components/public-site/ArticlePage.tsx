@@ -10,24 +10,27 @@ import { JsonLd } from '@/components/seo/JsonLd';
 import type { ArticleBlock, ArticleContent } from '@/lib/seo/article';
 import { blogPostingJsonLd, breadcrumbJsonLd, faqPageJsonLd, softwareApplicationJsonLd, webPageJsonLd } from '@/lib/seo/structured-data';
 import { SiteShell } from './SiteShell';
-import { CRUMB_LINK, SITE_CHROME, visibleHref } from './site-chrome';
-
-const TEXT = 'text-base leading-8 text-[#C8C8C8]';
+import { SITE_CHROME, visibleHref } from './site-chrome';
+import styles from './article.module.css';
 
 function Block({ block }: { block: ArticleBlock }) {
   return (
     <>
       {block.paragraphs.map(paragraph => (
-        <p key={paragraph} className={`mt-4 ${TEXT}`}>{paragraph}</p>
+        <p key={paragraph} className={styles.text}>{paragraph}</p>
       ))}
       {block.list?.length ? (
-        <ul className={`mt-4 list-disc space-y-2 pl-6 ${TEXT}`}>
+        <ul className={styles.list}>
           {block.list.map(item => <li key={item}>{item}</li>)}
         </ul>
       ) : null}
     </>
   );
 }
+
+/** The zones the backdrop's light moves through down a page (backdrop-j.module.css), one per section in turn. */
+export const SECTION_ZONES = ['voice', 'work', 'compare', 'price', 'faq'] as const;
+export const sectionZone = (index: number) => SECTION_ZONES[index % SECTION_ZONES.length];
 
 /**
  * One public keyword or info page (SEO_GEO_SPEC sections 6–8 and 10): a single H1 with the answer on the
@@ -70,16 +73,15 @@ export function ArticlePage({ content, supportEmail, demo }: {
   return (
     <SiteShell locale={content.locale} alternates={content.alternates} supportEmail={supportEmail}>
       <JsonLd data={jsonLd} />
-      <article className={`mx-auto px-4 py-10 sm:px-6 md:py-14 ${demo ? 'max-w-4xl' : 'max-w-3xl'}`}>
+      <article className={styles.article} data-wide={demo ? '' : undefined}>
         {content.breadcrumb.length > 1 ? (
-          <nav aria-label={chrome.breadcrumbLabel} className="mb-6 text-sm text-[#8A8A8A]">
-            {/* On a phone each crumb is a 44px target (max-sm:), and the row's pieces sit on one line. */}
-            <ol className="flex flex-wrap items-center gap-2">
+          <nav aria-label={chrome.breadcrumbLabel} className={styles.crumbs}>
+            <ol>
               {content.breadcrumb.map((item, index) => (
-                <li key={item.path} className="flex items-center gap-2">
+                <li key={item.path}>
                   {index > 0 ? <span aria-hidden="true">/</span> : null}
                   {index < content.breadcrumb.length - 1
-                    ? <Link href={visibleHref(item.path)} className={CRUMB_LINK}>{item.name}</Link>
+                    ? <Link href={visibleHref(item.path)}>{item.name}</Link>
                     : <span aria-current="page">{item.name}</span>}
                 </li>
               ))}
@@ -87,59 +89,52 @@ export function ArticlePage({ content, supportEmail, demo }: {
           </nav>
         ) : null}
 
-        <h1 className="text-3xl font-bold leading-tight sm:text-4xl">{content.h1}</h1>
-        <p className="mt-5 text-lg leading-8 text-[#E6E6E6]">{content.lead}</p>
+        <h1 className={styles.title}>{content.h1}</h1>
+        <p className={styles.lead}>{content.lead}</p>
         {content.keyPoints?.length ? (
-          <ul className={`mt-5 list-disc space-y-2 pl-6 ${TEXT}`}>
+          <ul className={styles.list}>
             {content.keyPoints.map(point => <li key={point}>{point}</li>)}
           </ul>
         ) : null}
-        <p className="mt-5 text-sm text-[#8A8A8A]">
-          <Link href={aboutHref} rel="author" className="underline hover:text-[#FFD700]">{chrome.authorLabel}</Link>
+        <p className={styles.byline}>
+          <Link href={aboutHref} rel="author">{chrome.authorLabel}</Link>
           {' · '}{chrome.updatedLabel} <time dateTime={content.updated}>{content.updated}</time>
         </p>
 
-        <div className="mt-8 rounded-2xl border border-[#FFD700]/30 bg-[#141414] p-6">
-          <p className={TEXT}>{content.cta.description}</p>
-          <Link
-            href={content.cta.href}
-            className="mt-4 inline-block rounded-lg bg-[#FFD700] px-5 py-3 text-sm font-semibold text-[#0A0A0A] hover:bg-[#FFE34D]"
-          >
-            {content.cta.label}
-          </Link>
+        <div className={styles.card}>
+          <p className={styles.cardText}>{content.cta.description}</p>
+          <div className={styles.cardAction}>
+            <Link href={content.cta.href} className={styles.pill}>{content.cta.label}</Link>
+          </div>
         </div>
 
-        {demo ? <div className="mt-10">{demo}</div> : null}
+        {demo ? <div className={styles.demo}>{demo}</div> : null}
 
         {content.definition ? (
-          <section className="mt-10 border-l-2 border-[#FFD700] pl-5">
-            <p className={TEXT}><strong className="text-white">{content.definition.term}</strong>{content.definition.text}</p>
+          <section className={styles.definition}>
+            <p><strong>{content.definition.term}</strong>{content.definition.text}</p>
           </section>
         ) : null}
 
-        {content.sections.map(section => (
-          <section key={section.h2} className="mt-12">
-            <h2 className="text-2xl font-semibold">{section.h2}</h2>
+        {content.sections.map((section, index) => (
+          <section key={section.h2} className={styles.section} data-zone={sectionZone(index)}>
+            <h2>{section.h2}</h2>
             <Block block={section} />
             {section.table ? (
-              // A phone (under 640px; Owner 2026-11-12, phone plan A): the table was 561px wide in a 328px column, so its last column
-              // (on the comparison page, Graylum's own) was off the screen with nothing saying so. There each row is a card: what is
-              // compared, then every column's answer under that column's name. From 640px it is the table it was. Same words.
-              <div className={'mt-6 overflow-x-auto rounded-xl border border-[#262626] '
-                + 'max-sm:overflow-visible max-sm:rounded-none max-sm:border-0'} role="region" aria-label="对比表格" tabIndex={0}>
-                <table className="w-full min-w-[34rem] border-collapse text-left text-sm leading-7 text-[#C8C8C8] max-sm:block max-sm:min-w-0">
+              // A phone (under 640px; Owner 2026-11-12, phone plan A): each row is a card, what is compared, then every column's
+              // answer under that column's name. From 640px it is the table. Same words.
+              <div className={styles.tableWrap} role="region" aria-label="对比表格" tabIndex={0}>
+                <table className={styles.table}>
                   <caption className="sr-only">{section.table.caption}</caption>
-                  <thead className="bg-[#141414] text-white max-sm:sr-only">
-                    <tr>{section.table.head.map(cell => <th key={cell} scope="col" className="px-4 py-3 font-semibold">{cell}</th>)}</tr>
+                  <thead>
+                    <tr>{section.table.head.map(cell => <th key={cell} scope="col">{cell}</th>)}</tr>
                   </thead>
-                  <tbody className="max-sm:grid max-sm:gap-3">
+                  <tbody>
                     {section.table.rows.map(row => (
-                      <tr key={row[0]} className={'border-t border-[#262626] align-top '
-                        + 'max-sm:block max-sm:rounded-xl max-sm:border max-sm:bg-[#101010] max-sm:p-4'}>
-                        {row.map((cell, index) => index === 0
-                          ? <th key={cell} scope="row" className="px-4 py-3 font-semibold text-white max-sm:block max-sm:p-0 max-sm:text-base">{cell}</th>
-                          : <td key={cell} className="px-4 py-3 max-sm:mt-3 max-sm:block max-sm:p-0">
-                            <span className="hidden text-xs font-semibold text-[#FFD700] max-sm:block">{section.table!.head[index]}</span>{cell}</td>)}
+                      <tr key={row[0]}>
+                        {row.map((cell, cellIndex) => cellIndex === 0
+                          ? <th key={cell} scope="row">{cell}</th>
+                          : <td key={cell}><span className={styles.cellHead}>{section.table!.head[cellIndex]}</span>{cell}</td>)}
                       </tr>
                     ))}
                   </tbody>
@@ -147,8 +142,8 @@ export function ArticlePage({ content, supportEmail, demo }: {
               </div>
             ) : null}
             {section.subsections?.map(subsection => (
-              <div key={subsection.h3} className="mt-6">
-                <h3 className="text-lg font-semibold text-white">{subsection.h3}</h3>
+              <div key={subsection.h3} className={styles.sub}>
+                <h3>{subsection.h3}</h3>
                 <Block block={subsection} />
               </div>
             ))}
@@ -156,38 +151,36 @@ export function ArticlePage({ content, supportEmail, demo }: {
         ))}
 
         {content.faq?.length ? (
-          <section className="mt-12">
-            <h2 className="text-2xl font-semibold">{chrome.faqTitle}</h2>
+          <section className={styles.section} data-zone="faq">
+            <h2>{chrome.faqTitle}</h2>
             {content.faq.map(item => (
-              <div key={item.question} className="mt-6">
-                <h3 className="text-lg font-semibold text-white">{item.question}</h3>
-                <p className={`mt-3 whitespace-pre-line ${TEXT}`}>{item.answer}</p>
+              <div key={item.question} className={styles.faqItem}>
+                <h3 className={styles.h3}>{item.question}</h3>
+                <p>{item.answer}</p>
               </div>
             ))}
           </section>
         ) : null}
 
-        <section className="mt-12">
-          <h2 className="text-2xl font-semibold">{chrome.relatedTitle}</h2>
-          <ul className="mt-4 space-y-4">
+        <section className={styles.section} data-zone="final">
+          <h2>{chrome.relatedTitle}</h2>
+          <ul className={styles.related}>
             {content.related.map(link => (
               <li key={link.href}>
-                <Link href={visibleHref(link.href)} className="font-semibold text-[#FFD700] underline underline-offset-2">{link.label}</Link>
-                <p className="mt-1 text-sm leading-7 text-[#9A9A9A]">{link.description}</p>
+                <Link href={visibleHref(link.href)}>{link.label}</Link>
+                <p>{link.description}</p>
               </li>
             ))}
           </ul>
         </section>
 
         {content.sources?.length ? (
-          <aside className="mt-10 border-t border-[#262626] pt-6">
-            <p className="text-sm font-semibold text-white">{chrome.sourcesTitle}</p>
-            <ul className="mt-3 space-y-2 text-sm text-[#9A9A9A]">
+          <aside className={styles.sources}>
+            <p>{chrome.sourcesTitle}</p>
+            <ul>
               {content.sources.map(source => (
                 <li key={source.href}>
-                  <a href={source.href} target="_blank" rel="noopener noreferrer" className="underline hover:text-[#FFD700]">
-                    {source.label}
-                  </a>
+                  <a href={source.href} target="_blank" rel="noopener noreferrer">{source.label}</a>
                 </li>
               ))}
             </ul>

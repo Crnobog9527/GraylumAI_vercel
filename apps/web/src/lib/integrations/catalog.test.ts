@@ -2,15 +2,25 @@
 import { readdirSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { connectMessage, INTEGRATIONS, largePicture, showcasePairs, trackedLink, type IntegrationModule } from './catalog';
+import { connectMessage, INTEGRATIONS, largePicture, showcasePairs, trackedLink, viewLink, type IntegrationModule } from './catalog';
 
 /** Every sample picture of a module: the two of 能做什么, then the photo and the result of each kind of use. */
 const pictures = (module: IntegrationModule) => (module.showcase
   ? [module.showcase.before, module.showcase.after, ...module.showcase.uses.flatMap(use => [use.before, use.after])] : []);
 
 describe('integration modules', () => {
+  it('Feishu (someone else\'s product): its official Base page as it is, no partner marker; ours stay tracked', () => {
+    const feishu = INTEGRATIONS.find(module => module.id === 'feishu-base')!;
+    expect(feishu.connector).toBe('feishu_base');
+    expect(viewLink(feishu)).toBe('https://www.feishu.cn/product/base');
+    expect(viewLink(INTEGRATIONS[0]!)).toBe(trackedLink('https://shotviva.com/zh', 'shotviva'));
+    // No sample pictures: a drawn animation instead (Owner 2026-11-14).
+    expect(feishu.showcase).toBeUndefined();
+    expect(feishu.illustration).toBe('feishu-write');
+  });
+
   it('each module has its introduction, when to use it, and an https link to its own page; no link to buy', () => {
-    expect(INTEGRATIONS.map(module => module.id)).toEqual(['shotviva']);
+    expect(INTEGRATIONS.map(module => module.id)).toEqual(['shotviva', 'feishu-base']);
     for (const module of INTEGRATIONS) {
       expect(module.features.length).toBeGreaterThan(0);
       expect(module.whenToUse.length).toBeGreaterThan(0);
