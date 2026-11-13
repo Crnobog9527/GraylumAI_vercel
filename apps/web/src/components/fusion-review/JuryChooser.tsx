@@ -10,6 +10,7 @@ import { resumableDraftId, splitProfiles, type ProfileDraft } from '@/components
 import { useProfileBusinesses } from '@/components/opc/profile-archive/profile-archive-api';
 import { ACTIVE, latestByDraft, reviewHref, type MineItem } from './review-adapter';
 import styles from './jury-entry.module.css';
+import sheet from '@/components/design/bottom-sheet.module.css';
 
 /** The mark that opens the jury card on a positioning's report page (JuryEntry reads it). */
 export const JURY_ENTRY_PARAM = 'jury';
@@ -61,7 +62,7 @@ export function JuryChooser({ onClose }: { onClose: () => void }) {
   const resume = resumableDraftId(splitProfiles(profiles.businesses, (drafts.data?.drafts ?? []) as ProfileDraft[]).active);
   return (
     <Dialog open onOpenChange={value => { if (!value) onClose(); }}>
-      <DialogContent tone="light" className={styles.chooser}>
+      <DialogContent tone="light" className={`${styles.chooser} ${sheet.panel} ${sheet.anchored}`}>
         <DialogHeader>
           <DialogTitle>请评审团审阅哪一份报告</DialogTitle>
           <DialogDescription>评审团审阅的是一份定位的运营策略报告。选一份，在它的报告页开始。</DialogDescription>

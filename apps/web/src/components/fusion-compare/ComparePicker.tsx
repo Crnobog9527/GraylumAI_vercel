@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { ReportPaywallDialog } from '@/components/paywall/ReportPaywallDialog';
 import { compareErrorText, initialPick, isDefiniteRefusal, isUpgradeRefusal, pickStatus, togglePick, type CompareOptions } from './compare-view';
 import styles from './compare.module.css';
+import sheet from '@/components/design/bottom-sheet.module.css';
 import { READ_RETRY } from '@/trpc/read-retry';
 import { QueryNotice } from '@/components/opc/query-notice';
 
@@ -150,7 +151,7 @@ function ComparePicker({ options, sessionId, question, skill, onClose, onUpgrade
 
   return (
     <Dialog open onOpenChange={value => { if (!value) onClose(); }}>
-      <DialogContent tone="light" className={styles.picker}>
+      <DialogContent tone="light" className={`${styles.picker} ${sheet.panel} ${sheet.anchored}`}>
         <DialogHeader>
           <DialogTitle>多模型对比</DialogTitle>
           <DialogDescription>
@@ -179,7 +180,7 @@ function ComparePicker({ options, sessionId, question, skill, onClose, onUpgrade
             : <>最多消耗 <strong>{estimate.credits}</strong> 积分，按各模型实际用量分别结算；没生成出回答的不收费。</>}</p>}
         {error && <p role="alert" className={styles.error}>{error.text}{error.upgrade && <>
           {' '}<button type="button" className="underline" onClick={onUpgrade}>去升级</button></>}</p>}
-        <DialogFooter>
+        <DialogFooter className={sheet.bar}>
           <Button variant="outline" onClick={onClose}>取消</Button>
           <Button disabled={!status.ready || blocked || start.isPending} onClick={() => void begin()}>
             {start.isPending && <Loader2 size={14} className={styles.spin} />}开始对比</Button>
