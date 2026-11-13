@@ -84,6 +84,16 @@
 
 ### 2.1 Owner 的新决定（2026-09-27 起，2026-11-14 更新）
 
+**2026-11-14：上线日期改为 2026-11-30（取代 2026-11-12 定的 11-22）**
+
+Owner 原话（2026-11-14，总控-15 窗口转达）：
+
+> 上线时间可以改到 11 月 30 号。
+
+起因：同日 Owner 把文风 2.0 等 6 项挪到上线前（见下一条），各方案估算塞不进 11-22。
+
+落实排期（总控定，不是 Owner 原话）：开发 PR 在 11-25 晚前合进 staging；11-26 staging 统一验收；11-27 建正式库；11-28、11-29 冒烟和对账；11-30 上线。各任务的上线前范围以 Owner 对各方案的选择为准。
+
 **2026-11-14：文风 2.0（VOICE-2）改为上线前做完；内容对话第二阶段、用户来源分析（PostHog）、谷歌统计（GA4）、拒付处理、飞书等外部集成改为上线前；图片生成（IMAGE-GEN）和内容审核（MODERATION）不做（取代 2026-10-25"文风 2.0 上线后做"、2026-10-26 CONTENT-CONVERSATION-2 与 GA4"上线后"、2026-10-21 PostHog"上线后第一周"、INTEGRATION-BASE/V3-FEISHU"上线后"、2026-10-27/11-03 IMAGE-GEN"上线后第一个大版本"、2026-10-01/10-17 MODERATION"暂缓、上线后再定"）**
 
 Owner 原话（2026-11-14，总控-15 窗口转达）：
@@ -97,7 +107,7 @@ Owner 在总控列出的"上线后任务"表上的标注（截图，总控整理
 落实方式（总控定，不是 Owner 原话）：
 - VOICE-2：先出方案由 Owner 定稿，再实施；方案里说明对上线日期的影响。
 - ANALYTICS-POSTHOG / ANALYTICS-GA4：等 Owner 拿来 Shotviva 的埋点方案后参照实施，在此之前不开规划窗口。
-- 其余挪到上线前的任务各自先出方案；它们对 11-22 上线日期的影响，方案出来后由总控汇总报 Owner 决定。
+- 其余挪到上线前的任务各自先出方案；它们对上线日期的影响，方案出来后由总控汇总报 Owner 决定（同日 Owner 已把上线日改为 11-30，见上一条）。
 - 对话里出图继续由 INTEGRATION-SHOTVIVA 提供，IMAGE-GEN 关闭。
 
 **2026-11-13：同一网络（IP）24 小时内最多送 5 个新账号开户积分（BOT-GUARD 第 3 部分，取代同日 BOT-GUARD"同一 IP 24 小时内只送 1 个"）**
@@ -4486,7 +4496,7 @@ node scripts/plan-progress.mjs --ref origin/staging
 | | MOBILE-UX | 落地页和应用内页面按原生 App 交互重做手机端（底部导航、全屏页面切换、底部弹层、大点击区等），开工前先出方案由 Owner 定稿；上线前做（第 2.1 节 2026-10-23、2026-11-12） | 方案由 Owner 定稿；与 LANDING-ART、UI-UNIFY、PUBLISH-SCHEDULE 按页面排队改同一批文件 | 高 | 大 / 待方案 | — |
 | | PROFILE-AVATAR | 用户自定义头像：上传、裁剪、换头像删旧文件、注销时一起删；上线前做（第 2.1 节 2026-11-12） | — | 中（含注销清理和存储策略） | 小 / 2 | — |
 | | INTEGRATION-SHOTVIVA | Shotviva 生图连接器和"集成"展示页：连接/断开（只存 shotviva_account_id）、对话里出图（Shotviva 计费，Graylum 不结算，免费会员不能用）、集成页每个自家产品一个展示模块、跳转带追踪；打通后才上线（第 2.1 节 2026-11-05、2026-11-12） | Shotviva 伙伴接口（Shotviva 侧已有）；staging 伙伴密钥由 Owner 填 | 高 | 中 / 5 | — |
-| **5 上线后** | INTEGRATION-BASE → V3-FEISHU、SOCIAL-SYNC | **2026-11-14 Owner 把 INTEGRATION-BASE、V3-FEISHU 改为上线前**（第 2.1 节 2026-11-14），先出方案。沿用 v11 §8（C1 套餐式自动追踪已确认）。2026-10-13：SOCIAL-SYNC 并入 PUBLISH-MONITOR 上线前完成（第 2.1 节），本行只剩 INTEGRATION-BASE、V3-FEISHU | — | 高 | 大 | — |
+| **5 上线后** | INTEGRATION-BASE → V3-FEISHU、SOCIAL-SYNC | **2026-11-14 Owner 把 INTEGRATION-BASE、V3-FEISHU 改为上线前**（第 2.1 节 2026-11-14），先出方案。沿用 v11 §8（C1 套餐式自动追踪已确认）。2026-10-13：SOCIAL-SYNC 并入 PUBLISH-MONITOR 上线前完成（第 2.1 节），本行只剩 INTEGRATION-BASE、V3-FEISHU | — | 高 | 大 | SOCIAL-SYNC：关闭：2026-10-13 并入 PUBLISH-MONITOR 上线前完成 |
 | | ANALYTICS-POSTHOG | **2026-11-14 Owner 改为上线前**（第 2.1 节 2026-11-14）。参照 Shotviva 埋点方案实施，方案到之前不开工。用户归因（第 2.1 节 2026-10-21 决定）：接入 PostHog 云（美国区），跟随现有 Termly 同意状态，用于用户级来源、路径、漏斗和 AI 推荐流量归因；注销时同步删除该用户在 PostHog 的数据。拒绝同意后的匿名计数、注册时加问题、服务器事件、GA4 去留、录像范围等具体范围都只是总控建议，以开工前方案经 Owner 确认的为准 | 10-31 上线后第一周开工，冻结前不做；开工前先出方案；PostHog 账号和项目编号由 Owner 提供 | 中（含注销对接） | 中 / 待方案 | 阻塞：等 Owner 提供 Shotviva 埋点方案（第 2.1 节 2026-11-14） |
 | | CHARGEBACK | **2026-11-14 Owner 改为上线前**（第 2.1 节 2026-11-14）。方向（Owner 2026-10-04，第 2.1 节第 51 项，[记录 W](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981381009)、[记录 X](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981808905)；**上线后任务，不阻塞上线**）：拒付最终判定输了，按商品分别处理：订阅按退款规则处理这一期（扣掉还没用完的积分、终止这份订阅以后的积分发放，是创始会员的立即结束创始身份，名额不放回）；微信一次性会员结束这一期，1 年期的终止以后按月发放的积分、扣掉这一期还没用完的积分（是创始会员的同样结束创始身份）；订阅和微信一次性会员被冻结的已发积分判输扣回、判赢解冻，不动其他来源（[记录 AC](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982525998)）；积分包扣回这个包里没用完的积分、判赢解冻，不动其他来源的积分（[记录 Z](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982115736)）；所有拒付都不自动接受，由 Owner 人工处理（[记录 Y](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982111397)）；赢了就解除 PAY-DISPUTE-GUARD 的冻结、恢复，按幂等处理（拒付期间被暂停的按月积分，判赢后按原发放日逐期补发，幂等，不改变原会员期限和发放日期，不延到原到期日之后）；订阅判赢后不自动恢复扣费，提醒用户自己重新订阅；判输时订阅终止（[记录 AD](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982615688)），具体由 CHARGEBACK 方案提出、Owner 批准；一键导出申诉材料（用收款核心的同意记录和订单、付款、Stripe 记录；PAY-EVIDENCE 已于 2026-10-19 决定不做，不采集付款 IP/设备证据）；限制同一人反复拒付；信用卡账单商户名（由 Waffo 控制）。续费和到期提醒归 PAY-NOTIFY，拒付事件接收和可撤回冻结归 PAY-DISPUTE-GUARD，上线前完成（2026-10-09 拆分）。拒付通知方式、举证截止日和手续费（每笔 $25）已由 [Waffo 2026-10-10 答复](https://github.com/Crnobog9527/GraylumAI_vercel/pull/752#issuecomment-6095292601)；开工前仍须向 Waffo 核实要交的材料和账单商户名。2026-10-12 补充：新订单改走 Stripe（MP 订单由 Stripe 作为记录商户处理拒付，大陆通道和钱包单笔由我们处理），上文 Waffo 的通知方式、手续费、材料和账单商户名只适用于旧 Waffo 订单；按 Stripe 的做法实施时由方案细化 | PAY-STRIPE-MP、PAY-NOTIFY、PAY-DISPUTE-GUARD；拒付材料和账单商户名核实（旧 Waffo 订单仍向 Waffo 核实） | 高 | 待实施方案细化 | — |
 | | LEARN-1 | 第 6.3 节：读取用户数据、依赖数据使用同意（2026-10-12：同意开关上线先隐藏，LEARN-1 做问题案例分析时再定开关方案，第 2.1 节） | 有真实用户 | 高 | 中 | — |
