@@ -9,9 +9,12 @@ import { readdirSync } from 'node:fs';
 import { localDb, read, replayMigrationTail } from '../runtime-view-perf/local-db.mjs';
 
 const migrationPath = 'packages/db/migrations/0259_platform_secrets.sql';
-// PAY-NOTIFY extends the slot list in place (adds 'resend'); reapplying 0259 alone restores six slots.
+// PAY-NOTIFY extends the slot list in place (adds 'resend'), INTEGRATION-SHOTVIVA adds 'shotviva'; reapplying 0259 alone
+// restores six slots.
 const slotExtensions = readdirSync(new URL('../../migrations/', import.meta.url))
-  .filter(f => f.endsWith('_payment_notices.sql')).map(f => `packages/db/migrations/${f}`);
+  .filter(f => f.endsWith('_payment_notices.sql') || f.endsWith('_shotviva_connector.sql')).sort()
+  .map(f => `packages/db/migrations/${f}`);
+const extensionSlots = slotExtensions.map(f => f.endsWith('_payment_notices.sql') ? 'resend' : 'shotviva');
 const reapply = async () => { for (const path of [migrationPath, ...slotExtensions]) await c.query(read(path)); };
 const db = await localDb(), c = db.client;
 const report = { build: db.build, migration: '0259', checks: [] };
@@ -154,7 +157,7 @@ try {
   assert.equal(await readSecret('postforme'), null);
   assert.deepEqual((await v('SELECT platform_secret_status() v')).map(row => row.slot),
     ['openrouter', 'postforme', 'postforme_webhook', 'tikhub', 'parallel', 'firecrawl',
-      ...(slotExtensions.length ? ['resend'] : [])]);
+      ...extensionSlots]);
   await clear('postforme_webhook', 1, admin);
   assert.equal(await readSecret('postforme_webhook'), null);
   report.checks.push('postforme_webhook is its own slot: set, read and clear without touching postforme');

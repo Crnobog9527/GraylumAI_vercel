@@ -147,6 +147,9 @@ const envSchema = z.object({
   WAFFO_TEST_PRIVATE_KEY: optionalString,
   WAFFO_TEST_WEBHOOK_PUBLIC_KEY: optionalString,
 
+  // INTEGRATION-SHOTVIVA: the Shotviva origin the connector calls (https://shotviva.com in production). Unset: connector off.
+  SHOTVIVA_BASE_URL: optionalString,
+
   // Sentry 构建与环境标识
   SENTRY_ORG: optionalString,
   SENTRY_PROJECT: optionalString,
@@ -401,4 +404,10 @@ export function getSafeEnvSummary(): Record<string, string> {
     SENTRY_DSN_SET: process.env.NEXT_PUBLIC_SENTRY_DSN ? '✓' : '✗',
     SENTRY_AUTH_TOKEN_SET: process.env.SENTRY_AUTH_TOKEN ? '✓' : '✗',
   };
+}
+
+/** INTEGRATION-SHOTVIVA: what the connect and callback routes and the connector service read from the environment. */
+export function readShotvivaRouteEnv() {
+  return { supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL, anonKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+    serviceKey: process.env.SUPABASE_SERVICE_ROLE_KEY, shotvivaBaseUrl: process.env.SHOTVIVA_BASE_URL };
 }

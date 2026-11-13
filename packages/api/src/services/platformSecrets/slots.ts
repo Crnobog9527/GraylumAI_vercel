@@ -7,6 +7,8 @@
  */
 export const PLATFORM_SECRET_SLOTS = [
   'openrouter', 'postforme', 'postforme_webhook', 'tikhub', 'parallel', 'firecrawl', 'resend',
+  // INTEGRATION-SHOTVIVA: the partner key Shotviva issues to Graylum (sv_test_ outside production, sv_live_ in production).
+  'shotviva',
 ] as const;
 export type PlatformSecretSlot = typeof PLATFORM_SECRET_SLOTS[number];
 
@@ -21,6 +23,7 @@ const FORMAT: Record<PlatformSecretSlot, RegExp> = {
   parallel: BASE,
   firecrawl: BASE,
   resend: /^re_[A-Za-z0-9_]{8,}$/,
+  shotviva: /^sv_(live|test)_[!-~]{8,}$/,
 };
 
 export function isPlatformSecretSlot(value: unknown): value is PlatformSecretSlot {

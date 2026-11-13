@@ -9,7 +9,7 @@ CREATE OR REPLACE FUNCTION public.platform_secret_check(p_slot text, p_actor uui
  SET search_path TO 'public', 'pg_temp'
 AS $function$
 BEGIN
- IF p_slot IS NULL OR p_slot NOT IN ('openrouter','postforme','postforme_webhook','tikhub','parallel','firecrawl','resend')
+ IF p_slot IS NULL OR p_slot NOT IN ('openrouter','postforme','postforme_webhook','tikhub','parallel','firecrawl','resend','shotviva')
   OR p_actor IS NULL OR p_revision IS NULL OR p_revision<0 OR p_revision>=9999999999
  THEN RAISE EXCEPTION 'PLATFORM_SECRET_INPUT_INVALID' USING ERRCODE='23514';END IF;
  IF NOT EXISTS(SELECT 1 FROM profiles WHERE id=p_actor AND role='admin'

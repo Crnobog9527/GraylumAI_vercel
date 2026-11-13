@@ -63,6 +63,8 @@ export const REQUIRED_ALWAYS = [
   'ALIYUN_SMS_ACCESS_KEY_SECRET',
   'ALIYUN_SMS_SIGN_NAME',
   'ALIYUN_SMS_TEMPLATE_CODE',
+  // INTEGRATION-SHOTVIVA (Owner 2026-11-12, "打通再上线"): the Shotviva origin; without it the connector is off.
+  'SHOTVIVA_BASE_URL',
 ];
 
 // Step 26: must never exist on the production project. A trailing "*" is a prefix.
