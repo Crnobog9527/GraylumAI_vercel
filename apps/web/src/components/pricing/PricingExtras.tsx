@@ -45,7 +45,8 @@ export function PricingCreditPacks({ packages, plans, failed }: {
 /** Studio: intent only, no team features promised until they exist (design README conflict 6). */
 export function PricingStudio() {
   return (
-    <section data-testid="pricing-studio" data-card="" className="grid gap-3 rounded-[var(--pub-radius-card,18px)] border p-5 md:grid-cols-[1fr_auto] md:items-center"
+    <section data-testid="pricing-studio" data-card=""
+      className="grid gap-3 rounded-[var(--pub-radius-card,18px)] border p-5 md:grid-cols-[1fr_auto] md:items-center"
       style={card}>
       <div className="grid gap-1">
         <h2 className="text-xl font-semibold" style={{ color: 'var(--text-primary)' }}>{COPY.studioTitle}</h2>
