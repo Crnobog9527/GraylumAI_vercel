@@ -6,7 +6,7 @@
  */
 .stickyCta {
   position: fixed; left: 0; right: 0; z-index: 29; border-bottom: 1px solid var(--j-line, #e7e6e2); background: rgba(255, 255, 255, .96);
-  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); opacity: 0; translate: 0 -8px; pointer-events: none;
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); opacity: 0; translate: 0 -8px; pointer-events: none;
   transition: opacity .25s ease-out, translate .25s ease-out;
 }
 .stickyCta[data-shown] { opacity: 1; translate: 0 0; pointer-events: auto; }

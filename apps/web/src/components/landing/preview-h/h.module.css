@@ -111,7 +111,7 @@
 .pillInk:hover { background: var(--h-ink-hover); }
 .pillGlass {
   border-color: rgba(255, 255, 255, .85); background: rgba(255, 255, 255, .6); color: var(--h-ink);
-  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); box-shadow: 0 0 0 1px rgba(var(--h-shade), .07);
+  -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); box-shadow: 0 0 0 1px rgba(var(--h-shade), .07);
 }
 .pillGlass:hover { background: #fff; }
 .pillLarge { min-height: var(--h-btn); padding: 0 var(--h-btn-pad); font-size: 16px; }
@@ -133,7 +133,7 @@
 .headerBar {
   display: flex; align-items: center; gap: 8px; max-width: 1200px; min-height: 54px; margin: 0 auto; padding: 0 6px 0 14px;
   border: 1px solid var(--h-line); border-radius: 999px; background: rgba(255, 255, 255, .96);
-  backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
   box-shadow: 0 0 0 1px rgba(var(--h-shade), .06), 0 12px 32px -20px rgba(var(--h-shade), .35);
 }
 .brand { display: flex; align-items: center; gap: 8px; color: var(--h-ink); font-size: 17px; font-weight: 700; letter-spacing: -.02em; text-decoration: none; }
@@ -149,7 +149,7 @@
 .main { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--h-section); padding-bottom: 24px; }
 .demoFrame {
   padding: 8px; border: 1px solid rgba(255, 255, 255, .85); border-radius: 26px; background: rgba(255, 255, 255, .45);
-  backdrop-filter: blur(var(--h-blur)); -webkit-backdrop-filter: blur(var(--h-blur));
+  -webkit-backdrop-filter: blur(var(--h-blur)); backdrop-filter: blur(var(--h-blur));
   box-shadow: 0 0 0 1px rgba(var(--h-shade), .06), 0 60px 100px -60px rgba(var(--h-shade), .55);
 }
 
@@ -264,8 +264,8 @@
 .planSlot { display: grid; }
 .plan {
   position: relative; display: grid; align-content: start; gap: 12px; padding: 20px; border: 1px solid rgba(255, 255, 255, .8);
-  border-radius: 24px; background: rgba(255, 255, 255, .6); backdrop-filter: blur(var(--h-blur)) saturate(1.6);
-  -webkit-backdrop-filter: blur(var(--h-blur)) saturate(1.6);
+  border-radius: 24px; background: rgba(255, 255, 255, .6); -webkit-backdrop-filter: blur(var(--h-blur)) saturate(1.6);
+  backdrop-filter: blur(var(--h-blur)) saturate(1.6);
   box-shadow: inset 0 1px 0 #fff, 0 0 0 1px rgba(var(--h-shade), .06), 0 30px 60px -36px rgba(var(--h-shade), .38);
 }
 .plan[data-recommended='true'] { border-color: transparent; background: rgba(255, 255, 255, .86); }
