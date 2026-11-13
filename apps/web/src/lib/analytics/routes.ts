@@ -44,6 +44,7 @@ const APP_TEMPLATES = [
   // MOBILE-UX: a phone's 对话 and 功能 pages; neither address carries a key or a record ID.
   '/app/chats',
   '/app/tools',
+  '/app/integrations', // INTEGRATION-SHOTVIVA: the integrations page (no id in its path).
   '/app/expert-consult',
   '/app/runtime',
   '/app/positioning',
