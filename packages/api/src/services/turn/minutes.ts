@@ -168,7 +168,8 @@ export async function runMinutesTurn(deps: ChatDeps, input: MinutesInput, emit: 
     const code = stopped ? stopped.code : error instanceof TurnStop ? error.code : error instanceof TurnDatabaseError ? error.code : 'TURN_FAILED';
     // Nothing delivered: the user pays nothing; an unknown outcome waits for recovery. A paused turn is never kept (no resume for
     // minutes): closed as failed and refunded, the user asks again after topping up.
-    const plan = code === 'TURN_PAUSED_FOR_CREDITS' ? { kind: 'failed' as const, refundAll: true } : CLOSES[code] ?? { kind: 'failed' as const, refundAll: true };
+    const refunded = { kind: 'failed' as const, refundAll: true };
+    const plan = code === 'TURN_PAUSED_FOR_CREDITS' ? refunded : CLOSES[code] ?? refunded;
     if (answered) noteUnsavedAnswer('minutes', turnId, code);
     await swallow('turn_close_failed', close(plan.kind, { refundAll: plan.refundAll, failureCode: code.toLowerCase() }), undefined,
       { category: 'ai' });

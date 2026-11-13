@@ -20,7 +20,8 @@ vi.mock('./admission/admissionConfiguration', async original => ({ ...await orig
       { model: 'openai/gpt-6-luna', purpose: 'attached_organizer', credits: 15 }, { model: 'openai/gpt-6-luna', purpose: 'skill', credits: 99 }] } }],
   error: null }) }));
 vi.mock('./settings/purposeBudgets', async original => ({ ...await original<object>(), readPurposeBudgets: async () => null }));
-vi.mock('./admission/newWorkGate', async original => ({ ...await original<object>(), readAdmissionSettings: async () => ({ ok: true, identityGuard: false }) }));
+vi.mock('./admission/newWorkGate', async original => ({ ...await original<object>(),
+  readAdmissionSettings: async () => ({ ok: true, identityGuard: false }) }));
 vi.mock('./agent/context', async original => ({ ...await original<object>(), assertRuntimeRequestCapacity: () => undefined }));
 vi.mock('./provider/providerRequest', async original => ({ ...await original<object>(),
   openRouterRequestBody: (_body: string, options: { context: Record<string, unknown>; phase: string }) => { h.request.push(options); return 'REQUEST'; } }));
@@ -59,7 +60,10 @@ function harness(over: { replay?: boolean; openError?: string; erased?: boolean;
     args: (name: string) => rpc.find(([n]) => n === name)![1] };
 }
 type Run = { exchange: (s: number, b: string) => Promise<string>; onText: (d: string) => void; instructions: string; input: string };
-const runs = (text: string) => { h.call.mockResolvedValue('{}'); h.runtime.mockImplementation(async (o: Run) => { await o.exchange(1, '{}'); o.onText(text); return text; }); };
+const runs = (text: string) => {
+  h.call.mockResolvedValue('{}');
+  h.runtime.mockImplementation(async (o: Run) => { await o.exchange(1, '{}'); o.onText(text); return text; });
+};
 
 describe('kind=minutes on the turn core (CONTENT-CONVERSATION-2)', () => {
   beforeEach(() => { h.request.length = 0; h.call.mockReset(); h.runtime.mockReset(); h.chatQuote.mockReset(); h.chatQuote.mockResolvedValue(quote); });
@@ -120,7 +124,8 @@ describe('kind=minutes on the turn core (CONTENT-CONVERSATION-2)', () => {
   });
 
   it('keeps the newest messages that fit, oldest first', () => {
-    const many = Array.from({ length: 5 }, (_, i) => ({ seq: i + 1, role: (i % 2 ? 'assistant' : 'user') as 'user' | 'assistant', content: 'm' + i, contentHash: hash }));
+    const many = Array.from({ length: 5 }, (_, i) =>
+      ({ seq: i + 1, role: (i % 2 ? 'assistant' : 'user') as 'user' | 'assistant', content: 'm' + i, contentHash: hash }));
     const all = minutesTranscript(many, 10_000);
     expect(all.messages).toBe(5);
     expect(all.text.startsWith('用户：m0')).toBe(true);
