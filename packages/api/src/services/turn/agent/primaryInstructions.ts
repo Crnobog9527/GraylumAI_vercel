@@ -2,6 +2,7 @@
 import {OWN_POSTS_INSTRUCTIONS} from './workspacePosts';
 import {POSITIONING_FALLBACK,POSITIONING_FALLBACK_INSTRUCTIONS} from '../admission/positioningFallback';
 import type {VoiceProfile} from '../../voice/profile';
+import type {VoiceStats} from '../../voice/stats';
 import {frozenReplyRule} from './replyLanguage';
 export {readReplySetting} from './replyLanguage';
 /** The system instruction of an ordinary free conversation turn without a Skill. Admission and the FUSION-COMPARE columns
@@ -96,9 +97,11 @@ export function libraryAddendum(references:boolean,retrieval:boolean):string {
 /** VOICE (Master Plan 5.3 step 4): a writing Skill run carries the user's confirmed voice profile. Admission freezes only
  * {guide, versionId}; the text is read for that version when the run executes (a deleted version is never read again), and
  * admission sizes the same text. VOICE_GUIDE versions the wording so earlier executions replay byte-identical. */
-export const VOICE_GUIDE='voice-v3';
+export const VOICE_GUIDE='voice-v4';
+/** VOICE-2 PR-2: what the administrator's switch falls back to (system_settings voice_examples = false). */
+export const VOICE_GUIDE_FALLBACK='voice-v3';
 /** Wordings an execution can have been frozen with; each replays its own text byte-identical. */
-export const VOICE_GUIDES=['voice-v1','voice-v2','voice-v3'] as const;
+export const VOICE_GUIDES=['voice-v1','voice-v2','voice-v3','voice-v4'] as const;
 /** Owner 2026-10-23 (A): with no confirmed profile yet, the coach points to the library page once instead of learning in chat. */
 export const VOICE_HINT_INSTRUCTIONS=
   '\n\nWriting voice (host rule): the user has not set up their own writing voice yet. Once, at the end of this reply, '+
@@ -106,8 +109,18 @@ export const VOICE_HINT_INSTRUCTIONS=
   'their voice in [资料库 · 我的文风](/app/library?tab=voice) and write like them. Skip it if it was already said in this conversation.';
 /** voice-v3 lists only word-sized phrases: a longer "phrase" is a whole sentence of the samples and could be copied. */
 export const VOICE_PHRASE_MAX=12;
-export function voiceAddendum(profile:VoiceProfile,guide:string=VOICE_GUIDE):string {
-  const v2=guide==='voice-v2',v3=guide==='voice-v3';
+/** VOICE-2 PR-2 (voice-v4): the code-computed writing stats as one line of numbers (VoiceStats, 0543). */
+export function voiceStatsLine(stats:VoiceStats):string {
+  if(!stats.sentences)return '';
+  const o=stats.openings,p=stats.perThousandChars;
+  return `\n- 写作数据（代码统计，按这些数字大致对齐）：平均每句 ${stats.avgSentenceChars} 字，短句（≤10 字）占 ${stats.shortSentenceShare}%，`+
+    `长句（≥30 字）占 ${stats.longSentenceShare}%；段落开头：问句 ${o.question}%、数字或列表 ${o.number}%、第一人称 ${o.firstPerson}%；`+
+    `每千字：感叹号 ${p.exclamation}、问号 ${p.question}、省略号 ${p.ellipsis}、表情 ${p.emoji}；`+
+    `平均每篇 ${stats.avgParagraphsPerDocument} 段、每段 ${stats.avgParagraphChars} 字；列表段落占 ${stats.listShare}%`;
+}
+export function voiceAddendum(profile:VoiceProfile,guide:string=VOICE_GUIDE,stats?:VoiceStats|null):string {
+  // voice-v4 is voice-v3 (no sample passages in the description) plus the stats line.
+  const v4=guide==='voice-v4',v2=guide==='voice-v2',v3=guide==='voice-v3'||v4;
   const line=(label:string,value:string)=>value?`\n- ${label}：${value}`:'';
   const list=(label:string,values:string[])=>values.length?`\n- ${label}：${values.join('、')}`:'';
   const phrases=v3?profile.phrases.filter(phrase=>[...phrase].length<=VOICE_PHRASE_MAX):profile.phrases;
@@ -122,13 +135,14 @@ export function voiceAddendum(profile:VoiceProfile,guide:string=VOICE_GUIDE):str
     'If the user asks for a different style this time, follow the user.'+
     '\n<user_voice>'+line('语气',profile.tone)+line('句子长短',profile.sentenceLength)+line('开头方式',profile.openings)+
     line('观点强弱',profile.stance)+list('常用表达',phrases)+list('不会用的表达',profile.avoid)+line('各平台差异',profile.platforms)+
+    (v4&&stats?voiceStatsLine(stats):'')+
     (v3?'':profile.samples.map((sample,index)=>`\n- 原文片段 ${index+1}${v2?'（只看语气，不可照抄）':''}：${sample}`).join(''))+
     '\n</user_voice>';
 }
 /** The voice paragraph of an execution: its own frozen wording (never another), the one-time hint without a profile, or nothing. */
-export function voiceText(voice?:{guide:string;profile?:VoiceProfile}):string {
+export function voiceText(voice?:{guide:string;profile?:VoiceProfile;stats?:VoiceStats|null}):string {
   if(!voice||!(VOICE_GUIDES as readonly string[]).includes(voice.guide))return '';
-  return voice.profile?voiceAddendum(voice.profile,voice.guide):VOICE_HINT_INSTRUCTIONS;
+  return voice.profile?voiceAddendum(voice.profile,voice.guide,voice.stats):VOICE_HINT_INSTRUCTIONS;
 }
 export function withPrimaryAddenda(instructions:string,
   context:{workspaceContext?:boolean;network?:string;positioningGate?:string;replyLanguage?:string;

@@ -104,10 +104,32 @@ describe('a free chat\'s tools from the route\'s dependencies (CORE-PATH-V2 V2-6
   it('the catalog voice goes to the per-user segment with its version, never the shared one', async () => {
     const voice = vi.fn(async () => ({ text: '\nWriting voice', versionId: 'v1' }));
     const setup = await prepare({ skills, voice });
-    expect(voice).toHaveBeenCalledWith(actorId, catalog);
+    expect(voice).toHaveBeenCalledWith(actorId, catalog, true);
     expect(setup.userInstructions).toBe('\nWriting voice');
     expect(setup.voiceVersionId).toBe('v1');
     expect(setup.sharedInstructions(false)).not.toContain('Writing voice');
+  });
+
+  // VOICE-2 PR-2: only a load of a flagged Skill reads and adds the examples; the switch off is passed to the voice read.
+  it('a load of a voice Skill adds the past pieces to its result; other loads, and replies without a load, read none', async () => {
+    const writer = '00000000-0000-4000-8000-000000000009';
+    const own = [entry('Hooks'), entry('Writer', { usesVoice: true as const, moduleId: writer })];
+    const prepared = new Map([['Hooks', JSON.stringify({ name: 'Hooks', instructions: 'h' })],
+      ['Writer', JSON.stringify({ name: 'Writer', instructions: 'w' })]]);
+    const read = vi.fn(async () => [{ text: '练完腿走路都打颤。' }]);
+    const voice = vi.fn(async () => ({ text: '\nWriting voice', versionId: 'v1', examples: { modules: [writer], read } }));
+    const setup = await prepare({ skills: async () => ({ catalog: own, prepared }), voice });
+    const built = await build(setup, false);
+    expect(read).not.toHaveBeenCalled();
+    const loadSkill = built.tools.find(tool => tool.name === 'load_skill')!;
+    expect(JSON.parse(String(await loadSkill.execute({ name: 'Hooks' }, 'c1')))).toEqual({ name: 'Hooks', instructions: 'h' });
+    expect(read).not.toHaveBeenCalled();
+    const loaded = JSON.parse(String(await loadSkill.execute({ name: 'Writer' }, 'c2')));
+    expect(read).toHaveBeenCalledWith('x');
+    expect(loaded.writingVoiceExamples).toContain('练完腿走路都打颤。');
+    expect(setup.userInstructions).not.toContain('练完腿');
+    await prepare({ skills: async () => ({ catalog: own, prepared }), voice }, { voice_examples: false });
+    expect(voice).toHaveBeenLastCalledWith(actorId, own, false);
   });
 
   it('a voice that cannot be read leaves the turn without it; no catalog means no voice read', async () => {

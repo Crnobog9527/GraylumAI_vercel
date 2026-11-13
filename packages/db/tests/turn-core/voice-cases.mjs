@@ -199,4 +199,42 @@ export async function voiceCases(t){
   assert.deepEqual(copy,{stats,documents:[{documentId:read,type:'script',topics:['下班','做饭'],edited:true}]});
   report.checks.push('voice 2.0: stats and labels saved with the profile (only for documents read), malformed ones refused, a label corrected only by its owner on a document the version read, an edited profile keeps them');
  }
+ // 9. VOICE-2 PR-2 (0544): voice_examples_read gives the opening text of the version's own documents only: the owner's
+ // confirmed (or superseded) version, a document it read at the same content version, still ready; at most three; the rest left
+ // out. voice_profile_read carries the stats and labels.
+ {
+  const a=await account(1000),other=await account(1000);
+  const doc=async(actor,body,{status='ready'}={})=>{const id=randomUUID();
+   await c.query(`insert into library_documents(id,actor_id,request_id,kind,format,purpose,filename,status,original_bytes,text_bytes)
+    values($1,$2,$3,'document','txt','authored','x.txt',$4,10,10)`,[id,actor.actor,randomUUID(),status]);
+   await c.query("insert into library_document_segments(document_id,actor_id,ordinal,body,source) values($1,$2,0,$3,'extracted')",[id,actor.actor,body]);
+   return id;};
+  const [d1,d2,d3,d4,stale,notRead]=[await doc(a,'第一篇'),await doc(a,'第二篇'),await doc(a,'第三篇'),await doc(a,'第四篇'),await doc(a,'改过的'),await doc(a,'没读过')];
+  const theirs=await doc(other,'别人的');
+  const src=[d1,d2,d3,d4,stale,theirs].map(id=>({documentId:id,contentVersion:1}));
+  const vid=randomUUID();
+  await c.query(`insert into voice_profile_versions(id,actor_id,request_id,version,status,profile,sources,stats,documents,confirmed_at)
+   values($1,$2,$3,1,'confirmed',$4,$5,$6,$7,now())`,[vid,a.actor,randomUUID(),JSON.stringify(profile),JSON.stringify(src),
+   JSON.stringify({sentences:1}),JSON.stringify([{documentId:d1,type:'post',topics:['做饭']}])]);
+  await c.query('update library_documents set content_version=2 where id=$1',[stale]);
+  const svc=async(sql,args,role='service_role')=>{await c.query('begin');try{await c.query(`set local role ${role}`);
+   const v=await one(sql,args);await c.query('commit');return v;}catch(e){await c.query('rollback');throw e;}};
+  const read=(actor,v,ids)=>svc('select voice_examples_read($1,$2,$3) v',[actor,v,ids]);
+  const texts=async(...args)=>(await read(...args)).map(x=>x.text);
+  assert.deepEqual(await texts(a.actor,vid,[d2,d1]),['第二篇','第一篇'],'in the order asked');
+  assert.deepEqual(await texts(a.actor,vid,[d1,d2,d3,d4]),['第一篇','第二篇','第三篇'],'at most three');
+  assert.deepEqual(await texts(a.actor,vid,[stale,notRead,theirs]),[],'changed since, not read, or another account\'s: left out');
+  assert.deepEqual(await texts(other.actor,vid,[d1]),[],'another account naming this version reads nothing');
+  await c.query("update voice_profile_versions set status='draft' where id=$1",[vid]);
+  assert.deepEqual(await texts(a.actor,vid,[d1]),[],'a draft is not a voice in use');
+  await c.query("update voice_profile_versions set status='confirmed' where id=$1",[vid]);
+  const pr=await svc('select voice_profile_read($1,$2) v',[a.actor,vid]);
+  assert.deepEqual([pr.stats,pr.documents.length,pr.profile.tone],[{sentences:1},1,profile.tone]);
+  await c.query("update library_documents set deleted_at=now() where id=$1",[d2]).catch(()=>{});
+  const after=await one('select count(*)::int v from voice_profile_versions where id=$1',[vid]);
+  if(after) assert.deepEqual(await texts(a.actor,vid,[d2]),[],'a deleted document is never read');
+  assert.match(await refusal(read(a.actor,vid,[d1]).then(()=>svc('select voice_examples_read($1,$2,$3) v',[a.actor,vid,[d1]],'authenticated'))),
+   /permission denied/,'only the service role');
+  report.checks.push('voice 2.0 examples: only the owner\'s confirmed version, documents it read at the same content version and still there, at most three, in order; service role only; voice_profile_read carries stats and labels');
+ }
 }

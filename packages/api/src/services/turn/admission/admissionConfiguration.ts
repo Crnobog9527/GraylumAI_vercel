@@ -4,6 +4,7 @@
  * This code is proprietary and confidential.
  */
 import { COACH_SWITCH, REVIEW_SWITCH } from '../../publishMonitor/reviewSettings';
+import { VOICE_EXAMPLES_SETTING } from './voiceExamplesSetting';
 import type {SupabaseClient} from '@supabase/supabase-js';
 import {RUNTIME_RATE_LIMIT_KEY} from '../settings/rateLimitSettings';
 import {MODEL_IDENTITY_GUARD_KEY} from '../../modelIdentity/guardSetting';
@@ -39,7 +40,7 @@ export async function readAdmissionConfiguration(admin: SupabaseClient): Promise
       LIBRARY_AGENT_READ_KEY, LIBRARY_RETRIEVAL_KEY, OWN_POSTS_SWITCH, 'publish_monitor_enabled', REVIEW_SWITCH, COACH_SWITCH,
       PAYG_HOST_SETTING, PAYG_PRODUCTION_SETTING, BILLING_UNIT_SETTING_KEYS.creditsPerUsd, BILLING_UNIT_SETTING_KEYS.multiplier,
       CHAT_RESEARCH_KEY, RESEARCH_THRESHOLDS_KEY, PROVIDER_PRICES_KEY, RW_V2_KEY, CORE_PATH_SETTING, RUNTIME_PAYG_SETTING,
-      REPORT_PRICE_KEY,
+      REPORT_PRICE_KEY, VOICE_EXAMPLES_SETTING,
     ]));
   } catch (error) { return {data: null, error}; }
 }

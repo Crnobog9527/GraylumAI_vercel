@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {describe, expect, it} from 'vitest';
-import {FREE_CHAT_BASE_INSTRUCTIONS,FREE_CHAT_POSITIONING_REDIRECT,freeChatInstructions,REPLY_LANGUAGE,REPLY_LANGUAGE_INSTRUCTIONS,VOICE_GUIDE,VOICE_GUIDES,WORKSPACE_STRATEGY_GUIDE,voiceAddendum,withPrimaryAddenda} from './primaryInstructions';
+import {FREE_CHAT_BASE_INSTRUCTIONS,FREE_CHAT_POSITIONING_REDIRECT,freeChatInstructions,REPLY_LANGUAGE,REPLY_LANGUAGE_INSTRUCTIONS,VOICE_GUIDE,VOICE_GUIDES,WORKSPACE_STRATEGY_GUIDE,voiceAddendum,withPrimaryAddenda, voiceStatsLine } from './primaryInstructions';
 import {sourceToolBytes} from '../research/sourceRuntimeTool';
 import {agentTurnInstructions} from '../../opc/agentTurnPrompt';
 
@@ -101,7 +101,7 @@ describe('VOICE wording versions (acceptance step 8: the draft must not copy the
   it('the current wording gives no sample passage at all and lists only word-sized phrases', () => {
     const long = '哎下班到家都七点了咋整啊真的是服了';
     const text = voiceAddendum({ ...profile, phrases: ['咋整', long] });
-    expect(VOICE_GUIDE).toBe('voice-v3');
+    expect(VOICE_GUIDE).toBe('voice-v4');
     expect(text).toContain('No sample passages are given on purpose');
     expect(text).toContain('- 常用表达：咋整\n');
     expect(text).not.toContain(long);
@@ -119,7 +119,21 @@ describe('VOICE wording versions (acceptance step 8: the draft must not copy the
     expect(text).not.toContain('Never copy a sentence');
     expect(text).toContain('- 原文片段 1：第一段原文');
     expect(withPrimaryAddenda('B', { voice: { guide: 'voice-v1', profile } })).toBe('B' + text);
-    expect(VOICE_GUIDES).toEqual(['voice-v1', 'voice-v2', 'voice-v3']);
+    expect(VOICE_GUIDES).toEqual(['voice-v1', 'voice-v2', 'voice-v3', 'voice-v4']);
+  });
+  // VOICE-2 PR-2: voice-v4 is voice-v3 plus the code-computed stats line; voice-v3 replays without it byte for byte.
+  it('voice-v4 adds the writing stats as numbers; voice-v3 (the fallback) replays without them', () => {
+    const stats = { documents: 4, sentences: 40, avgSentenceChars: 14, shortSentenceShare: 30, longSentenceShare: 10,
+      openings: { question: 25, number: 5, firstPerson: 40 }, perThousandChars: { exclamation: 3.5, question: 2, ellipsis: 1, emoji: 0.5 },
+      avgParagraphsPerDocument: 3, avgParagraphChars: 60, listShare: 10 };
+    const v4 = voiceAddendum(profile, 'voice-v4', stats), v3 = voiceAddendum(profile, 'voice-v3', stats);
+    expect(v4).toContain('平均每句 14 字');
+    expect(v4).toContain('问句 25%');
+    expect(v4).toContain('No sample passages are given on purpose');
+    expect(v3).not.toContain('写作数据');
+    expect(v4.replace(voiceStatsLine(stats), '')).toBe(voiceAddendum(profile, 'voice-v3'));
+    expect(withPrimaryAddenda('B', { voice: { guide: 'voice-v4', profile, stats } } as never)).toBe('B' + v4);
+    expect(voiceStatsLine({ ...stats, sentences: 0 })).toBe('');
   });
   it('an unknown wording adds nothing', () => {
     expect(withPrimaryAddenda('B', { voice: { guide: 'voice-v0', profile } })).toBe('B');
