@@ -11,6 +11,8 @@
 export type IntegrationModule = {
   id: string;
   name: string;
+  /** The product's own mark, a square picture under public/integrations (absent: a plain picture icon). */
+  icon?: string;
   /** One line under the name. */
   tagline: string;
   /** The product's belief, under the one line (absent: none). */
@@ -32,6 +34,8 @@ export const INTEGRATIONS: readonly IntegrationModule[] = [
   {
     id: 'shotviva',
     name: 'Shotviva',
+    // Owner 2026-11-13: Shotviva's own icon (their 512px file, kept here at 192px).
+    icon: '/integrations/shotviva.png',
     // Owner 2026-11-13 ("文案可以，就按这版改"): the one line, the belief and inGraylum's second line, word for word.
     tagline: 'Shotviva 是一款为普通人和小商家打造的 AI 照片工作室：用手机拍下的真实照片，选一个模板，三步就能做出能直接用的商品图、菜品图和宣传图。',
     philosophy: '我们相信，好看的照片不该只属于会写提示词、会用专业软件的人。Shotviva 保留你拍下的真实主体，只帮你换光线、场景和风格；不用写任何提示词，先看到效果再动手。',

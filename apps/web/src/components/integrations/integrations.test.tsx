@@ -6,14 +6,16 @@ const mocks = vi.hoisted(() => ({ status: vi.fn(), disconnect: vi.fn() }));
 vi.mock('@/trpc/client', () => ({ trpc: { useUtils: () => ({ connectors: { shotvivaStatus: { invalidate: vi.fn() } } }),
   connectors: { shotvivaStatus: { useQuery: mocks.status }, shotvivaDisconnect: { useMutation: mocks.disconnect } } } }));
 import { INTEGRATIONS } from '@/lib/integrations/catalog';
-import { IntegrationDetailBody } from './IntegrationDetail';
+import { IntegrationDetailBody, IntegrationLinks } from './IntegrationDetail';
 import { IntegrationsView } from './IntegrationsView';
 import type { ShotvivaState } from './use-shotviva';
 
 const shotviva = INTEGRATIONS[0]!;
 const state = (data: unknown, over: Partial<ShotvivaState> = {}) => ({ status: { data, isLoading: false }, connect: vi.fn(),
   connecting: false, error: null, disconnect: { mutate: vi.fn(), isPending: false, isError: false }, ...over }) as unknown as ShotvivaState;
-const body = (s: ShotvivaState) => renderToStaticMarkup(<IntegrationDetailBody module={shotviva} shotviva={s}/>);
+// What the dialog shows under the product's own two paragraphs, and its foot.
+const body = (s: ShotvivaState) => renderToStaticMarkup(<><IntegrationDetailBody module={shotviva} shotviva={s}/>
+  <IntegrationLinks module={shotviva} shotviva={s}/></>);
 
 beforeEach(() => {
   vi.clearAllMocks();

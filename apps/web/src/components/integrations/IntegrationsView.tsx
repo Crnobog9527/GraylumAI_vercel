@@ -1,9 +1,9 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 'use client';
 import { useState } from 'react';
-import { ChevronRight, Image as ImageIcon } from 'lucide-react';
+import { ChevronRight } from 'lucide-react';
 import { connectMessage, INTEGRATIONS, type IntegrationModule } from '@/lib/integrations/catalog';
-import { IntegrationDetail } from './IntegrationDetail';
+import { IntegrationDetail, IntegrationIcon } from './IntegrationDetail';
 import { useShotviva, type ShotvivaState } from './use-shotviva';
 import styles from './integrations.module.css';
 
@@ -23,7 +23,7 @@ export function IntegrationsView({ result }: { result: { connected?: string | nu
         {INTEGRATIONS.map(module => (
           <li key={module.id}>
             <button type="button" className={styles.card} onClick={() => setOpenId(module.id)} aria-haspopup="dialog">
-              <i aria-hidden="true"><ImageIcon /></i>
+              <IntegrationIcon module={module}/>
               <span className={styles.cardText}><b>{module.name}</b><span>{module.tagline}</span></span>
               <StatusChip module={module} shotviva={shotviva}/>
               <ChevronRight size={18} aria-hidden="true" className={styles.chevron}/>

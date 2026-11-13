@@ -12,34 +12,89 @@
   padding: 14px; border: 0; border-radius: 20px; background: #fff; box-shadow: 0 0 0 1px rgba(31, 30, 28, .09); text-align: left;
   color: inherit; font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparent; }
 .card:focus-visible { outline: 2px solid #1f1e1c; outline-offset: 2px; }
-.card i { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 14px; background: #fff4dc; }
-.card i svg { width: 22px; height: 22px; stroke-width: 1.8; }
+.mark { display: block; flex: none; width: 44px; height: 44px; }
+i.mark { display: grid; place-items: center; border-radius: 14px; background: #fff4dc; }
+i.mark svg { width: 22px; height: 22px; stroke-width: 1.8; }
 .cardText { display: grid; gap: 3px; min-width: 0; }
 .cardText b { font-size: 16px; font-weight: 650; }
 .cardText span { color: #77736b; font-size: 13px; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .chip { padding: 2px 9px; border-radius: 99px; background: #f4f2ee; color: #77736b; font-size: 12px; white-space: nowrap; }
 .chip[data-connected='true'] { background: #e9f3ea; color: #1f5130; }
 .chevron { color: #77736b; }
-.detail { max-height: 88vh; overflow-y: auto; }
-.detailTitle { font-size: 22px; font-weight: 700; }
-.tagline { color: #3a3833; font-size: 14px; line-height: 1.6; }
-.philosophy { margin: 4px 0 0; color: #77736b; font-size: 13px; line-height: 1.6; }
-.section h3 { margin: 14px 0 6px; font-size: 14px; font-weight: 650; }
-.section ul { display: grid; gap: 6px; margin: 0; padding-left: 18px; font-size: 14px; line-height: 1.55; color: #3a3833; }
-.connection { display: grid; gap: 10px; margin-top: 16px; padding: 12px 14px; border-radius: 14px; background: #f7f5f1; font-size: 14px; line-height: 1.5; }
+
+/* A product's introduction: the signed-in dialog of DESIGN.md "Light foundation" (white, 18px, the title row and the actions
+   divided from what scrolls between them). The dialog carries `.light`, so the --gl-* values below are the light foundation's. */
+.detail { display: flex; flex-direction: column; gap: 0; }
+.head { display: flex; flex: none; align-items: center; gap: 14px; }
+.head .mark { width: 48px; height: 48px; }
+.detailTitle { color: var(--gl-text); font-size: 20px; font-weight: 600; line-height: 28px; letter-spacing: -.01em; }
+.scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; border-block: 1px solid var(--gl-border); }
+.tagline { margin: 0; color: var(--gl-text); font-size: 15px; line-height: 1.7; }
+.philosophy { margin: 8px 0 0; color: var(--gl-text-secondary-aa); font-size: 13px; line-height: 1.7; }
+
+/* The connection: Graylum and the product with what is between them, the state in words, and the one thing to do about it. */
+.connection { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 12px 16px; margin-top: 18px; padding: 16px;
+  border: 1px solid var(--gl-border); border-radius: var(--gl-radius-card); background: var(--gl-surface-subtle);
+  color: var(--gl-text-body); font-size: 14px; line-height: 22px; }
+.connection[data-connection='connected'] { border-color: #dcebdf; background: var(--gl-success-bg); }
 .connection p { margin: 0; }
+.connection > p { align-self: center; }
+.connection b { color: var(--gl-text); font-weight: 600; }
+.connection[data-connection='connected'] b { color: var(--gl-success); }
+.connectionBody { display: grid; gap: 12px; min-width: 0; padding-top: 5px; }
 .connectionActions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.confirmText { flex-basis: 100%; color: #77736b; font-size: 13px; }
-.links { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 18px; }
-.primary, .secondary, .danger { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 16px;
-  border-radius: 12px; font-size: 15px; font-weight: 600; text-decoration: none; cursor: pointer; border: 0; }
-.primary { background: #1f1e1c; color: #fff; }
-.secondary { background: #fff; color: #1f1e1c; box-shadow: inset 0 0 0 1px rgba(31, 30, 28, .16); }
-.danger { background: #b42318; color: #fff; }
+.confirmText { flex-basis: 100%; color: var(--gl-text-body); font-size: 13px; line-height: 20px; }
+.pair { display: inline-flex; align-items: center; }
+.pair img, .pair i { display: block; width: 32px; height: 32px; border-radius: 9px; }
+.pair i { background: var(--gl-surface-muted); }
+.wire { position: relative; display: grid; place-items: center; width: 34px; height: 32px; }
+.wire::before { content: ''; position: absolute; top: 50%; right: 4px; left: 4px; border-top: 2px dotted #bdbdbd; translate: 0 -50%; }
+.pair[data-linked='true'] .wire::before { right: 0; left: 0; border-top: 2px solid var(--gl-success); }
+.wire svg { position: relative; width: 18px; height: 18px; padding: 4px; border-radius: 50%; background: var(--gl-success); color: #fff; }
+
+/* The introduction, row by row: what the row is about on the left, its lines on the right. */
+.rows { margin-top: 20px; }
+.row { display: grid; grid-template-columns: 136px minmax(0, 1fr); gap: 16px; padding: 16px 0; border-top: 1px solid var(--gl-border); }
+.row:last-child { padding-bottom: 0; }
+.row h3 { margin: 0; color: var(--gl-text); font-size: 13px; font-weight: 600; line-height: 22px; }
+.row ul { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; color: var(--gl-text-body); font-size: 14px; line-height: 22px; }
+.row li { position: relative; padding-left: 14px; }
+.row li::before { content: ''; position: absolute; top: 9px; left: 1px; width: 4px; height: 4px; border-radius: 50%; background: #bdbdbd; }
+
+.links { display: flex; flex: none; justify-content: flex-end; gap: 8px; }
+.primary, .secondary, .danger, .quiet { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 36px;
+  padding: 0 14px; border: 0; border-radius: var(--gl-radius-control); font: inherit; font-size: 13px; font-weight: 500; line-height: 20px;
+  text-decoration: none; white-space: nowrap; cursor: pointer; transition: background-color var(--gl-motion), box-shadow var(--gl-motion), color var(--gl-motion); }
+.primary { background: var(--gl-action); color: var(--gl-action-text); }
+.primary:hover { background: var(--gl-action-hover); }
+.secondary { background: var(--gl-surface); color: var(--gl-text); box-shadow: inset 0 0 0 1px var(--gl-border-control); }
+.secondary:hover { background: var(--gl-surface-subtle); box-shadow: inset 0 0 0 1px var(--gl-border-strong); }
+.danger { background: var(--gl-error); color: #fff; }
+.quiet { margin-left: auto; padding: 0 10px; background: none; color: var(--gl-text-secondary-aa); }
+.quiet:hover { background: rgba(0, 0, 0, .05); color: var(--gl-text); }
+.primary:focus-visible, .secondary:focus-visible, .danger:focus-visible, .quiet:focus-visible { outline: 2px solid var(--gl-text); outline-offset: 2px; }
 .primary:disabled, .danger:disabled { opacity: .6; cursor: wait; }
-.error { color: #b42318; font-size: 13px; }
+.error { color: var(--gl-error); font-size: 13px; line-height: 20px; }
+
+@media (min-width: 640px) {
+  .detail { width: calc(100vw - 48px); max-width: 600px; max-height: min(88vh, 780px); padding: 0; overflow: hidden; }
+  .head { padding: 20px 56px 16px 24px; }
+  .scroll { padding: 20px 24px 24px; }
+  .links { padding: 14px 24px; }
+  .links .primary, .links .secondary { min-width: 112px; min-height: 40px; font-size: 14px; }
+}
 @media (max-width: 639px) {
   .page { padding: 18px 16px 28px; }
-  .detail { top: auto !important; bottom: 0 !important; left: 0 !important; right: 0 !important; transform: none !important;
-    width: 100% !important; max-width: none !important; border-radius: 22px 22px 0 0 !important; padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px)); }
+  /* The sheet's own padding (16px a side) stays; what scrolls reaches both edges of the screen, and so do its two lines. */
+  .head { padding: 0 40px 14px 0; }
+  .scroll { margin: 0 -16px; padding: 16px 16px 20px; }
+  .connection { grid-template-columns: minmax(0, 1fr); }
+  .connectionBody { padding-top: 0; }
+  .row { grid-template-columns: minmax(0, 1fr); gap: 6px; padding: 14px 0; }
+  /* Thumb-sized: 44px for what is pressed inside the sheet (its foot's two links are the sheet's own 48px). */
+  .primary, .secondary, .danger, .quiet { min-height: 44px; padding: 0 16px; font-size: 15px; }
+  .connection[data-connection='ready'] .primary { flex: 1; }
+  /* The foot is the sheet's own row of buttons (bottom-sheet.module.css `.bar`): 48px and round, as on the other sheets. */
+  .links .primary, .links .secondary { min-height: 48px; border-radius: 999px; }
 }
+@media (prefers-reduced-motion: reduce) { .primary, .secondary, .danger, .quiet { transition: none; } }
