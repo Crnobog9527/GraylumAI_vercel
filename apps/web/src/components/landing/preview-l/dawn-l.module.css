@@ -79,6 +79,9 @@
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .9), 0 0 0 1px rgba(20, 19, 18, .06), 0 30px 50px -24px rgba(120, 70, 0, .5);
 }
 .card h3 { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin: 0 0 5px; color: var(--j-muted); font-size: 12px; font-weight: 600; line-height: 1.5; }
+/* A title too long for its line, with the tag beside it, turns at a bracket or a comma and never inside a word
+   ("最终想得到什么 / （目标与变现方式）", not "…变 / 现方式）"); only a piece wider than the whole line is cut. */
+.card h3 { word-break: keep-all; overflow-wrap: anywhere; }
 /* Each card says it is an example, with the window's own tag (DemoTag), a size smaller here. */
 .card h3 > span { flex: none; margin: 0; font-size: 11px; line-height: 18px; }
 .card p { margin: 0; }

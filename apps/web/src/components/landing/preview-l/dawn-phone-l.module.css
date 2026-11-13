@@ -13,8 +13,13 @@
   /*
    * The menu: the whole screen under the top bar, each place a full-width row a thumb can hit, instead of a short list
    * hanging from the bar. The drawer is the header's own (SiteHeaderJ), shown and hidden as before.
+   *
+   * The bar's height is not one number (staging review of #1932: the menu was sized as the screen less 64px, the bar
+   * stood 52px tall there, and 12px of the page showed under the menu). So no number is written: while the menu is
+   * open the header is as tall as the screen, a column of the bar and the menu, and the menu takes what the bar leaves.
    */
-  .phone.phone header > [id]:not([hidden]) { height: calc(100dvh - 64px); max-height: none; background: rgba(250, 250, 249, .98); }
+  .phone.phone header:has(> [id]:not([hidden]) > nav) { display: flex; flex-direction: column; height: 100dvh; padding-bottom: 0; }
+  .phone.phone header > [id]:not([hidden]) { flex: 1 1 0; min-height: 0; max-height: none; background: rgba(250, 250, 249, .98); }
   .phone.phone header > [id] > nav { align-content: start; gap: 20px; padding-top: 8px; padding-bottom: calc(28px + env(safe-area-inset-bottom, 0px)); }
   .phone.phone header > [id] > nav > div > a {
     display: flex; align-items: center; justify-content: space-between; min-height: 54px; padding: 0;
