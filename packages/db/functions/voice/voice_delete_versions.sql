@@ -16,7 +16,8 @@ BEGIN
  ON CONFLICT(run_id) DO NOTHING;
  DELETE FROM voice_profile_versions WHERE actor_id=a AND id=ANY(ids);
  GET DIAGNOSTICS n=ROW_COUNT;
- -- CORE-PATH-V2: replies written with a deleted version leave the visible history (Owner 10-23: effective at once). The
+ -- Owner 10-23: a deletion is effective at once for the turns still running with this version; replies already shown stay
+ -- in the conversation (D7; VOICE-ABORT-FIX 0535: this used to hide every past turn bound to the version). The
  -- open turns bound to it are locked first, so a turn that closes waits for this commit, re-reads its tombstones, closes
  -- erased and saves nothing. The callers hold the account row (library_actor), which turn_close takes before its turn row,
  -- so a turn row held here is only ever held by a call write (turn row only): waiting on it cannot deadlock.
@@ -26,7 +27,7 @@ BEGIN
  DELETE FROM turn_call_raw r USING turns t WHERE t.actor_id=a AND t.kind='voice' AND t.policy->'voice'->>'versionId'=ANY(ids::text[])
   AND r.turn_id=t.id;
  UPDATE session_messages m SET visible=false FROM turns t
-  WHERE t.actor_id=a AND t.policy ? 'voiceVersionId' AND t.policy->>'voiceVersionId'=ANY(ids::text[])
+  WHERE t.actor_id=a AND t.state<>'closed' AND t.policy ? 'voiceVersionId' AND t.policy->>'voiceVersionId'=ANY(ids::text[])
    AND m.session_id=t.session_id AND m.turn_id=t.id AND m.visible;
  RETURN n;
 END $function$;
