@@ -1336,6 +1336,20 @@ describe('paymentsRouter error sanitization', () => {
     expect(h.orderInserts[0].purchase_change_request.originalPrice).toBe('price_test_old');
   });
 
+  it('refuses a plan upgrade (an immediate card charge) for an account with an open or lost dispute (CHARGEBACK G4)', async () => {
+    const h = createSubscriptionChangeGuardHarness();
+    const input = { planId: h.targetPlanId, billingCycle: 'monthly' as const };
+    const quote = await getQuote(h, input);
+    const { DisputePurchaseBlocked, DISPUTE_OPEN_PURCHASE_MESSAGE } = await import('../services/payments/disputePurchaseBlock');
+    const blocked = () => new DisputePurchaseBlocked({ code: 'FORBIDDEN', message: DISPUTE_OPEN_PURCHASE_MESSAGE });
+    disputeBlock.assert.mockRejectedValueOnce(blocked()).mockRejectedValueOnce(blocked());
+    await expect(h.caller.previewSubscriptionPlanChange(input)).rejects.toMatchObject({ code: 'FORBIDDEN', message: DISPUTE_OPEN_PURCHASE_MESSAGE });
+    await expect(h.caller.changeSubscriptionPlan({ ...input, expected: quote }))
+      .rejects.toMatchObject({ code: 'FORBIDDEN', message: DISPUTE_OPEN_PURCHASE_MESSAGE });
+    expect(h.subscriptionUpdate).not.toHaveBeenCalled();
+    expect(h.orderInserts).toHaveLength(0);
+  });
+
   it.each(['missing', 'ambiguous'] as const)('rejects %s current paid-term source before provider dispatch', async (state) => {
     const h = createSubscriptionChangeGuardHarness();
     if (state === 'missing') h.grants.splice(0);
