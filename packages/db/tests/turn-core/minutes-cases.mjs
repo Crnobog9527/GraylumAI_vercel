@@ -33,9 +33,8 @@ export async function minutesCases(t){
   const next=await open(a);
   assert.deepEqual(next.history.map(h=>h.content),['我想做露营装备测评','先从帐篷开始']);
   await close(a,next.turnId,'failed',{messages:[],delivered:false,refundAll:true});
-  // Never in the page's conversation.
-  const view=await one('select turn_session_view($1,$2,0) v',[a.actor,a.session]);
-  assert.ok(!JSON.stringify(view.messages).includes('定了做帐篷测评'));
+  // Never in the page's conversation: the page reads visible rows only (turn_session_view), and the minutes row is not one.
+  assert.equal(await one("select count(*)::int v from session_messages where session_id=$1 and visible and content like '%帐篷测评%'",[a.session]),0);
   // Listed, newest first.
   const listed=await list(a);
   assert.equal(listed.length,1);
