@@ -150,4 +150,49 @@ export async function voiceCases(t){
   assert.equal(await balance(a),settled);
   report.checks.push('voice: a repeated request is one turn and one charge; a result for another version is refused');
  }
+ // 8. VOICE-2 PR-1 (0536): the code-computed stats and the documents' labels are saved with the profile, only for documents the
+ // version read; a malformed label set or an unknown key is refused; an edit of the confirmed profile copies them; the user can
+ // correct one document's label on their own version only.
+ {
+  const read=randomUUID(),stranger=randomUUID();
+  const sources=JSON.stringify([{documentId:read,contentVersion:1}]);
+  const a=await account(1000),id=randomUUID();
+  await c.query("insert into voice_profile_versions(id,actor_id,request_id,version,status,sources) values($1,$2,$3,1,'generating',$4::jsonb)",
+   [id,a.actor,randomUUID(),sources]);
+  const o=await openVoice(a,id);await call(a,o.turnId);
+  const stats={documents:1,sentences:3,avgSentenceChars:12};
+  const bad=async(extra,why)=>assert.match(await refusal(closeVoice(a,o.turnId,'completed',{result:{versionId:id,profile,...extra}})),
+   /TURN_KIND_RESULT_INVALID/,why);
+  await bad({stats:[1]},'stats must be an object');
+  await bad({documents:[{documentId:read,type:'tweet',topics:[]}]},'unknown type');
+  await bad({documents:[{documentId:read,type:'post',topics:['1','2','3','4','5','6']}]},'at most five topics');
+  await bad({documents:[{documentId:read,type:'post',topics:['话'.repeat(21)]}]},'a topic of at most twenty characters');
+  await bad({documents:[{documentId:read,type:'post',topics:[],secret:'x'}]},'no other key in a label');
+  await bad({extra:1},'no other key in the result');
+  const labels=[{documentId:read,type:'post',topics:['做饭']},{documentId:stranger,type:'article',topics:[]}];
+  await closeVoice(a,o.turnId,'completed',{result:{versionId:id,profile,stats,documents:labels}});
+  const row=(await c.query('select stats,documents,status from voice_profile_versions where id=$1',[id])).rows[0];
+  assert.deepEqual(row.stats,stats);
+  assert.deepEqual(row.documents,[labels[0]],'a label for a document the version did not read is dropped');
+  assert.equal(row.status,'draft');
+  // Correcting a label: the owner's own version and a document it labelled; anything else is refused.
+  const label=(actor,vid,did,type,topics,client=c)=>one('select voice_document_label_set($1,$2,$3,$4,$5) v',
+   [actor,vid,did,type,JSON.stringify(topics)],client);
+  await label(a.actor,id,read,'script',['下班','做饭']);
+  assert.deepEqual(await one('select documents v from voice_profile_versions where id=$1',[id]),
+   [{documentId:read,type:'script',topics:['下班','做饭'],edited:true}]);
+  const other=await account(1000);
+  assert.match(await refusal(label(other.actor,id,read,'post',[])),/VOICE_VERSION_GONE/,'another account');
+  assert.match(await refusal(label(a.actor,id,stranger,'post',[])),/VOICE_VERSION_GONE/,'a document the version did not read');
+  assert.match(await refusal(label(a.actor,id,read,'tweet',[])),/VOICE_INVALID/,'an unknown type');
+  const anon=await t.peer();
+  try{await anon.query('set role authenticated');
+   assert.match(await refusal(label(a.actor,id,read,'post',[],anon)),/permission denied/,'only the service role');}finally{await anon.end();}
+  // An edit of the confirmed profile is a new version: stats and labels go with it.
+  await one('select voice_profile_confirm($1,$2,1,$3) v',[a.actor,id,JSON.stringify(profile)]);
+  await one('select voice_profile_confirm($1,$2,2,$3) v',[a.actor,id,JSON.stringify({...profile,tone:'更口语'})]);
+  const copy=(await c.query("select stats,documents from voice_profile_versions where actor_id=$1 and version=2",[a.actor])).rows[0];
+  assert.deepEqual(copy,{stats,documents:[{documentId:read,type:'script',topics:['下班','做饭'],edited:true}]});
+  report.checks.push('voice 2.0: stats and labels saved with the profile (only for documents read), malformed ones refused, a label corrected only by its owner on a document the version read, an edited profile keeps them');
+ }
 }

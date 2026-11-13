@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
-import { NO_PLATFORM_DIFFERENCE, parseVoiceProfile, VOICE_INSTRUCTIONS, voiceInput, voiceProfile } from './profile';
+import { NO_PLATFORM_DIFFERENCE, parseVoiceDocuments, parseVoiceProfile, VOICE_INSTRUCTIONS, voiceInput, voiceProfile } from './profile';
 
 const material = [{ documentId: 'd1', filename: '旧笔记.md', text: '哎下班到家都七点了，咋整。\n一口锅搞定呗。' }];
 const both = ['哎下班到家都七点了，咋整。', '一口锅搞定呗。'];
@@ -41,5 +41,21 @@ describe('voiceInput', () => {
   it('puts each document under its own heading in order', () => {
     expect(voiceInput([...material, { documentId: 'd2', filename: null, text: 'B' }]))
       .toBe('### 文件 1：旧笔记.md\n哎下班到家都七点了，咋整。\n一口锅搞定呗。\n\n### 文件 2：未命名\nB');
+  });
+});
+
+describe('parseVoiceDocuments (VOICE-2 PR-1)', () => {
+  const two = [...material, { documentId: 'd2', filename: null, text: '第二篇' }];
+  it('labels every document read, by file number; an unknown type or a missing entry is other', () => {
+    const labels = parseVoiceDocuments(answer({ documents: [{ file: 2, type: 'script', topics: ['做饭', '做饭', ' 下班 '] },
+      { file: 1, type: 'tweet', topics: 'x' }] }), two);
+    expect(labels).toEqual([{ documentId: 'd1', type: 'other', topics: [] }, { documentId: 'd2', type: 'script', topics: ['做饭', '下班'] }]);
+    expect(VOICE_INSTRUCTIONS).toContain('documents');
+  });
+  it('bounds topics (five, twenty characters) and survives an answer that is not JSON', () => {
+    const many = Array.from({ length: 8 }, (_, i) => '话'.repeat(25) + i);
+    expect(parseVoiceDocuments(answer({ documents: [{ file: 1, type: 'post', topics: many }] }), material)[0]!.topics)
+      .toEqual(Array.from({ length: 5 }, () => '话'.repeat(20)).slice(0, 1));
+    expect(parseVoiceDocuments('不是 JSON', material)).toEqual([{ documentId: 'd1', type: 'other', topics: [] }]);
   });
 });

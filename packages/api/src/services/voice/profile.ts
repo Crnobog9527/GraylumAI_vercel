@@ -35,7 +35,37 @@ export const VOICE_INSTRUCTIONS = [
   '- avoid：这个人明显不会用的表达或腔调（例如书面套话、AI 腔），最多 12 条，每条不超过 80 字',
   `- platforms：如果能看出在不同平台写法不同（例如在某平台更短、更口语），写在这里；样文只有一种平台或看不出来，就原样写“${NO_PLATFORM_DIFFERENCE}”`,
   '- samples：2 到 3 段最能代表这个人说话方式的原文，必须从下面的文字里一字不改地摘出来，每段不超过 400 字',
+  // VOICE-2 PR-1: the same call labels each document, so writing can later pick past pieces of the same type, other topics.
+  '- documents：下面每个文件一项，按文件编号：{"file": 编号, "type": 类型, "topics": 话题}。type 只能是 post（社媒短帖）、article（长文）、'
+    + 'script（视频口播稿）、other（其他）之一；topics 是这篇讲的 1 到 5 个话题词，每个不超过 20 字',
 ].join('\n');
+
+export const VOICE_DOCUMENT_TYPES = ['post', 'article', 'script', 'other'] as const;
+export type VoiceDocumentLabel = { documentId: string; type: (typeof VOICE_DOCUMENT_TYPES)[number]; topics: string[] };
+
+/** VOICE-2 PR-1: the type and topics of each document read, from the same answer (no second call). A document the model left out,
+ * or labelled with something unusable, is "other" with no topics, so every read document has one label. */
+export function parseVoiceDocuments(answer: string, material: VoiceMaterial[]): VoiceDocumentLabel[] {
+  let items: unknown[] = [];
+  try {
+    const trimmed = answer.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+    const raw = JSON.parse(trimmed.slice(trimmed.indexOf('{'), trimmed.lastIndexOf('}') + 1)) as { documents?: unknown };
+    if (Array.isArray(raw?.documents)) items = raw.documents;
+  } catch { items = []; }
+  const byFile = new Map<number, { type?: unknown; topics?: unknown }>();
+  for (const item of items) {
+    if (item && typeof item === 'object' && Number.isInteger((item as { file?: unknown }).file)) {
+      byFile.set((item as { file: number }).file, item as { type?: unknown; topics?: unknown });
+    }
+  }
+  return material.map((doc, index) => {
+    const item = byFile.get(index + 1);
+    const type = VOICE_DOCUMENT_TYPES.find(known => known === item?.type) ?? 'other';
+    const topics = Array.isArray(item?.topics) ? [...new Set(item.topics.filter((t): t is string => typeof t === 'string')
+      .map(t => [...t.trim()].slice(0, 20).join('')).filter(Boolean))].slice(0, 5) : [];
+    return { documentId: doc.documentId, type, topics };
+  });
+}
 
 /** The user message: each document under its own heading, in the frozen order. */
 export function voiceInput(material: VoiceMaterial[]): string {

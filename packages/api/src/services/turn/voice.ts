@@ -18,7 +18,9 @@ import { ORGANIZER_INPUT_BYTES } from './mentorCatalog';
 import { startThresholdCredits, turnPolicy } from './policy';
 import { chatQuote, QuoteError } from './quote';
 import { SUMMARY_MODEL_SETTING } from '../artifacts/summaryPolicy';
-import { parseVoiceProfile, VOICE_INSTRUCTIONS, VOICE_OUTPUT_TOKENS, voiceInput, type VoiceMaterial } from '../voice/profile';
+import { parseVoiceDocuments, parseVoiceProfile, VOICE_INSTRUCTIONS, VOICE_OUTPUT_TOKENS, voiceInput,
+  type VoiceMaterial } from '../voice/profile';
+import { computeVoiceStats } from '../voice/stats';
 
 /*
  * CORE-PATH-V2 V2-12 B7 kind=voice: "学习我的文风" (Master Plan 5.3 steps 1-3), one call on the organizer (summary) model, no tools,
@@ -115,9 +117,12 @@ export async function runVoiceTurn(deps: ChatDeps, input: VoiceTurnInput): Promi
       },
     });
     // 4. An answer that is no usable profile is a confirmed failure: the cost is the platform's, the user's freeze comes back.
-    const profile = parseVoiceProfile(output || text, input.material);
+    const answer = output || text, profile = parseVoiceProfile(answer, input.material);
     if (!profile) return abandon('VOICE_FORMAT_INVALID');
-    const closed = await close('completed', { result: { versionId: input.versionId, profile } });
+    // VOICE-2 PR-1: the documents' types and topics from the same answer, and the writing stats computed by code (free).
+    const result = { versionId: input.versionId, profile, documents: parseVoiceDocuments(answer, input.material),
+      stats: computeVoiceStats(input.material.map(item => item.text)) };
+    const closed = await close('completed', { result });
     if (closed.closeKind === 'erased') return fail('TURN_TOMBSTONED', turnId);
     return { saved: true, turnId };
   } catch (error) {
