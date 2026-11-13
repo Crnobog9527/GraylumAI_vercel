@@ -5,11 +5,9 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { CheckCircle2, Loader2, LogOut, MailCheck, RefreshCw } from 'lucide-react';
 import { createClient } from '@/lib/supabase';
-import { getSafeErrorMessage } from '@/lib/safe-error-message';
 import { isEmailVerified, sanitizeRedirectTarget } from '@/lib/auth';
 import { buildAuthHref, resolveAuthAppUrl } from '@/lib/site-config';
 import { Button } from '@/components/ui/button';
-import { invisibleCaptchaOptions } from '@/lib/invisibleCaptcha';
 import {
   buildAuthCallbackUrl,
   parseVerifyReason,
@@ -146,21 +144,12 @@ function VerifyEmailPageContent() {
 
     setResending(true);
     const supabase = createClient();
-    let captchaOptions: Awaited<ReturnType<typeof invisibleCaptchaOptions>>;
-    try {
-      captchaOptions = await invisibleCaptchaOptions();
-    } catch (error) {
-      setMessage({ tone: 'error', text: getSafeErrorMessage(error, '人机验证未完成，请重试。') });
-      setResending(false);
-      return;
-    }
 
     const { error } = await supabase.auth.resend({
       type: 'signup',
       email,
       options: {
         emailRedirectTo: buildAuthCallbackUrl(resolveAuthAppUrl(window.location.origin), redirectTarget),
-        ...captchaOptions,
       },
     });
 

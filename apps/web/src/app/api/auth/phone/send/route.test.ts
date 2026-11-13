@@ -10,7 +10,7 @@ vi.mock('@/lib/rateLimit', async importOriginal => ({
 const { POST } = await import('./route');
 const request = (ip: string) => new Request('https://auth-staging.graylum.com/api/auth/phone/send', {
   method: 'POST', headers: { 'content-type': 'application/json', 'x-forwarded-for': ip },
-  body: JSON.stringify({ phone: '13800005678', createUser: false, captchaToken: 'invalid' }),
+  body: JSON.stringify({ phone: '13800005678', createUser: false }),
 });
 
 // A sliding window like the real one: `max` attempts per IP, every attempt counted.
@@ -37,9 +37,9 @@ describe('POST /api/auth/phone/send attempt limit (deep review 11-11 item 7)', (
     expect(mocks.send).toHaveBeenCalledTimes(1);
   });
 
-  it('counts failed hCaptcha attempts, so a loop from one IP stops before the database while the owner still gets in', async () => {
+  it('counts refused attempts, so a loop from one IP stops before the database while the owner still gets in', async () => {
     mocks.limit.mockImplementation(windowOf(10));
-    mocks.send.mockImplementation(async () => Response.json({ ok: false, code: 'CAPTCHA_FAILED' }, { status: 400 }));
+    mocks.send.mockImplementation(async () => Response.json({ ok: false, code: 'PHONE_INVALID' }, { status: 400 }));
     for (let i = 0; i < 10; i += 1) expect((await POST(request('198.51.100.7'))).status).toBe(400);
 
     const refused = await POST(request('198.51.100.7'));

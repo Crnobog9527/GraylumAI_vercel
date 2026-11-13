@@ -5,8 +5,6 @@ import { Suspense, useEffect, useState, type FormEvent } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { KeyRound, Loader2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase';
-import { getSafeErrorMessage } from '@/lib/safe-error-message';
-import { invisibleCaptchaOptions } from '@/lib/invisibleCaptcha';
 import { resolveAuthAppUrl } from '@/lib/site-config';
 import { clearAuthFragment } from '@/lib/authFlow';
 import {
@@ -66,20 +64,11 @@ function ForgotPasswordContent() {
 
     setPending(true);
     setStatus(null);
-    let captchaOptions: Awaited<ReturnType<typeof invisibleCaptchaOptions>>;
-    try {
-      captchaOptions = await invisibleCaptchaOptions();
-    } catch (error) {
-      setStatus({ tone: 'error', message: getSafeErrorMessage(error, '人机验证未完成，请重试。') });
-      setPending(false);
-      return;
-    }
 
     let error: unknown;
     try {
       ({ error } = await createClient().auth.resetPasswordForEmail(address, {
         redirectTo: buildRecoveryRedirectUrl(resolveAuthAppUrl(window.location.origin)),
-        ...captchaOptions,
       }));
     } catch (thrown) {
       error = thrown;

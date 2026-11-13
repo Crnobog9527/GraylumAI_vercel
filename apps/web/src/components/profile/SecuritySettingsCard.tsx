@@ -15,8 +15,6 @@ import { buildVerifyEmailPath } from '@/lib/authFlow';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { keepDialogOpenForCaptcha } from '@/lib/dialogCaptcha';
-import { invisibleCaptchaOptions } from '@/lib/invisibleCaptcha';
 import { FORGOT_PASSWORD_PATH } from '@/lib/passwordRecovery';
 import { createPasswordChanger, passwordChangeEntry, SET_PASSWORD_BY_EMAIL_HINT } from '@/lib/passwordChange';
 import {
@@ -44,8 +42,6 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   // One changer per page: after an unanswered update it stops further attempts (see passwordChange.ts).
   const [passwordChanger] = useState(() => createPasswordChanger({
-    // Invisible hCaptcha: a fresh single-use token per attempt; a challenge appears only if needed.
-    captcha: () => invisibleCaptchaOptions(),
     signInWithPassword: credentials => createClient().auth.signInWithPassword(credentials),
     updatePassword: password => createClient().auth.updateUser({ password }),
   }));
@@ -260,7 +256,6 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
 
       <Dialog open={showPasswordDialog} onOpenChange={setPasswordDialogOpen}>
         <DialogContent
-          onInteractOutside={keepDialogOpenForCaptcha}
           className="sm:max-w-md"
           style={{
             background: 'var(--bg-secondary)',

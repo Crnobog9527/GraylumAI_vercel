@@ -19,11 +19,11 @@ export async function sessionPhoneE164(client: PhoneAuthClient): Promise<string 
   return digits ? `+${digits}` : null;
 }
 
-export async function sendPhoneReauthCode(client: PhoneAuthClient, captchaToken: string | undefined,
+export async function sendPhoneReauthCode(client: PhoneAuthClient,
   send: typeof requestPhoneCode = requestPhoneCode): Promise<string | null> {
   const phone = await sessionPhoneE164(client);
   if (!phone) return '当前会话缺少手机号信息，无法发送验证码。';
-  return send({ phone, createUser: false, captchaToken });
+  return send({ phone, createUser: false });
 }
 
 export async function verifyPhoneReauth(client: PhoneAuthClient, code: string): Promise<string | null> {

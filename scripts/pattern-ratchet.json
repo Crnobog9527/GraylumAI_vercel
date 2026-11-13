@@ -33,7 +33,7 @@
       ],
       "regex": "process\\.env\\.",
       "count": "files",
-      "max": 58
+      "max": 57
     },
     {
       "id": "web-error-code-includes",

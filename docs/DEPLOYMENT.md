@@ -32,7 +32,6 @@
 | `NEXT_PUBLIC_APP_URL`、`NEXT_PUBLIC_AUTH_APP_URL` | 站点与认证回跳地址；`apps/web/src/lib/site-config.ts` |
 | `UPSTASH_REDIS_REST_URL`、`UPSTASH_REDIS_REST_TOKEN` | Redis 分布式限流；`packages/api/src/services/redisRateLimiter.ts`、`apps/web/src/proxy.ts` |
 | `RATE_LIMIT_FAIL_CLOSED` | 已退役，不再控制行为；设为 false 或不配置均不能关闭故障拒绝 |
-| `NEXT_PUBLIC_HCAPTCHA_SITEKEY` | 前端 hCaptcha sitekey；`apps/web/src/lib/authCaptcha.ts` |
 | `NEXT_PUBLIC_SITE_NAME`、`NEXT_PUBLIC_SUPPORT_EMAIL` | 站点显示与支持入口；`apps/web/src/lib/site-config.ts` |
 | `NEXT_PUBLIC_APP_NAME` | OpenRouter 请求标题的回退名称；`packages/api/src/services/providerUtils.ts` |
 | `NEXT_PUBLIC_SENTRY_DSN` | Sentry 错误上报；`apps/web/sentry.server.config.ts` 等 |
