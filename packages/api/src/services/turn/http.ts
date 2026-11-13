@@ -5,6 +5,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { compareSkillInput, loadCompareTurnParts } from '../fusion/compareLoad';
 import { ENDED_STATES } from '../fusion/reviewRecord';
 import { runChatTurn, type ChatDeps } from './chat';
+import { runMinutesTurn } from './minutes';
 import { runCompareTurn } from './compare';
 import { codeOf, juryTurn } from './jury';
 import { reportTurnRequest, runReportTurn } from './report';
@@ -36,6 +37,8 @@ export const turnRequest = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('mentor'), ...common, moduleId: z.string().uuid(), stepId: z.string().min(1).max(128),
     text: z.string().trim().min(1).max(8000), organizeAfter: z.boolean(), answer: mentorAnswer.optional(),
     researchRefreshId: z.string().uuid().optional() }).strict(),
+  // CONTENT-CONVERSATION-2: the minutes of this conversation ("整理纪要" / "整理本选题"); a button press or the chat's request.
+  z.object({ kind: z.literal('minutes'), ...common }).strict(),
   // V2-10: continue a turn paused for credits. What the user asked was saved at the pause, so any device can send this.
   z.object({ kind: z.literal('resume'), ...common, resumeOf: z.number().int().positive() }).strict(),
   reportTurnRequest,
@@ -129,6 +132,8 @@ async function answerTurn(request: Request, deps: TurnHttpDeps, input: z.infer<t
       parts: () => loadCompareTurnParts({ admin: deps.chat.admin, user: deps.userClient(request), actorId }, { sessionId, question, skill }) }, emit));
   }
   if (input.kind === 'jury') return stream(emit => runJuryStart(deps, actorId, input, emit));
+  if (input.kind === 'minutes') return stream(emit => runMinutesTurn(deps.chat, { actorId, sessionId: input.sessionId,
+    requestId: input.requestId }, emit));
   if (input.kind === 'mentor') return stream(emit => runMentorTurn(deps.chat, { actorId, sessionId: input.sessionId,
     requestId: input.requestId, moduleId: input.moduleId, stepId: input.stepId, text: input.text, organizeAfter: input.organizeAfter,
     ...(input.answer ? { answer: input.answer } : {}), ...(input.researchRefreshId ? { researchRefreshId: input.researchRefreshId } : {}) }, emit));

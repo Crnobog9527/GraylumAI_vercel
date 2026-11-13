@@ -13,7 +13,7 @@ import styles from './work-composer.module.css';
  */
 export function ComposerView({
  rootRef,attachment,editor,referenceMenu,menu=null,disabled=false,reading=false,onToggleFiles,onPickFile,fileHint,fileInput,
- onToggleSkills,skillMenu,counter,skillName,sendDisabled=false,onSend,status,error,note,tools,
+ onToggleSkills,hideSkills=false,skillMenu,counter,skillName,sendDisabled=false,onSend,status,error,note,tools,
 }:{
  rootRef?:Ref<HTMLDivElement>;
  /** Shown inside the frame above the text, for example the docked question card. */
@@ -32,6 +32,8 @@ export function ComposerView({
  /** The hidden file input. */
  fileInput?:ReactNode;
  onToggleSkills?:()=>void;
+ /** CONTENT-CONVERSATION-2: no "使用技能" button (the topic window: the model loads the writing Skill itself). */
+ hideSkills?:boolean;
  /** Shown while `menu` is "skills": `SkillMenuView`. */
  skillMenu?:ReactNode;
  /** Shown near the limit as "length / max". */
@@ -53,8 +55,8 @@ export function ComposerView({
    <div className={styles.menuAnchor}><button type="button" aria-label="添加资料" disabled={disabled||reading} aria-expanded={menu==='files'}
     onClick={onToggleFiles}><Plus size={19}/></button>{menu==='files'&&<FilesMenu onPickFile={onPickFile} fileHint={fileHint}/>}</div>
    {fileInput}
-   <div className={styles.menuAnchor}><button type="button" aria-label="使用技能" disabled={disabled} aria-expanded={menu==='skills'}
-    onClick={onToggleSkills}><Box size={18}/></button>{menu==='skills'&&skillMenu}</div>
+   {!hideSkills&&<div className={styles.menuAnchor}><button type="button" aria-label="使用技能" disabled={disabled} aria-expanded={menu==='skills'}
+    onClick={onToggleSkills}><Box size={18}/></button>{menu==='skills'&&skillMenu}</div>}
    {tools}
   </div><div className={styles.toolRight}>{counter&&<span>{counter.length} / {counter.max}</span>}
   {skillName&&<span>{skillName}</span>}<ModelSlot/><button type="button" aria-label="发送" className={styles.send} disabled={sendDisabled}
