@@ -14,6 +14,7 @@ import { CtaK } from '@/components/landing/preview-k/CtaK';
 import k from '@/components/landing/preview-k/k.module.css';
 import dawn from './dawn-l.module.css';
 import regions from './dawn-regions-l.module.css';
+import phone from './dawn-phone-l.module.css';
 import own from './l.module.css';
 import { StickyCtaMNO } from '@/components/landing/preview-mno/StickyCtaMNO';
 import { HERO } from '@/lib/landing/landing-copy';
@@ -59,7 +60,7 @@ export function SampleL({ data, siteName, extras, production = false, supportEma
   // the price page, not here, and the home page carries no "先聊后买" or Gold line.
   const terms = <p className={k.terms}>{allOn(extras.flags, ['signupGrant']) ? L_PRICE_NOTE.free : L_PRICE_NOTE.noCard}</p>;
   return (
-    <MotionJ className={cn(light.light, page.page, k.page, own.lines, dawn.dawn, regions.regions)}>
+    <MotionJ className={cn(light.light, page.page, k.page, own.lines, dawn.dawn, regions.regions, phone.phone)}>
       {production ? null : (
         <nav aria-label="样稿切换" className={page.sampleBar}>
           <span>不公开的风格样稿（L：K 的第二轮）</span>

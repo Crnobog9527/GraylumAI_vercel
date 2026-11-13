@@ -41,6 +41,9 @@ const APP_TEMPLATES = [
   '/app/profile',
   // PUBLISH-SCHEDULE: the schedule page; its address carries no key or record ID (the week is chosen on the page).
   '/app/publish-schedule',
+  // MOBILE-UX: a phone's 对话 and 功能 pages; neither address carries a key or a record ID.
+  '/app/chats',
+  '/app/tools',
   '/app/expert-consult',
   '/app/runtime',
   '/app/positioning',

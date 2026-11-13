@@ -54,8 +54,11 @@ test('the consent bar covers nothing at the bottom, and an undecided visitor sen
 });
 
 // Validation of #1816 (step 11): with the bar shown the phone drawer got shorter and squeezed its list to nothing, so an existing
-// conversation in it could not be clicked. The list keeps a usable height and the drawer scrolls as a whole.
-test('with the consent bar shown, an existing conversation opens from the phone drawer', async ({ page }) => {
+// conversation in it could not be clicked. The list keeps a usable height and scrolls as a whole.
+// MOBILE-UX (Owner 2026-11-12, phone plan A): on a phone the pages with the bottom bar no longer open a drawer; that same list is
+// the 对话 page, reached from the bar. What this guards is unchanged: with the consent bar shown, the way to an existing conversation
+// is not under the bar (the bottom bar stands on it), the list keeps a usable height, and the conversation opens.
+test('with the consent bar shown, an existing conversation opens from the phone\'s 对话 page', async ({ page }) => {
   const evidence = watchPage(page);
   await signIn(page, 'alice');
   const session = await startFreeChat(page, '用一句话说明为什么要先想清楚给谁看。');
@@ -63,12 +66,23 @@ test('with the consent bar shown, an existing conversation opens from the phone 
 
   await page.goto('/app/positioning');
   await expect(bar(page)).toBeVisible({ timeout: 60_000 });
-  await page.getByRole('button', { name: '打开导航' }).click();
+  // The phone's bottom bar is the way round: it shows, whole, above the consent bar, and the drawer's button is gone.
+  const tabs = page.getByRole('navigation', { name: '主导航' });
+  await expect(tabs).toBeVisible({ timeout: 60_000 }).catch(async error => { await evidence('no bottom bar'); throw error; });
+  await expectAbove(tabs, page);
+  await expect(page.getByRole('button', { name: '打开导航' })).toHaveCount(0);
+  await tabs.getByRole('link', { name: '对话' }).click();
+  await page.waitForURL(url => url.pathname === '/app/chats', { timeout: 60_000 });
+  await expect(bar(page)).toBeVisible();
+
   const list = page.getByLabel('平台、账号与工作');
   const row = list.locator(`a[href="/app/runtime?session=${session}"]`);
-  await expect(row).toBeVisible({ timeout: 60_000 }).catch(async error => { await evidence('conversation not in the drawer'); throw error; });
+  await expect(row).toBeVisible({ timeout: 60_000 }).catch(async error => { await evidence('conversation not in the list'); throw error; });
   expect((await list.boundingBox())!.height, 'the list keeps a usable height').toBeGreaterThanOrEqual(100);
   await expectAbove(row, page);
+  // …and above the bottom bar, which stands on the consent bar.
+  const [rowBox, tabsBox] = [await row.boundingBox(), await tabs.boundingBox()];
+  expect(rowBox!.y + rowBox!.height, 'the row ends above the bottom bar').toBeLessThanOrEqual(tabsBox!.y + 1);
   await row.click();
   await page.waitForURL(url => url.searchParams.get('session') === session, { timeout: 60_000 });
   await expect(page.getByRole('textbox', { name: '消息' })).toBeVisible({ timeout: 60_000 });

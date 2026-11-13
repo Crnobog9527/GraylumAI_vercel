@@ -13,6 +13,8 @@ import { afterAll, beforeAll, expect, it } from 'vitest';
  * UI-UNIFY A4 validation on staging: the /app home header at 390px hid the credits link, but the handoff needs language, credits and the
  * avatar on the right on a phone. The real GlobalHeader with the home page's own CSS in Chrome: all three show, the header does not
  * overflow at 360px and nothing overlaps; the menu button (no rail to open here) stays hidden.
+ * MOBILE-UX (Owner 2026-11-12, phone plan A): a phone goes round the product by its bottom bar, so the top bar's three links
+ * (首页 / 对话 / 个人中心) no longer show under 640px; the logo stands at the left and the three on the right as before.
  */
 let browser: Browser;
 let page: string;
@@ -63,17 +65,19 @@ for (const width of [390, 360]) {
           const box = (element: Element | null) => { const r = element?.getBoundingClientRect(); return r ? { left: r.left, right: r.right, width: r.width } : null; };
           const visible = (element: Element | null | undefined) => Boolean(element) && getComputedStyle(element as Element).display !== 'none';
           const nav = document.querySelector('header nav');
+          const brand = document.querySelector('header > a');
           const language = document.querySelector('header button[aria-label="语言"]');
           const creditsLink = [...document.querySelectorAll('header a')].find(link => /积分/.test(link.textContent ?? ''));
           const avatar = document.querySelector('header a[aria-label="个人中心"]');
-          return { overflow: document.documentElement.scrollWidth - innerWidth, nav: box(nav), language: box(language), credits: box(creditsLink ?? null),
+          return { overflow: document.documentElement.scrollWidth - innerWidth, navShown: visible(nav), brand: box(brand), language: box(language), credits: box(creditsLink ?? null),
             avatar: box(avatar), menuHidden: !visible(document.querySelector('header button[aria-label="打开导航"]')), shown: [language, creditsLink, avatar].every(visible) };
         });
         expect(measured.shown, 'language, credits and avatar are all visible').toBe(true);
         expect(measured.menuHidden, 'the menu button has no rail to open on this page').toBe(true);
         expect(measured.overflow).toBeLessThanOrEqual(0);
         // In order, left to right, with no overlap and inside the viewport.
-        const row = [measured.nav!, measured.language!, measured.credits!, measured.avatar!];
+        expect(measured.navShown, 'the three links are the bottom bar\'s on a phone').toBe(false);
+        const row = [measured.brand!, measured.language!, measured.credits!, measured.avatar!];
         for (let index = 1; index < row.length; index++) expect(row[index].left, `item ${index} overlaps the previous one`).toBeGreaterThanOrEqual(row[index - 1].right - 0.5);
         expect(row[row.length - 1].right).toBeLessThanOrEqual(width);
       } finally { await tab.close(); }

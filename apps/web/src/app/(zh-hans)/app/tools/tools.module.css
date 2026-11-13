@@ -1,0 +1,35 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/* A phone's 功能 page: the rail's function links as large tiles, in the home page's "晨光" look. */
+.page { height: 100%; overflow-y: auto; padding: 18px 16px 28px; color: #1f1e1c; }
+.page h1 { margin: 2px 4px 14px; font-size: 28px; font-weight: 700; line-height: 1.2; letter-spacing: -.03em; }
+.page a, .page button { color: inherit; font: inherit; text-decoration: none; -webkit-tap-highlight-color: transparent; }
+.page :is(a, button):focus-visible { outline: 2px solid #1f1e1c; outline-offset: 2px; }
+.find { display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 14px; border-radius: 14px; background: rgba(31, 30, 28, .06); color: #77736b !important; font-size: 15px; }
+.tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 14px 0; padding: 0; list-style: none; }
+.tiles li { display: grid; }
+.tiles li > * {
+  display: grid; align-content: start; gap: 8px; width: 100%; min-height: 112px; padding: 14px; border: 0; border-radius: 20px;
+  background: #fff; box-shadow: 0 0 0 1px rgba(31, 30, 28, .09); text-align: left; cursor: pointer;
+}
+.tiles li > [aria-disabled] { cursor: default; color: #77736b; }
+.tiles i { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 13px; background: #f4f2ee; color: #1f1e1c; }
+.tiles i svg { width: 21px; height: 21px; stroke-width: 1.8; }
+.tiles i[data-tint='warm'] { background: #fff4dc; }
+.tiles i[data-tint='lilac'] { background: #f0ebfd; }
+.tiles i[data-tint='peach'] { background: #ffeae1; }
+.tiles i[data-tint='green'] { background: #e9f3ea; }
+.tiles b { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 650; }
+.tiles b small { padding: 1px 8px; border-radius: 99px; background: #f4f2ee; color: #77736b; font-size: 11px; font-weight: 500; }
+.tiles span { color: #77736b; font-size: 12px; line-height: 1.45; }
+.row {
+  display: grid; grid-template-columns: 36px 1fr auto; align-items: center; gap: 12px; min-height: 56px; padding: 9px 14px; border-radius: 20px;
+  background: #fff; box-shadow: 0 0 0 1px rgba(31, 30, 28, .09); font-size: 15px; font-weight: 550;
+}
+.row i { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 11px; background: #f4f2ee; }
+.row i svg { width: 19px; height: 19px; stroke-width: 1.8; }
+.row > svg { color: #77736b; }
+@media (min-width: 640px) {
+  /* A computer reaches these from the rail; the page still reads well if someone opens its address. */
+  .page { max-width: 720px; margin: 0 auto; padding: 36px 24px; }
+  .tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}

@@ -12,7 +12,7 @@ import styles from './schedule-calendar.module.css';
 const HOURS = Array.from({ length: 24 }, (_, hour) => hour);
 const pad = (n: number) => String(n).padStart(2, '0');
 
-/** A post on the week axis or in the phone list: time and status, the platforms, the caption's start. */
+/** A post on the week axis or under the phone's month grid: time and status, the platforms, the caption's start. */
 export function EntryCard({ entry, onOpen, className, style }: {
   entry: ScheduleEntry; onOpen: (entry: ScheduleEntry) => void; className?: string; style?: React.CSSProperties;
 }) {
@@ -73,27 +73,5 @@ export function WeekGrid({ days, entries, now, onOpen }: {
         })}
       </div>
     </div>
-  );
-}
-
-/** Phones: the shown days that have posts, one card per post (a month of seven narrow columns is not readable there). */
-export function AgendaList({ days, entries, now, onOpen }: {
-  days: Date[]; entries: ScheduleEntry[]; now: Date; onOpen: (entry: ScheduleEntry) => void;
-}) {
-  const grouped = byDay(entries);
-  const busy = days.filter(day => grouped.has(dayKey(day)));
-  return (
-    <ol className={styles.agenda} aria-label="这段时间的发布">
-      {busy.map(day => (
-        <li key={day.toISOString()} className={styles.agendaDay}>
-          <h2>{dayLabel(day)}{isToday(day, now) && <span>今天</span>}</h2>
-          <ul className={styles.agendaList}>
-            {grouped.get(dayKey(day))!.map(entry => <li key={entry.id}>
-              <EntryCard entry={entry} onOpen={onOpen} className={styles.agendaCard} />
-            </li>)}
-          </ul>
-        </li>
-      ))}
-    </ol>
   );
 }

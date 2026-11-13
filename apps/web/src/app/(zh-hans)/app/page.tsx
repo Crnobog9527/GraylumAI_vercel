@@ -10,6 +10,7 @@ import styles from './home.module.css';
 import { QueryNotice } from '@/components/opc/query-notice';
 import { LanguageSwitch } from '@/components/layout/LanguageSwitch';
 import { GlobalHeader } from '@/components/opc/rail-view';
+import { PhoneTabs } from '@/components/opc/phone-tabs';
 import { HomeMethod } from './home-method';
 import { startEntryHref, type StartMode } from './positioning/start-entry';
 
@@ -46,5 +47,7 @@ export default function HomePage(){
    <section className={styles.capabilities}><h2>从策略，继续走向实际创作</h2><div>{CAPABILITIES.map(([title,description,Mark])=><article key={title}>
     <Mark size={19} strokeWidth={1.8} aria-hidden="true"/><h3>{title}</h3><p>{description}</p></article>)}</div></section>
   </main>
+  {/* A phone's bottom bar (phone plan A); the page's foot leaves it room in home.module.css. */}
+  <PhoneTabs on="home"/>
  </div>;
 }

@@ -53,6 +53,9 @@
 .navIcon{display:block;flex:none;width:20px;height:20px}
 .railNav a:hover,.railNav button:hover:not(:disabled){background:#faf9f5}.railNav a[aria-current=page]{background:#faf4e5}.railNav button:disabled{color:#555;cursor:default}.railNav small{margin-left:auto;color:#6b6b6b;font-size:10px}
 .history{flex:1;min-height:0;margin-top:8px;margin-right:-3px;padding-right:3px;overflow:auto;scrollbar-width:thin}
+/* A short desktop window (a 768px-high laptop leaves about 650px): with the two member tools the entries above the list would
+   squeeze it to nothing. The rail then scrolls as a whole and the list keeps a usable height, as the phone drawer does below. */
+@media(min-width:640px) and (max-height:780px){.rail{overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin}.rail .history{min-height:120px}}
 .history details{margin:2px 0}
 .history summary{display:flex;align-items:center;justify-content:space-between;list-style:none;cursor:pointer;padding:8px 10px;color:#444;font-size:13px;font-weight:550}
 .history summary::-webkit-details-marker{display:none}
@@ -88,7 +91,7 @@
 .rightToggle button:hover{background:#f4f4f4}
 @media(max-width:1100px){.shell,.shell.withRight{grid-template-columns:224px minmax(0,1fr)}.shell.withRight{grid-template-columns:224px minmax(0,1fr) 300px}}
 @media(max-width:920px){.shell,.shell.withRight{grid-template-columns:204px minmax(0,1fr)}.shell.withRight>.right{position:fixed;right:8px;top:102px;bottom:calc(8px + var(--consent-bar-space, 0px));width:min(380px,calc(100vw - 25px));z-index:20;box-shadow:0 10px 30px #0002}}
-@media(max-width:700px){
+@media(max-width:639px){
  /* Phone top bar: the logo without the word (font-size 0 keeps "Graylum" as the link's name for screen readers, as the home page does),
     a 40px menu button, the three links at a readable size, and the language switch. Nothing shrinks: at 360px the row is 328px wide, so
     the switch on the right is no longer cut off by the frame (global-header-phone.browser.test.tsx). */
@@ -114,7 +117,7 @@
 .profile{width:100%;gap:10px;border:0;border-radius:6px;background:transparent;text-align:left;font-size:14px;line-height:20px;cursor:pointer}.profile:hover{background:#eee}
 .popoverDismiss{position:fixed;inset:0;z-index:45;border:0;background:transparent;cursor:default}.bottomPopover{position:fixed;z-index:46;width:272px;overflow:auto;border-radius:12px;background:#fff;box-shadow:0 8px 32px #0000001a,0 2px 8px #0000000d;color:#28251e;font-size:14px}.bottomPopover>a,.bottomPopover>button{display:flex;align-items:center;gap:12px;width:100%;min-height:40px;padding:8px 16px;border:0;background:#fff;color:#333;text-align:left;text-decoration:none;font-size:13px}.bottomPopover>a:hover,.bottomPopover>button:hover{background:#f7f7f7}.popoverFoot{padding:12px 16px;border-top:1px solid #e7e7e7}.popoverFoot a{color:#333;text-decoration:none;font-size:13px}.profileHead{display:flex;gap:11px;align-items:center;padding:16px}.profileHead strong,.profileHead small{display:block;overflow:hidden;max-width:206px;text-overflow:ellipsis;white-space:nowrap}.profileHead strong{font-weight:550}.profileHead small{color:#6b6b6b;font-size:11px}
 .feedbackBackdrop{position:fixed;inset:0;z-index:60;display:grid;place-items:center;padding:16px;background:#0005}.feedbackDialog{width:min(480px,100%);max-height:calc(100dvh - 32px);overflow:auto;border-radius:16px;background:#fff;box-shadow:0 18px 56px #0003}.feedbackDialog header{display:flex;align-items:center;justify-content:space-between;padding:20px 24px;border-bottom:1px solid #eee}.feedbackDialog h2{font-size:20px;font-weight:500}.feedbackDialog header button{display:grid;place-items:center;width:28px;height:28px;border:0;background:none}.feedbackBody{padding:20px 24px 24px}.feedbackBody>p{margin:0 0 15px;color:#6b6b6b;font-size:13px}.feedbackBody label{display:block;margin:14px 0 0;color:#555;font-size:13px}.feedbackBody input,.feedbackBody select,.feedbackBody textarea{display:block;width:100%;margin-top:7px;padding:10px 12px;border:1px solid #e5e5e5;border-radius:8px;background:#fff;color:#262626;font-size:14px}.feedbackBody textarea{min-height:120px;resize:none}.feedbackBody footer{display:flex;align-items:center;justify-content:flex-end;gap:10px;margin-top:22px}.feedbackBody footer a{color:#666;text-decoration:none;font-size:12px}.feedbackBody footer button{padding:8px 14px;border:0;border-radius:8px;background:#28251e;color:#fff;font-size:13px}.feedbackBody footer button:disabled{opacity:.5}.feedbackError{color:#a33830!important}
-@media(max-width:700px){.bottomPopover{left:8px!important;right:8px;width:auto;max-height:calc(100dvh - 20px)!important}}
+@media(max-width:639px){.bottomPopover{left:8px!important;right:8px;width:auto;max-height:calc(100dvh - 20px)!important}}
 @media(max-width:340px){.global{padding:0 8px;gap:6px}.global nav a{padding:0 6px}}
 
 .inlineRename{flex:1;min-width:0;height:34px;margin:3px 0;padding:4px 8px;border:1px solid #8c8c8c;border-radius:7px;background:#fff;color:#222;font-size:12px}
@@ -133,4 +136,23 @@
 .bottomPopover:has(.profileHead){width:284px;padding-bottom:10px}.profileHead{padding:20px 18px}.profileHead .avatar{width:38px;height:38px;font-size:16px}.profileHead>span:last-child{min-width:0}.profileHead small{margin-top:5px}
 .membership{margin:0 10px 10px;border-radius:11px;background:#f7f7f7;font-size:12px}.membership>a{display:flex;flex-direction:column;gap:14px;padding:16px 12px;border-radius:inherit;color:#444;text-decoration:none}.membership>a>span:first-child{font-weight:600;color:#28251e}.membershipLink{display:flex;align-items:center;justify-content:space-between;gap:12px}.membership>a:hover{background:#f0f0f0;color:#111}
 .bottomPopover:has(.profileHead)>a,.bottomPopover:has(.profileHead)>button{width:calc(100% - 20px);min-height:42px;margin:0 10px;padding:10px 12px;border-radius:6px}.bottomPopover:has(.profileHead)>a:nth-of-type(2){margin-top:7px;border-top:1px solid #ededed;border-radius:0}
-@media(max-width:700px){.bottomPopover:has(.profileHead){width:auto}}
+@media(max-width:639px){.bottomPopover:has(.profileHead){width:auto}}
+/*
+ * A phone with the bottom bar (PhoneTabs; Owner 2026-11-12, phone plan A: every area but the conversation and topics pages, marked
+ * data-tabs). The bar is the way round the product, so the top bar keeps only the logo and what stands at its right, the button that
+ * opened the drawer goes, and the page ends above the bar (56px and the home indicator's inset).
+ */
+.phoneTitle{display:none}
+@media(max-width:639px){
+ .workspace[data-tabs] .mobileGlobalMenu,.workspace[data-tabs] .global nav{display:none}
+ .workspace[data-tabs] .shell,.workspace[data-tabs] .shell.withRight{height:calc(100dvh - 96px - 56px - env(safe-area-inset-bottom, 0px) - var(--consent-bar-space, 0px))}
+ .workspace[data-tabs] .shell.noNotice{height:calc(100dvh - 56px - 56px - env(safe-area-inset-bottom, 0px) - var(--consent-bar-space, 0px))}
+ /* The 对话 page: the rail's own list of platforms, accounts and work is the page. Its function links are the 功能 page's, and its
+    foot (feedback, credits, the account) is the 我的 page's, so neither shows here. */
+ /* It scrolls as a whole when the screen is short (the consent bar showing), as the drawer does, so its list is never squeezed to nothing. */
+ .workspace[data-area=history] .rail{display:flex;position:static;inset:auto;width:auto;padding:0 12px 8px;background:transparent;box-shadow:none;z-index:auto}
+ .workspace[data-area=history] .center,.workspace[data-area=history] .railMobile,.workspace[data-area=history] .railNav,.workspace[data-area=history] .railBottom{display:none}
+ .workspace[data-area=history] .phoneTitle{display:block;margin:10px 4px 0;font-size:28px;font-weight:700;letter-spacing:-.03em;line-height:1.2;color:#1f1e1c}
+ .workspace[data-area=history] .newConversation{height:48px;margin:12px 0 6px;border-radius:99px;font-size:15px}
+ .workspace[data-area=history] .thread,.workspace[data-area=history] .strategy{padding:12px 12px}
+}

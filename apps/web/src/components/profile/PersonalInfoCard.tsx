@@ -105,7 +105,8 @@ export const UserProfileHeader = memo(function UserProfileHeader({
     >
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-4">
-          <ProfileAvatar src={user?.avatar_url} initial={user?.full_name?.[0] || user?.email?.[0]?.toUpperCase() || 'U'} />
+          <ProfileAvatar src={user?.avatar_url} initial={user?.full_name?.[0] || user?.email?.[0]?.toUpperCase() || 'U'}
+            onChanged={url => onUserUpdate?.({ ...user, avatar_url: url })} />
           <div>
             <div className="flex items-center gap-2 mb-1">
               {editingNickname ? (
