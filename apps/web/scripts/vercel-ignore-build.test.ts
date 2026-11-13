@@ -16,7 +16,8 @@ describe('VERCEL-COST-2: which changed files can change the website', () => {
       'apps/web/vercel.json', 'apps/web/tsconfig.json', 'apps/web/postcss.config.mjs', 'apps/web/src/proxy.ts',
       'apps/web/scripts/build-library-sandbox.mjs', 'apps/web/assets/library-ocr/eng.traineddata', 'apps/web/content/legal/terms.html',
       'apps/web/sentry.server.config.ts', 'apps/web/some-new-config.ts', 'packages/api/src/root.ts', 'packages/api/package.json',
-      'packages/tsconfig/base.json', 'packages/db/schema.ts', 'pnpm-lock.yaml', 'package.json', 'pnpm-workspace.yaml', 'turbo.json', '.node-version'])
+      'packages/tsconfig/base.json', 'packages/db/schema.ts', 'pnpm-lock.yaml', 'package.json', 'pnpm-workspace.yaml', 'turbo.json', '.node-version',
+      '.vercelignore', 'packages/api/src/scripts/e2eSim/seed.ts', 'packages/api/vitest.config.ts'])
       expect(affectsSite(path), path).toBe(true);
   });
   it('leaves out docs, tests, CI, migrations, database functions and the tools only tests or editors read', () => {

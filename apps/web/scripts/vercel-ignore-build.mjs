@@ -10,8 +10,9 @@ import { pathToFileURL } from 'node:url';
 
 const SHA = /^[0-9a-f]{40}$/;
 
-/** Repository files outside the app that the install or the build reads. */
-const ROOT_FILES = new Set(['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'turbo.json', '.node-version', '.npmrc']);
+/** Repository files outside the app that the install, the upload or the build reads (.vercelignore decides what Vercel takes). */
+const ROOT_FILES = new Set(['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'turbo.json', '.node-version', '.npmrc',
+  '.vercelignore']);
 /** Test files and fixtures: never part of the built site. */
 const TEST_FILE = /(^|\/)(__tests__|__fixtures__)\/|\.(test|spec)\.[cm]?[jt]sx?$|\.integration\.[cm]?[jt]sx?$/;
 /** apps/web files that only the tests, the linter or editors read (the app's other files all count, new ones included). */
@@ -26,7 +27,8 @@ export function affectsSite(path) {
   const inside = (prefix) => path.startsWith(prefix) ? path.slice(prefix.length) : null;
   const web = inside('apps/web/');
   if (web !== null) return !web.startsWith('tests/') && !TEST_FILE.test(web) && !WEB_TOOLING.has(web);
-  // The app imports @repo/api's source and extends @repo/tsconfig.
+  // The app imports @repo/api's source and extends @repo/tsconfig (checked against the web program's files, `tsc --listFilesOnly`:
+  // outside apps/web it reads only packages/api/src and packages/db/schema.ts; @repo/api depends on no other workspace package).
   const api = inside('packages/api/') ?? inside('packages/tsconfig/');
   if (api !== null) return !TEST_FILE.test(api);
   const db = inside('packages/db/');
