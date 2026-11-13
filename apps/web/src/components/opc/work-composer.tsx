@@ -20,7 +20,7 @@ import { ReportPaywallDialog } from '@/components/paywall/ReportPaywallDialog';
  * `attachment` is shown inside the same frame, above the text box (the mentor's open question card).
  */
 export function WorkComposer({value,onChange,onSend,disabled=false,sendDisabled=false,label='消息',placeholder='消息',maxLength=20000,sessionId,skillId='',onSkillChange,note,attachment,
- references=COMPOSER_REFERENCES_ENABLED,referenceList,onReferencesChange,images,tools}: {
+ references=COMPOSER_REFERENCES_ENABLED,referenceList,onReferencesChange,images,tools,showSkills=true}: {
  value:string;onChange:(value:string)=>void;onSend:(skillId?:string)=>void;disabled?:boolean;sendDisabled?:boolean;label?:string;placeholder?:string;maxLength?:number;
  sessionId?:string;skillId?:string;onSkillChange?:(id:string)=>void;note?:string;attachment?:ReactNode;
  /** UI-B (default off): `@` picks library documents. Pages whose send cannot carry them pass false. */
@@ -31,6 +31,8 @@ export function WorkComposer({value,onChange,onSend,disabled=false,sendDisabled=
  images?:ChatImages;
  /** More entries for the row of tools (a phone's "多模型对比", fusion-compare/ComparePhoneEntry.tsx). */
  tools?:ReactNode;
+ /** CONTENT-CONVERSATION-2: false hides the "使用技能" menu (the topic window: the model loads the writing Skill itself). */
+ showSkills?:boolean;
 }) {
  const [menu,setMenu]=useState<'files'|'skills'|null>(null),[query,setQuery]=useState(''),[localSkill,setLocalSkill]=useState(''),[error,setError]=useState(''),[reading,setReading]=useState(false);
  const root=useRef<HTMLDivElement>(null);
@@ -100,7 +102,7 @@ export function WorkComposer({value,onChange,onSend,disabled=false,sendDisabled=
   fileInput={<input ref={fileInput} type="file" aria-label="选择附件" multiple hidden
    accept={(references?attachmentAccept():'.txt,.md,.csv,.json,.log')+(images?',image/*':'')}
    onChange={event=>chooseFiles(event.target.files)}/>}
-  onToggleSkills={toggleSkills}
+  onToggleSkills={toggleSkills} hideSkills={!showSkills}
   skillMenu={<SkillMenuView query={query} onQuery={setQuery} onClose={()=>setMenu(null)} skills={skills} onPick={changeSkill}
    hint={onSkillChange?'加载到本对话，不自动发送':'使用此技能开展独立对话'}
    status={choices.isLoading?<PageSkeleton compact rows={2} label="技能读取中"/>:choices.error?<QueryNotice error={choices.error} label="技能列表" retry={()=>choices.refetch()}/>:undefined}/>}

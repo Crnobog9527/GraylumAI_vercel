@@ -9,6 +9,9 @@ import { RateLimitError } from '../lib/rateLimitError';
 import { assertCheckoutRateLimit } from '../services/stripe';
 const mocks = vi.hoisted(() => ({ cancel: vi.fn(), provider: vi.fn(), oneTime: vi.fn(), wallet: vi.fn(), card: vi.fn(), gateOpen: { value: false },
   membership: vi.fn(), scope: vi.fn(), stripeConfigured: { value: false } }));
+// CHARGEBACK G4 is covered by disputePurchaseBlock.test.ts; these cases are about other purchase rules.
+const disputeBlock = vi.hoisted(() => ({ assert: vi.fn(async () => {}) }));
+vi.mock('../services/payments/disputePurchaseBlock', async original => ({ ...(await original<object>()), assertNoDisputePurchaseBlock: disputeBlock.assert }));
 vi.mock('../services/payments/methodMembership', () => ({ readMethodMembership: mocks.membership }));
 vi.mock('../services/payments/stripeCheckoutPersistence', () => ({ resolveStripeScope: mocks.scope }));
 vi.mock('../services/payments/waffoTestOperationsClient', () => ({ getWaffoTestOperationsClient: mocks.provider, getWaffoOperationsClient: mocks.provider }));
@@ -124,6 +127,15 @@ it('passes a checkout rate limit through as TOO_MANY_REQUESTS with its retry hin
   await expect(fixture('user', settings(true)).caller.methodCheckout(card)).rejects.toMatchObject({ code: 'TOO_MANY_REQUESTS',
     message: '请求过于频繁，请在 30 秒后重试' });
   expect(mocks.card).not.toHaveBeenCalled(); expect(mocks.wallet).not.toHaveBeenCalled();
+});
+it('refuses a buyer with an open or lost dispute before any provider is called, with the plain message (CHARGEBACK G4)', async () => {
+  stubStaging(); mocks.gateOpen.value = true;
+  const { DisputePurchaseBlocked, DISPUTE_LOST_PURCHASE_MESSAGE } = await import('../services/payments/disputePurchaseBlock');
+  disputeBlock.assert.mockRejectedValueOnce(new DisputePurchaseBlocked({ code: 'FORBIDDEN', message: DISPUTE_LOST_PURCHASE_MESSAGE }));
+  await expect(fixture('user', settings(true)).caller.methodCheckout(card))
+    .rejects.toMatchObject({ code: 'FORBIDDEN', message: DISPUTE_LOST_PURCHASE_MESSAGE });
+  expect(disputeBlock.assert).toHaveBeenLastCalledWith(expect.anything(), expect.any(String));
+  expect(mocks.card).not.toHaveBeenCalled(); expect(mocks.wallet).not.toHaveBeenCalled(); expect(mocks.provider).not.toHaveBeenCalled();
 });
 it('sends card purchases past the environment gate to the Stripe card checkout, never Waffo or the wallet checkout', async () => {
   stubStaging(); mocks.gateOpen.value = true;

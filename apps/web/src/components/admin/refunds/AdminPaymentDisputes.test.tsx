@@ -8,6 +8,7 @@ vi.mock('@/trpc/client', () => ({ trpc: {
     list: { useQuery: () => ({ data: fixture.rows, isError: fixture.error, isLoading: false }) },
     notice: { useQuery: () => ({ data: { frozen: fixture.frozen, lost: fixture.lost } }) },
     confirmLost: { useMutation: () => ({ mutate: vi.fn(), isPending: false }) },
+    evidence: { useQuery: () => ({ data: undefined, isLoading: false, isError: false }) },
     resolveExternal: { useMutation: () => ({ mutate: vi.fn(), isPending: false }) },
     withdraw: { useMutation: () => ({ mutate: vi.fn(), isPending: false }) },
   },
@@ -128,7 +129,7 @@ it('offers lost confirmation only for a frozen Stripe loss or a frozen Waffo row
   expect(renderToStaticMarkup(<AdminPaymentDisputes />)).toContain('确认判输结案');
   fixture.rows = [{ ...base, provider: 'stripe', status: 'lost', freeze_state: 'frozen', lost_confirmed_at: '2026-11-14T00:00:00Z' }];
   const html = renderToStaticMarkup(<AdminPaymentDisputes />);
-  expect(html).toContain('已判输结案'); expect(html).not.toContain('>撤回冻结');
+  expect(html).toContain('已判输结案'); expect(html).toContain('冻结：已收回'); expect(html).not.toContain('>撤回冻结');
   expect(html).not.toContain('>确认判输结案');
   fixture.rows = [{ ...base, provider: 'stripe', status: 'lost', freeze_state: 'withdrawn' }];
   expect(renderToStaticMarkup(<AdminPaymentDisputes />)).toContain('撤回冻结后被判输');
@@ -151,4 +152,25 @@ it('reports restored credits, the monthly backfill and the resubscribe email aft
   expect(withdrawMessage({ restored: 0, backfilled: 0, email: 'failed' })).toContain('请在付款提醒页重发');
   expect(withdrawMessage({ restored: 0, email: 'not_won' })).toContain('不是判赢');
   expect(withdrawMessage({ restored: 0, duplicate: true })).toContain('之前已经撤回过');
+});
+
+it('offers dispute evidence only for a matched order and writes it in plain English without IP or device data', async () => {
+  fixture.rows = [{ id: 'd1', order_id: 'order-id', provider: 'stripe', amount: 100, currency: 'usd', status: 'needs_response',
+    freeze_state: 'frozen', renewal_stop_state: 'confirmed' }];
+  expect(renderToStaticMarkup(<AdminPaymentDisputes />)).toContain('申诉材料');
+  fixture.rows = [{ id: 'd2', order_id: null, provider: 'stripe', amount: 100, currency: 'usd', status: 'needs_response',
+    freeze_state: 'pending', renewal_stop_state: 'pending' }];
+  expect(renderToStaticMarkup(<AdminPaymentDisputes />)).not.toContain('>申诉材料</button>');
+  const { evidenceText } = await import('./DisputeEvidencePanel');
+  const text = evidenceText({
+    dispute: { providerDisputeId: 'du_1', provider: 'stripe', amount: 2900, currency: 'usd', reason: 'fraudulent', status: 'needs_response',
+      openedAt: '2026-11-10T00:00:00Z', evidenceDueBy: '2026-11-20T00:00:00Z' },
+    order: { id: 'order-1', itemType: 'membership_plan', membershipLevel: 'gold', billingCycle: 'monthly', amountTotal: 2900, currency: 'usd',
+      paymentMethod: 'card_cn', paidAt: '2026-11-01T00:00:00Z', deliveredAt: '2026-11-01T00:00:05Z', entitlementStart: '2026-11-01T00:00:00Z',
+      entitlementEnd: '2026-12-01T00:00:00Z', credits: 8970, termsVersion: 'terms-v3', termsAcceptedAt: '2026-11-01T00:00:00Z', autoRenew: true },
+    customer: { email: 'buyer@example.test', accountCreatedAt: '2026-10-01T00:00:00Z' },
+    usage: { spendCount: 2, creditsSpent: 100, firstUseAt: '2026-11-02T00:00:00Z', lastUseAt: '2026-11-05T00:00:00Z' },
+  });
+  expect(text).toContain('29.00 USD'); expect(text).toContain('version terms-v3'); expect(text).toContain('2 paid AI actions, 100 credits used');
+  expect(text).toContain('gold membership (monthly, auto-renewing)'); expect(text).not.toMatch(/\bIP\b|device/i);
 });

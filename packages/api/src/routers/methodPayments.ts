@@ -18,6 +18,7 @@ import { assertMethodCheckoutEnvironment, assertWaffoCheckoutEnvironment, paymen
 import { describeWaffoFailure } from '../services/payments/waffoFailure';
 import { hasOpenDispute, hasUnpaidSubscription, mapMethodPurchaseRejection, MethodPurchaseRejected } from '../services/payments/methodPurchaseError';
 import { logger } from '../lib/logger';
+import { assertNoDisputePurchaseBlock, DisputePurchaseBlocked } from '../services/payments/disputePurchaseBlock';
 
 /** The client only sees a generic 503; this keeps the secret-free reason (#815 checkout had none).
  * Categorised provider/key/database failures are errors; expected gates (closed switch, stale route) are warnings. */
@@ -66,6 +67,8 @@ export const methodPaymentProcedures = {
       if (terms.error || typeof terms.data?.value?.version !== 'string' || input.termsVersion !== terms.data.value.version) {
         throw new Error('PAY_WAFFO_TERMS_UNAVAILABLE');
       }
+      // CHARGEBACK G4: an open or lost dispute blocks every new purchase before any provider is called.
+      await assertNoDisputePurchaseBlock(ctx.supabaseAdmin, ctx.profileId);
       await assertCheckoutRateLimit(ctx.profileId, ctx.headers);
       const common = { db: ctx.supabaseAdmin, userId: ctx.profileId, appUrl: getStripeAppUrl(),
         termsVersion: terms.data.value.version, purchase: input };
@@ -87,6 +90,7 @@ export const methodPaymentProcedures = {
       logMethodPaymentFailure('method_checkout', ctx.profileId, error, { method: input.method });
       // A throttled buyer gets TOO_MANY_REQUESTS with its retry hint, which the purchase page shows as such.
       if (error instanceof RateLimitError) throw error;
+      if (error instanceof DisputePurchaseBlocked) throw error;
       const transition = error instanceof MethodPurchaseRejected && error.message === 'PAY_WAFFO_MEMBERSHIP_TRANSITION_REQUIRED'
         && ctx.hasSupabaseAdminPrivileges;
       const openDispute = transition && await hasOpenDispute(ctx.supabaseAdmin, ctx.profileId);

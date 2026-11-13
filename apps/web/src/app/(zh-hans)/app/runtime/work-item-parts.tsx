@@ -2,7 +2,7 @@
 'use client';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
-import type { VideoChoice } from './work-input';
+import type { SaveKind } from './work-turn-path';
 
 /** The work item's choices in the transcript (V2-10b C2), worded as on the old workspace. */
 export const TYPE_LABEL: Record<string, string> = { article: '文章', image_text: '图文', video: '视频' };
@@ -23,54 +23,25 @@ export function WorkTypeChoice({ disabled, onChoose }: { disabled: boolean; onCh
   );
 }
 
-export function WorkAdoptAction({ adopted, isVideo, href, disabled, onAdopt }: {
-  adopted: boolean; isVideo: boolean; href: string; disabled: boolean; onAdopt: () => void;
+/** CONTENT-CONVERSATION-2: the save buttons under a reply of the topic window, one per kind the item takes; a kind already saved
+ *  from this reply shows its version and a link to the library instead. */
+export function WorkSaveActions({ kinds, saved, href, disabled, onSave }: {
+  kinds: ReadonlyArray<{ kind: SaveKind; label: string }>; saved: Partial<Record<SaveKind, number>>; href: string; disabled: boolean;
+  onSave: (kind: SaveKind) => void;
 }) {
   return (
-    <div className="mt-3 flex flex-wrap gap-2">
-      {adopted ? (
-        <Link className="underline" href={href}>
-          {isVideo ? '这版口播稿已定稿' : '已采用为草稿'} · 查看
-        </Link>
-      ) : (
-        <Button disabled={disabled} onClick={onAdopt}>
-          {isVideo ? '将这条回复定稿为口播稿' : '采用为当前草稿'}
-        </Button>
+    <div className="mt-3 flex flex-wrap items-center gap-2" aria-label="保存这条回复">
+      {kinds.map(({ kind, label }) =>
+        saved[kind] !== undefined ? (
+          <Link key={kind} className="text-sm underline" href={href}>
+            已存为{label} · 第 {saved[kind]} 版 · 查看
+          </Link>
+        ) : (
+          <Button key={kind} size="sm" variant="outline" disabled={disabled} onClick={() => onSave(kind)}>
+            存为{label}
+          </Button>
+        )
       )}
     </div>
-  );
-}
-
-export function WorkResultAction({ version, disabled, onSave }: { version: number | null; disabled: boolean; onSave: () => void }) {
-  return (
-    <div className="mt-2">
-      {version !== null ? (
-        <p role="status">已保存成果 · 第 {version} 版</p>
-      ) : (
-        <Button variant="outline" disabled={disabled} onClick={onSave}>
-          保存 Skill 成果
-        </Button>
-      )}
-    </div>
-  );
-}
-
-export function WorkVideoChoices({ version, storyboard, editing, busy, onChoose }: {
-  version: number; storyboard: boolean; editing: boolean; busy: boolean; onChoose: (choice: VideoChoice | 'end') => void;
-}) {
-  return (
-    <section aria-label="口播稿后续选择" className="space-y-3 rounded-xl border border-[var(--border-primary)] bg-[var(--bg-secondary)] p-4">
-      <h2 className="font-medium">{storyboard ? '分镜已保存。要基于这版分镜生成剪辑建议吗？' : '口播稿已定稿。要先制作分镜脚本吗？'}</h2>
-      <p className="text-sm text-[var(--text-secondary)]">
-        本次只绑定口播稿第 {version} 版。选择后才会调用 Agent；以后重新定稿口播稿时不会自动生成。
-      </p>
-      <div className="flex flex-wrap gap-2">
-        {!storyboard && <Button disabled={busy || editing} onClick={() => onChoose('both')}>先做分镜，再生成剪辑建议</Button>}
-        {!storyboard && <Button variant="outline" disabled={busy} onClick={() => onChoose('storyboard')}>只生成分镜</Button>}
-        {storyboard && <Button variant="outline" disabled={busy || editing} onClick={() => onChoose('editing')}>只生成剪辑建议</Button>}
-        <Button variant="ghost" disabled={busy} onClick={() => onChoose('end')}>暂时结束</Button>
-      </div>
-      <p className="text-xs text-[var(--text-tertiary)]">也可以在消息框输入同样的选择；提问卡和自然语言只执行同一个业务动作。</p>
-    </section>
   );
 }
