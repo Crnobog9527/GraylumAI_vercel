@@ -110,7 +110,9 @@ async function open(width: number, height: number) {
 it('the month fills the panel; a chip opens the post, and 改期 opens the reschedule dialog', async () => {
   const { page, errors, ranges, close } = await open(1440, 900);
   try {
-    expect(ranges[0]).toEqual({ from: '2026-10-26T07:00:00.000Z', to: '2026-12-07T08:00:00.000Z' });
+    // The page asks for its first range a moment after it loads: wait for it (as the week case below does) instead of reading it at once.
+    // Read at once it was sometimes not there yet (CI, 2026-11-13: "expected undefined to deeply equal").
+    await expect.poll(() => ranges[0]).toEqual({ from: '2026-10-26T07:00:00.000Z', to: '2026-12-07T08:00:00.000Z' });
     await ui(page.getByRole('button', { name: '15:00 小红书、抖音，已排期，示例文案 a' })).toBeVisible();
     await ui(page.getByRole('button', { name: /20:30 抖音，失败/ })).toBeVisible();
     await ui(page.getByText('还有 2 条')).toBeVisible();
