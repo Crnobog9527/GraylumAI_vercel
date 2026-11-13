@@ -19,10 +19,14 @@ const brief = (text: string) => {
 };
 const host = (url: string) => { try { return new URL(url).hostname; } catch { return ''; } };
 
-export function stepStart(name: string, args: Record<string, unknown>, skillNames: ReadonlySet<string>): StepStart {
+/**
+ * `skillTitles`: this turn's Skills, the name the model calls → the display title users see (the composer menu, 功能广场). A Skill
+ * without a title is shown with no name ("已读取方法"): its name is an internal package name (e.g. short-video-script), never shown.
+ */
+export function stepStart(name: string, args: Record<string, unknown>, skillTitles: ReadonlyMap<string, string>): StepStart {
   if (name === 'load_skill') {
-    const asked = typeof args.name === 'string' ? args.name : '';
-    return skillNames.has(asked) ? { tool: 'load_skill', label: asked } : { tool: 'load_skill' };
+    const title = typeof args.name === 'string' ? skillTitles.get(args.name) : undefined;
+    return title ? { tool: 'load_skill', label: title } : { tool: 'load_skill' };
   }
   // The positioning page's benchmark flow (keywords, discover, more candidates, fetch) is the same "searching" as the general lookups.
   if ((GENERAL_RESEARCH_TOOLS as readonly string[]).includes(name) || (POSITIONING_RESEARCH_TOOLS as readonly string[]).includes(name)) {

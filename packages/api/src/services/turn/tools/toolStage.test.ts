@@ -7,14 +7,22 @@ import type { StepKind } from '../sse';
 import { SKILL_FILE_UNAVAILABLE } from './skills';
 import { savedSteps, stepEnd, stepStart } from './toolStage';
 
-const skills = new Set(['分镜', 'Hooks']);
+const skills: ReadonlyMap<string, string> = new Map([['storyboard', '分镜'], ['hooks', 'Hooks']]);
 const COACH = 'coach_review:00000000-0000-4000-8000-000000000001';
 
 describe('what the page is told when a tool starts', () => {
-  it('load_skill names the Skill only when it is one of this turn\'s, by its public name', () => {
-    expect(stepStart('load_skill', { name: '分镜' }, skills)).toEqual({ tool: 'load_skill', label: '分镜' });
+  it('load_skill names the Skill only when it is one of this turn\'s, by its display title, never by the name the model calls', () => {
+    expect(stepStart('load_skill', { name: 'storyboard' }, skills)).toEqual({ tool: 'load_skill', label: '分镜' });
+    expect(stepStart('load_skill', { name: '分镜' }, skills)).toEqual({ tool: 'load_skill' });
     expect(stepStart('load_skill', { name: 'not-a-skill' }, skills)).toEqual({ tool: 'load_skill' });
     expect(stepStart('load_skill', {}, skills)).toEqual({ tool: 'load_skill' });
+  });
+
+  it('LOAD-SKILL: an internal package name (slug) never becomes the step label, even for a Skill with no title', () => {
+    const untitled: ReadonlyMap<string, string> = new Map();
+    expect(stepStart('load_skill', { name: 'short-video-script' }, untitled)).toEqual({ tool: 'load_skill' });
+    const titled: ReadonlyMap<string, string> = new Map([['short-video-script', '视频口播稿']]);
+    expect(stepStart('load_skill', { name: 'short-video-script' }, titled).label).toBe('视频口播稿');
   });
 
   it('each research tool is "research" with the first ~20 characters of what it looks for, or a page\'s host', () => {
@@ -146,7 +154,7 @@ describe('the steps kept after a reply closed', () => {
 describe('INTEGRATION-SHOTVIVA: an image step', () => {
   const JOB = '00000000-0000-4000-8000-0000000000bb';
   it('starts as an image and ends with its job, or with why it was not made', () => {
-    expect(stepStart('generate_image', { template_id: 'freeform', prompt: 'a private prompt' }, new Set())).toEqual({ tool: 'image' });
+    expect(stepStart('generate_image', { template_id: 'freeform', prompt: 'a private prompt' }, new Map())).toEqual({ tool: 'image' });
     expect(stepEnd('image', JSON.stringify({ status: 'succeeded', jobId: JOB, creditsCharged: 2 }))).toEqual({ state: 'done', job: JOB });
     expect(stepEnd('image', JSON.stringify({ status: 'running', jobId: JOB }))).toEqual({ state: 'done', reason: 'running', job: JOB });
     expect(stepEnd('image', JSON.stringify({ status: 'running' }))).toEqual({ state: 'done', reason: 'running' });

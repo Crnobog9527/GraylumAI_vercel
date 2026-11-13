@@ -13,7 +13,7 @@ vi.mock('@/trpc/client', () => {
     user: { getEntitlements: { useQuery: () => ({ data: state.entitlements }) } },
     settings: { getMembershipPlans: { useQuery: () => ({ data: state.plans }) } } } };
 });
-import { JuryEntry } from './JuryEntry';
+import { JuryEntry, juryProcessText } from './JuryEntry';
 
 const report = { available: true, id: '11111111-2222-4333-8444-555555555555' };
 const plan = (level: string, jury: boolean) => ({ id: level, name: level, level, price: { monthly: level === 'pro' ? 29 : 69, yearly: 0 },
@@ -63,4 +63,12 @@ it('a downgraded user keeps the link to a review they already paid for (running,
     expect(html).toContain(text);
     expect(html).toContain(`/${latest.reviewId}`);
   }
+});
+
+it('FUSION-REVIEW: says a debate round only when the setting allows one (maxRounds 2), never with one round', () => {
+  const one = juryProcessText({ reviewers: ['甲', '乙', '丙'], summary: '主审', maxRounds: 1 });
+  expect(one).not.toContain('辩论');
+  expect(one).toBe('3 位评审（甲、乙、丙）会各自读完你的定位报告、提出修改意见，最后由主审逐条裁决、写出修订稿。用不用修订稿，由你逐章决定。');
+  expect(juryProcessText({ reviewers: ['甲'], summary: '主审' })).not.toContain('辩论');
+  expect(juryProcessText({ reviewers: ['甲', '乙'], summary: '主审', maxRounds: 2 })).toContain('意见不一的地方再辩论一轮，最后由主审');
 });
