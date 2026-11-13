@@ -81,6 +81,17 @@ describe('listChoiceSkills', () => {
     expect(skills.map(skill => [skill.moduleId, skill.revisionId])).toEqual([[id(2), id(502)], [id(3), id(500)]]);
   });
 
+  it('LOAD-SKILL: never lists a Skill free chat excludes (the positioning workflow), unless it is the work conversation\'s own method', async () => {
+    const modules = [moduleRow(1), moduleRow(2, { title: '社媒账号定位与商业规划' }), moduleRow(3)];
+    const h = harness({ [id(2)]: { revisions: [{ revisionId: id(600) }] } });
+    // Module 2's package stands for the positioning workflow: free chat's rule (freeChatExcluded) says no to it.
+    const excluded = vi.fn(async (_source: unknown, descriptor: { revisionId: string }) => descriptor.revisionId === id(600));
+    const list = (pin?: { moduleId: string; revisionId: string }) => listChoiceSkills({ userClient: h.userClient, privateClient: null,
+      visible: visibleOf(modules), modules, runnable: all, listed: all, tier: null, excluded: excluded as never, ...(pin ? { pin } : {}), ...h.seams });
+    expect((await list()).map(skill => skill.name)).toEqual(['Skill 1', 'Skill 3']);
+    expect((await list({ moduleId: id(2), revisionId: id(600) })).map(skill => skill.name)).toEqual(['Skill 1', '社媒账号定位与商业规划', 'Skill 3']);
+  });
+
   it('pins the work conversation\'s method revision on its module only', async () => {
     const modules = [moduleRow(1), moduleRow(2)];
     const h = harness({});

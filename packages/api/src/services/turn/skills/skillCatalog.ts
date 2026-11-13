@@ -3,7 +3,7 @@ import { asRequiredLevel } from '../../skills/memberOnly';
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { databaseSkillSource, userVisibleModules, type Authentication } from '../../skills/databaseSource';
-import { activateFreeChatSkill, isPositioningPackage } from '../../skills/stepGuide';
+import { activateFreeChatSkill, freeChatExcluded } from '../../skills/stepGuide';
 import { discoverSkills, SkillLoadError, type SkillSource } from '../../skills/loader';
 import { catalogVersion } from '../settings/catalogCache';
 
@@ -188,10 +188,7 @@ async function discoverUncached(user: SupabaseClient, admin: SupabaseClient,
     for (const item of found) {
       const descriptor = descriptors.find(d => d.revisionId === item.selection.revisionId);
       if (!descriptor) throw new Error('RUNTIME_CATALOG_CHANGED');
-      if (Object.keys(descriptor.tasks).length) continue;
-      let positioning;
-      try { positioning = await isPositioningPackage(source, descriptor); } catch { continue; }
-      if (positioning) continue;
+      if (await freeChatExcluded(source, descriptor)) continue;
       const entry = { name: item.public.name.slice(0, 80), description: item.public.description.slice(0, DESCRIPTION_CHARS),
         moduleId: row.id, skillId: row.skill_id, packageId: item.selection.packageId, revisionId: item.selection.revisionId,
         packageHash: item.selection.packageHash };
