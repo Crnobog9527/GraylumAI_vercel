@@ -34,14 +34,15 @@ const listParameters = z.object({}).strict();
 
 const GENERATE_DESCRIPTION = 'Make one image with the user\'s connected Shotviva account (Shotviva charges its own credits; '
   + 'Graylum charges nothing). Use "freeform" with a prompt, or a template id with its text fields from list_image_templates. '
-  + 'The user sees the image as a card under your reply: do not repeat a link or describe it at length. Never ask to swap a '
+  + 'The user sees the image as a card under your reply: do not repeat a link, the prompt or the description. Never ask to swap a '
   + 'face or to make someone look like a real person: that is refused.';
 const LIST_DESCRIPTION = 'List the Shotviva image templates the user can use (id, name, category, credits, text fields). '
   + 'Read-only, free.';
 
 export const IMAGE_TOOLS_INSTRUCTIONS = '\n\nImages: when the user asks for a picture, call generate_image once ("freeform" '
-  + 'with a prompt, or a template from list_image_templates). If the tool says the account is not connected, not a member, '
-  + 'or out of Shotviva credits, tell the user plainly; the card under your reply has the button.';
+  + 'with a prompt, or a template from list_image_templates). Keep the reply short: never write out the prompt, the '
+  + 'description or the template fields, before or after the call (the user wrote them; the card shows the image). If the '
+  + 'image is not made, say in one sentence why and what the user can do next; the card under your reply has the button.';
 
 export function imageToolBytes(): number {
   return Buffer.byteLength(JSON.stringify([
@@ -59,8 +60,13 @@ export type ImageToolCalls = {
     => Promise<ImageOutcome>;
 };
 
+/** Owner 2026-11-13: a reply about an image does not repeat the user's prompt; a failed one is one sentence and the next step. */
+const ONE_SENTENCE = 'In one sentence, tell the user why and what they can do next (the card under your reply has the button); '
+  + 'do not repeat the prompt or the description.';
+export const IMAGE_SHOWN_NOTE = 'The image is shown to the user as a card. Do not repeat the prompt or describe the image.';
+export const IMAGE_FAILED_NOTE = `Not made. Do not call again in this reply. ${ONE_SENTENCE}`;
 const IMAGE_UNAVAILABLE = (reason: string) => JSON.stringify({ status: 'failed', code: reason,
-  note: 'Image generation cannot be used in this reply. Tell the user plainly.' });
+  note: `Image generation cannot be used in this reply. ${ONE_SENTENCE}` });
 
 /** The Shotviva idempotency key of one call: the session, the model's call id and the request. A resumed turn replays the
  * same call id and arguments, so it is the same job and charged once; a provider that repeats a call id in a later turn
@@ -75,14 +81,15 @@ export function imageIdempotencyKey(sessionId: string, callId: string, request: 
 export function imageToolResult(outcome: ImageOutcome): string {
   if (outcome.status === 'succeeded') {
     return JSON.stringify({ status: 'succeeded', jobId: outcome.jobId, creditsCharged: outcome.creditsCharged,
-      creditsRemaining: outcome.creditsRemaining, note: 'The image is shown to the user as a card.' });
+      creditsRemaining: outcome.creditsRemaining, note: IMAGE_SHOWN_NOTE });
   }
   if (outcome.status === 'running') {
     return JSON.stringify({ status: 'running', ...(outcome.jobId ? { jobId: outcome.jobId } : {}),
-      note: 'Still generating. Tell the user it will appear in their Shotviva works; do not call again.' });
+      note: 'Still generating. In one sentence, tell the user it will appear in their Shotviva works; do not call again '
+        + 'and do not repeat the prompt.' });
   }
   return JSON.stringify({ status: 'failed', code: outcome.code, ...(outcome.jobId ? { jobId: outcome.jobId } : {}),
-    refunded: outcome.refunded, note: 'Not made. Do not call again in this reply; tell the user why in plain words.' });
+    refunded: outcome.refunded, note: IMAGE_FAILED_NOTE });
 }
 
 /** The two RuntimeTools. `usable`: the plan left them available this reply; each has its own per-reply cap. */
@@ -95,7 +102,8 @@ export function imageTools(input: { usable: (name: string) => boolean; calls: Im
       if (!input.usable(LIST_IMAGE_TEMPLATES_TOOL) || !input.calls || lists >= LIST_IMAGE_TEMPLATES_CALLS) return IMAGE_UNAVAILABLE('unavailable');
       lists++; input.onCall();
       const listed = await swallow('turn_image_templates_failed', input.calls.listTemplates(), { ok: false as const, code: 'unavailable' });
-      if (!listed.ok) return JSON.stringify({ status: 'failed', code: listed.code });
+      if (!listed.ok) return JSON.stringify({ status: 'failed', code: listed.code,
+        note: `The template list could not be read. ${ONE_SENTENCE}` });
       return JSON.stringify({ status: 'ok', items: listed.templates.slice(0, MAX_TEMPLATES).map(template => ({
         id: template.id, name: template.name, category: template.category, credits: template.credits_cost,
         fields: template.fields.copy.map(field => ({ key: field.key, label: field.label, required: field.required,

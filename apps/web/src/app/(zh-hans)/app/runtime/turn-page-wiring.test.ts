@@ -23,6 +23,11 @@ describe('every page on useTurnChat', () => {
       expect(page.source).toContain('<TurnStepList steps={chat.live?.steps ?? []} live');
       expect(page.source).toContain('chat.stepsByTurn.get(reply.turnId) ?? reply.steps ?? []');
     });
+  // Owner 2026-11-13: a reply that only reports an image not made offers no save (offersSave, lib/session-results).
+  for (const page of pages.filter(page => page.source.includes('<SaveReplyButton')))
+    it(`${page.name}: offers a save only where offersSave allows it`, () => {
+      expect(page.source).toContain('offersSave(reply.content, steps) && <SaveReplyButton');
+    });
 });
 
 // A turn that closes while another conversation's turn still holds its freeze reads a low balance, and nothing else asks again: every close

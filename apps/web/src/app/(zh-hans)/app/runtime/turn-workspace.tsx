@@ -12,6 +12,7 @@ import { WorkComposer } from '@/components/opc/work-composer';
 import { useChatImages } from '@/components/opc/composer-image';
 import { WorkspaceFrame } from '@/components/opc/workspace-frame';
 import { SaveReplyButton, SessionResultsPanel } from '@/components/opc/session-results';
+import { offersSave } from '@/lib/session-results';
 import composerStyles from '@/components/opc/work-composer.module.css';
 import { trpc } from '@/trpc/client';
 import { RUNTIME_CHOICES_STALE_MS } from '@/lib/runtime-choices';
@@ -154,14 +155,16 @@ export function TurnWorkspace({ sessionId }: { sessionId: string }) {
       <div ref={scrollArea} className={workStyles.scrollArea} aria-label="对话记录">
         {!messages.length && !outgoing && <RuntimeEmptyState text="输入一条消息，发送后可刷新查看记录。"/>}
         <section className={workStyles.transcript}>
-          {turns.map(reply => <RuntimeTurnView key={reply.seq} userText={asked(reply.turnId)}>
-            {reply.turnId !== null && <TurnStepList steps={chat.stepsByTurn.get(reply.turnId) ?? reply.steps ?? []}/>}
+          {turns.map(reply => { const steps = reply.turnId === null ? [] : chat.stepsByTurn.get(reply.turnId) ?? reply.steps ?? [];
+            return <RuntimeTurnView key={reply.seq} userText={asked(reply.turnId)}>
+            {reply.turnId !== null && <TurnStepList steps={steps}/>}
             {reply.turnId !== null && <AgentWorkStatus items={workRows.get(reply.turnId) ?? []}/>}
             <RuntimeReply text={reply.content}/>
-            {results.data && reply.turnId !== null && <SaveReplyButton sessionId={sessionId} turnId={reply.turnId} reply={reply.content}
+            {results.data && reply.turnId !== null && offersSave(reply.content, steps) && <SaveReplyButton sessionId={sessionId}
+              turnId={reply.turnId} reply={reply.content}
               savedItems={results.data.filter(item => item.sourceTurnId === reply.turnId)}
               onOpenResults={() => { setPanelOpen(true); setReveal(count => count + 1); }}/>}
-          </RuntimeTurnView>)}
+          </RuntimeTurnView>; })}
           {results.isError && <QueryNotice error={results.error} label="本对话成果夹" retry={() => results.refetch()}/>}
           <CompareThread cards={compare.cards} names={compare.names} onQuote={update}
             onAdopted={() => { void compare.refresh(); void chat.reload(); }}/>
