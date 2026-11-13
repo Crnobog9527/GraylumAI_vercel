@@ -50,6 +50,9 @@ jobs:
       - name: Check code pattern ratchet
         run: node scripts/check-pattern-ratchet.mjs
 
+      - name: Check backdrop-filter order (unprefixed last)
+        run: node scripts/check-backdrop-filter-order.mjs
+
       - name: Check new migrations rewrite functions whole
         run: node scripts/check-function-patches.mjs
 

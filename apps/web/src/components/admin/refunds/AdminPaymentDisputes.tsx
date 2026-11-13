@@ -44,6 +44,18 @@ export function ConfirmLost({ provider, pending, onConfirm, onCancel }:
   </div>;
 }
 
+const EMAIL_NOTE: Record<string, string> = {
+  sent: '已给用户发"请重新订阅"邮件。',
+  not_sent: '这笔不需要发"请重新订阅"邮件。',
+  not_won: '这笔拒付不是判赢，没有发邮件。',
+  failed: '"请重新订阅"邮件没发出，请在付款提醒页重发。',
+};
+export function withdrawMessage(result: { restored: number; backfilled?: number; email?: string; duplicate?: boolean }) {
+  if (result.duplicate) return '这笔冻结之前已经撤回过，没有重复操作。';
+  return `已撤回冻结，恢复 ${result.restored} 积分，补发冻结期间的按月积分 ${result.backfilled ?? 0}。`
+    + `订阅继续保持停止续费。${EMAIL_NOTE[result.email ?? ''] ?? ''}`;
+}
+
 export function AdminPaymentDisputes() {
   const [offset, setOffset] = useState(0);
   const rows = trpc.paymentDisputes.list.useQuery({ offset });
@@ -69,7 +81,7 @@ export function AdminPaymentDisputes() {
   });
   const withdraw = trpc.paymentDisputes.withdraw.useMutation({
     onSuccess: result => {
-      setMessage(`已撤回冻结，恢复 ${result.restored} 积分。订阅继续保持停止续费；如需补发未发出的分期，请人工核对。`);
+      setMessage(withdrawMessage(result));
       setSelected(null);
       void utils.paymentDisputes.invalidate();
       void utils.payments.invalidate();

@@ -65,6 +65,8 @@ BEGIN
    OR EXISTS(SELECT 1 FROM opc_video_material_bindings b WHERE b.actor_id=a AND b.session_id=t.session_id AND b.source_script_id=ANY(refs)
     AND b.material_revision::text=t.policy#>>'{workMaterial,revision}')
    OR t.policy#>>'{workSource,contentId}'=ANY(refs::text[])
+   -- CONTENT-CONVERSATION-2 (0541): a topic-window turn given a script or storyboard among its sources.
+   OR EXISTS(SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(t.policy->'workSources')='array' THEN t.policy->'workSources' ELSE '[]'::jsonb END) e WHERE e->>'contentId'=ANY(refs::text[]))
    OR t.session_id IN (SELECT rs.id FROM runtime_sessions rs WHERE rs.actor_id=a AND content_erasure_references(rs.scope,refs)))
   ORDER BY t.id);
  -- A resumed turn's raw responses before the pause are on the turns it continues.

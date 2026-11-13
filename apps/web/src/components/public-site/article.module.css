@@ -10,6 +10,9 @@
   position: relative; width: 100%; max-width: 800px; margin: 0 auto;
   padding: clamp(40px, 7vw, 88px) 16px clamp(64px, 8vw, 112px);
   color: var(--pub-body); font-size: 16px; line-height: 1.8;
+  /* Shared cards placed in the column (ExpertConsultCard on /contact) read these older aliases: the public card values. */
+  --bg-secondary: rgba(255, 255, 255, .78); --border-primary: var(--pub-line);
+  --text-primary: var(--pub-ink); --text-secondary: var(--pub-body);
 }
 .article[data-wide] { max-width: 1000px; }
 @media (min-width: 768px) { .article { padding-inline: 32px; } }
@@ -58,7 +61,7 @@
 /* Cards: white glass on the backdrop's light, an 18px radius and a hairline, as the home page's first-screen cards. */
 .card {
   margin-top: 32px; padding: clamp(20px, 3vw, 28px); border-radius: var(--pub-radius-card, 18px);
-  background: rgba(255, 255, 255, .78); backdrop-filter: blur(20px) saturate(1.4); -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  background: rgba(255, 255, 255, .78); -webkit-backdrop-filter: blur(20px) saturate(1.4); backdrop-filter: blur(20px) saturate(1.4);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .9), 0 0 0 1px rgba(20, 19, 18, .07), var(--pub-shadow-feature);
 }
 .card > :first-child { margin-top: 0; }

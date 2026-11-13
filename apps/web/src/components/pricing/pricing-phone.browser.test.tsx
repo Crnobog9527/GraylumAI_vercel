@@ -41,6 +41,8 @@ beforeAll(async () => {
       // The same pieces, in the same order and wrapper, as app/(zh-hans)/pricing/page.tsx; the plans as the public catalog sends them.
       return `import React from 'react'; import { createRoot } from 'react-dom/client';
         import ${file('../../app/globals.css')};
+        import light from ${file('../design/light-tokens.module.css')};
+        import page from ${file('./pricing-page.module.css')};
         import { PricingPlans } from ${file('./PricingPlans.tsx')};
         import { PricingCreditPacks, PricingFaq, PricingStudio } from ${file('./PricingExtras.tsx')};
         const plan = (level, monthly, yearly, limit) => ({ id: level + '-id', name: level, level, price: { monthly, yearly },
@@ -50,8 +52,8 @@ beforeAll(async () => {
         const plans = [plan('free', 0, 0, 1), plan('pro', 29, 279, 3), plan('gold', 69, 621, 6)];
         const packs = [[990, 9.9], [2990, 29.9], [10990, 99.9]].map(([credits, price], index) => ({ id: 'p' + index, credits, bonus_credits: 0, price }));
         const h = React.createElement;
-        createRoot(document.getElementById('root')).render(h('main', { className: 'light', style: { background: '#fafafa' } },
-          h('div', { className: 'mx-auto grid max-w-6xl gap-12 px-4 py-10 sm:px-6 sm:py-16 md:py-20 lg:px-8' },
+        createRoot(document.getElementById('root')).render(h('main', { className: light.light, style: { background: '#fafaf9' } },
+          h('div', { className: page.pricing },
             h(PricingPlans, { plans, links: { signup: '/login?action=signup', membership: '/app/profile?tab=subscription' } }),
             h(PricingCreditPacks, { packages: packs, plans, failed: false }), h(PricingStudio), h(PricingFaq))));`;
     } }],

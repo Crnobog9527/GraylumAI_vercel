@@ -42,7 +42,7 @@
 .header {
   position: sticky; top: 0; z-index: 30; padding: 12px 0; border-bottom: 1px solid transparent;
   background: color-mix(in srgb, var(--ps-canvas) 94%, transparent);
-  backdrop-filter: saturate(1.4) blur(16px); -webkit-backdrop-filter: saturate(1.4) blur(16px);
+  -webkit-backdrop-filter: saturate(1.4) blur(16px); backdrop-filter: saturate(1.4) blur(16px);
 }
 .root[data-tone='dark'] .header { border-bottom-color: var(--ps-line); }
 /* The light tone is the home page's "晨光" look (dawn-l.module.css sets the --j-* values on the root, Owner 2026-11-14): a
