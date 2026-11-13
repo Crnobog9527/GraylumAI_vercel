@@ -42,3 +42,100 @@
 /* Fills the remaining height so 我的文档 scrolls inside it; [hidden] must win over display:flex. */
 .documentsPane{display:flex;flex-direction:column;flex:1;min-height:0}.documentsPane[hidden]{display:none}
 .evidencePane{flex:1;min-height:0;overflow:auto;padding-bottom:24px}
+
+/*
+ * A phone (under 640px; Owner 2026-11-12, phone plan A: "把它当成一个原生的网页 APP 界面来做……不要像现在这样，就是生硬地挤压").
+ * The same page, laid out the way an app lays one out: the page's name large, the four kinds of material as a row of
+ * pills that slides sideways, the accounts as chips, every line of type large enough to read and every control tall
+ * enough for a thumb (44px), text boxes at 16px so the phone does not zoom in on them, and a topic's details rising from
+ * the foot of the screen as a sheet instead of a small window in the middle. Nothing is added or removed and no word
+ * changes; a computer and a tablet see what they saw. Every rule starts from .page so it wins over the rules above.
+ */
+@media (max-width: 639px) {
+  .page .header { height: auto; min-height: 0; padding: 14px 16px 2px; }
+  .page .header h1 { font-size: 26px; font-weight: 700; line-height: 1.2; letter-spacing: -.03em; }
+  .page .header a { display: inline-flex; align-items: center; min-height: 44px; font-size: 13px; }
+
+  .page .tabs { gap: 8px; margin: 0; padding: 8px 16px 10px; border-bottom: 0; overflow-x: auto; scrollbar-width: none; }
+  .page .tabs::-webkit-scrollbar { display: none; }
+  .page .tabs button {
+    flex: none; min-height: 40px; padding: 0 16px; border: 0; border-radius: 99px; background: #f4f2ee; color: #55524c;
+    font-size: 14px; white-space: nowrap;
+  }
+  .page .tabs button[aria-selected=true] { background: #1f1e1c; color: #fff; font-weight: 600; }
+  .page .intro, .page .tabs + .intro { min-height: 0; margin: 0 16px; padding: 2px 0 12px; border-bottom: 0; font-size: 13px; line-height: 1.6; }
+
+  /* 选题与稿件: the accounts are chips; what is found is cards. */
+  .page .catalog { margin: 0; }
+  .page .catalogNav { gap: 8px; min-height: 0; padding: 0 16px 12px; border-bottom: 0; scrollbar-width: none; }
+  .page .catalogNav::-webkit-scrollbar { display: none; }
+  .page .catalogNav button {
+    min-height: 40px; padding: 0 14px; border-radius: 99px; background: #fff; box-shadow: inset 0 0 0 1px #e3e0d9; font-size: 13px;
+  }
+  .page .catalogNav button[aria-current=page] { background: #fff8e6; box-shadow: inset 0 0 0 1.5px #ffbb17; color: #1f1e1c; }
+  .page .catalogNav button span { font-size: 12px; }
+  .page .catalogContent { padding: 4px 16px 28px; }
+  .page .scopeHead { align-items: flex-start; flex-wrap: wrap; margin-bottom: 18px; }
+  .page .scopeHead h2 { font-size: 19px; font-weight: 650; }
+  .page .scopeHead p { font-size: 13px; }
+  .page .scopeActions button, .page .scopeActions a { min-height: 44px; padding: 0 14px; border-radius: 99px; font-size: 13.5px; }
+  .page .strategyOverview h3 { font-size: 15px; font-weight: 600; }
+  .page .strategyOverview p { font-size: 12.5px; }
+  .page .strategyCards { gap: 10px; margin-inline: -16px; padding: 0 16px 4px; scroll-snap-type: x mandatory; scroll-padding-inline: 16px; scrollbar-width: none; }
+  .page .strategyCards::-webkit-scrollbar { display: none; }
+  .page .strategyCards > a, .page .strategyCards > button, .page .strategyCards > .strategyMissing {
+    flex-basis: 82%; min-height: 116px; border-radius: 18px; font-size: 13px; scroll-snap-align: start;
+  }
+  .page .filters { gap: 8px; margin-bottom: 14px; }
+  .page .filters label:first-child { min-height: 46px; padding: 0 14px; border-radius: 14px; font-size: 13px; }
+  .page .filters input { font-size: 16px; }
+  .page .filters > select, .page .scopeHead select { min-height: 44px; padding: 0 12px; border-radius: 12px; font-size: 16px; }
+  .page .statusTabs { flex-wrap: nowrap; gap: 8px; margin-inline: -16px; padding: 0 16px 2px; overflow-x: auto; scrollbar-width: none; }
+  .page .statusTabs::-webkit-scrollbar { display: none; }
+  .page .statusTabs button { flex: none; min-height: 40px; padding: 0 14px; border-radius: 99px; font-size: 13px; white-space: nowrap; }
+  .page .items { gap: 10px; margin-top: 14px; }
+  .page .item { border-radius: 18px; }
+  .page .itemOpen { min-height: 64px; padding: 14px 16px; }
+  .page .itemOpen strong { font-size: 15px; white-space: normal; }
+  .page .itemOpen small { font-size: 12.5px; line-height: 1.5; }
+  .page .itemOpen > span:last-child { font-size: 13px; }
+  .page .empty { font-size: 13.5px; }
+  .page .pagination { gap: 10px; font-size: 13px; }
+  .page .pagination button { min-height: 44px; padding: 0 16px; border-radius: 99px; font-size: 14px; }
+  .page .catalogNote { font-size: 12px; line-height: 1.6; }
+
+  /* A topic's details: a sheet from the foot of the screen, its main buttons a thumb's height. */
+  .page .backdrop { place-items: end stretch; padding: 0; }
+  .page .dialog {
+    position: relative; width: 100%; min-height: 0; max-height: calc(100dvh - 28px - env(safe-area-inset-top, 0px));
+    border-radius: 24px 24px 0 0; padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .page .dialog::before {
+    content: ''; position: absolute; z-index: 1; top: 8px; left: 50%; width: 36px; height: 5px; margin-left: -18px;
+    border-radius: 99px; background: #d9d9d9;
+  }
+  .page .dialogHead { min-height: 0; padding: 24px 16px 12px; }
+  .page .dialogHead h2 { font-size: 17px; font-weight: 650; }
+  .page .dialogHead button { display: grid; place-items: center; flex: none; width: 44px; height: 44px; margin: -8px -8px 0 0; }
+  .page .dialogBody { padding: 14px 16px 22px; }
+  .page .dialogBody h4 { font-size: 15.5px; }
+  .page .detailIntro h3 { font-size: 17px; }
+  .page .detailIntro p, .page .dialogHead p { font-size: 13px; }
+  .page .actionRow { gap: 10px; }
+  .page .actionRow button, .page .actionRow a { min-height: 48px; border-radius: 14px; font-size: 14px; }
+  .page .metaForm label, .page .publicationForm label { font-size: 13px; }
+  .page .metaForm input, .page .metaForm select, .page .metaForm textarea,
+  .page .publicationForm input, .page .publicationForm select { min-height: 46px; border-radius: 12px; font-size: 16px; }
+  .page .publicationForm button { min-height: 46px; padding: 0 16px; border-radius: 99px; font-size: 14px; }
+}
+@media (max-width: 639px) and (prefers-reduced-motion: no-preference) {
+  .page .dialog { animation: library-sheet-rise .26s cubic-bezier(.32, .72, 0, 1); }
+}
+@keyframes library-sheet-rise { from { translate: 0 100%; } }
+@media (max-width: 639px) {
+  /* The chips are one height, and the small print on a card or a row is still large enough to read. */
+  .page .catalogNav { align-items: center; }
+  .page .catalogNav button { flex: none; height: 40px; }
+  .page .itemOpen span { font-size: 12.5px; }
+  .page .strategyCards small, .page .strategyCards button span, .page .strategyCards a span { font-size: 12.5px; }
+}
