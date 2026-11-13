@@ -154,6 +154,9 @@
 }
 .page .card:hover { z-index: 2; box-shadow: inset 3px 0 0 var(--chip-bar), 0 4px 12px rgba(2, 4, 26, .12); }
 .card time { font-weight: 600; font-variant-numeric: tabular-nums; }
+/* A narrow card beside another: less padding, and the time never cut (it is the one thing that must be read there). */
+.page .card[data-compact] { padding: 4px 3px 4px 7px; }
+.card[data-compact] time { overflow: visible; white-space: nowrap; letter-spacing: -.02em; }
 .cardLine { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Phones: the whole month as a grid (dots for posts), the picked day's posts listed below; the two scroll together. */
