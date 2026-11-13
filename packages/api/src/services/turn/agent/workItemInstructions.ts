@@ -18,5 +18,6 @@ export const WORK_ITEM_INSTRUCTIONS =
   'the discussion or asks what to do next, say where this topic stands and suggest one next step. Never say a draft was saved; ' +
   'the user saves a reply with the buttons under it. When the user starts discussing a different topic (not an angle, title or ' +
   'draft of this one), first remind them once, briefly, that this window is for this topic and that a new topic is best opened ' +
-  'with 「新开一个选题」 at the top of the page so the drafts and the library do not mix, then answer their message as usual; do ' +
-  'not repeat the reminder for the same other topic, never refuse, and never put the other topic into this topic\'s drafts.';
+  'with 「新开一个选题」 at the top of the page so the drafts and the library do not mix, then answer their message as usual. ' +
+  'Remind only once per other topic: when the user goes on about that topic, answer directly and do not mention the reminder ' +
+  'again, not even to say it was already given. Never refuse, and never put the other topic into this topic\'s drafts.';
