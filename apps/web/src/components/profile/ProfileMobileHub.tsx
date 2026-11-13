@@ -1,6 +1,6 @@
 'use client';
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { ChevronLeft, ChevronRight, LogOut, MessageSquareText } from 'lucide-react';
+import { ChevronLeft, ChevronRight, LogOut, MessageSquareText, Shield } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { profileTabHref, type ProfileTab } from '@/lib/profile-tabs';
 import { PROFILE_MENU_ITEMS, useProfileLogout } from './profile-menu';
@@ -15,13 +15,15 @@ const sectionLabel = (tab: ProfileTab) => PROFILE_MENU_ITEMS.find(item => item.i
  * data or a new destination: every row opens a section the desktop menu already has. Shown only at 639px and below
  * (profile-mobile.module.css); the page renders it while no section is chosen in the address.
  */
-export function ProfileMobileHub({ name, initial, avatarUrl, membership, credits, onOpen, onFeedback }: {
+export function ProfileMobileHub({ name, initial, avatarUrl, membership, credits, onOpen, onFeedback, isAdmin = false }: {
   name: string; initial: string; avatarUrl?: string | null;
   /** The plan line under the name; empty while it is not known (never a default plan). */
   membership: string;
   /** The balance, or undefined while it cannot be verified: then a dash, never a zero. */
   credits: number | undefined;
   onOpen: (tab: ProfileTab) => void; onFeedback: () => void;
+  /** An admin's way into the admin console (Owner 2026-11-13). Only the link: /admin still checks the role on the server. */
+  isAdmin?: boolean;
 }) {
   const logout = useProfileLogout();
   const open = (tab: ProfileTab) => (event: React.MouseEvent) => { event.preventDefault(); onOpen(tab); };
@@ -53,6 +55,9 @@ export function ProfileMobileHub({ name, initial, avatarUrl, membership, credits
         <li><button type="button" className={styles.row} onClick={onFeedback}>
           <MessageSquareText size={19} strokeWidth={1.7} aria-hidden="true" /><span>在线反馈</span>
           <ChevronRight size={18} aria-hidden="true" /></button></li>
+        {isAdmin && <li><a className={styles.row} href="/admin" data-testid="profile-hub-admin-entry">
+          <Shield size={19} strokeWidth={1.7} aria-hidden="true" /><span>管理后台</span>
+          <ChevronRight size={18} aria-hidden="true" /></a></li>}
         <li><button type="button" className={`${styles.row} ${styles.quiet}`} disabled={logout.pending} onClick={() => void logout.run()}>
           <LogOut size={19} strokeWidth={1.7} aria-hidden="true" /><span>{logout.pending ? '退出中...' : '退出登录'}</span></button></li>
       </ul>
