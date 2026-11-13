@@ -119,6 +119,11 @@ for (const [width, height] of [[390, 844], [360, 740]] as const) {
       expect(boxTop).toBeGreaterThanOrEqual(panelTop - 1);
       expect(boxTop).toBeLessThan(panelTop + 24);
       if (SHOTS) await page.screenshot({ path: `${SHOTS}/search-${width}-scrolled.png` });
+      // The Chinese name the rows show finds them too, as the code does (before, 小红书 found nothing).
+      await box.fill('小红书');
+      await ui(page.locator('main a[href^="/app/runtime"]')).toHaveCount(14);
+      await box.fill('xiaohongshu');
+      await ui(page.locator('main a[href^="/app/runtime"]')).toHaveCount(14);
       // Typing still filters as before.
       await box.fill('选题');
       await ui(page.getByText('没有匹配的工作。')).toBeVisible();

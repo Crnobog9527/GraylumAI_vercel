@@ -26,13 +26,15 @@ export default function WorkspaceSearch(){
  const back=/^\/app\/(runtime\?session=[0-9a-f-]{36}|positioning\/[0-9a-f-]{36}(\/topics)?)([&#?].*)?$/i.test(returnTo)?returnTo:'/app/positioning';
  const profile=trpc.user.getUserProfile.useQuery();
  const scrollProps=useScrollPosition(profile.data?.id?'opc-search-scroll:'+profile.data.id+':'+(query):null,library.isSuccess&&drafts.isSuccess&&modules.isSuccess);
+ // A platform matches by its code and by the Chinese name the rows show (小红书 as well as xiaohongshu).
  const normalized=query.trim().toLocaleLowerCase();
  const matches=(...values:(string|undefined|null)[])=>!normalized||values.some(value=>value?.toLocaleLowerCase().includes(normalized));
  const accounts=((library.data?.businesses??[]) as Business[]).flatMap(business=>business.accounts);
- const works=accounts.flatMap(account=>account.items.filter(item=>!item.deleted&&matches(item.chatName??item.title,item.brief,account.platform,account.account,account.displayName)).map(item=>({account,item})))
+ const works=accounts.flatMap(account=>account.items.filter(item=>!item.deleted&&matches(item.chatName??item.title,item.brief,account.platform,platformName(account.platform),account.account,account.displayName)).map(item=>({account,item})))
   .sort((a,b)=>Number(Boolean(a.item.archived))-Number(Boolean(b.item.archived)));
  const assigned=new Set(accounts.map(account=>account.strategyDraftId).filter(Boolean));
- const strategies=accounts.filter(account=>account.strategyDraftId&&matches('定位策略',account.platform,account.account,account.displayName));
+ const strategies=accounts.filter(account=>account.strategyDraftId
+  &&matches('定位策略',account.platform,platformName(account.platform),account.account,account.displayName));
  const unassigned=((drafts.data?.drafts??[]) as Draft[]).filter(draft=>!assigned.has(draft.draftId)&&matches(draft.businessName,'定位分析'));
  const skills=(modules.data?.modules??[]).filter(module=>matches(module.title,module.description));
  async function restore(item:Work){
