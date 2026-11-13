@@ -45,6 +45,13 @@ describe('session results panel', () => {
     button(view.tree, '删除').props.onClick?.();
     expect(view.onMode).toHaveBeenCalledWith('delete');
   });
+  it('UI-FINISH: shows no Markdown marks — a plain title and the body formatted as in the conversation', () => {
+    const view = card({ item: { ...item, title: '**一句话说明**：早起的好处', body: '**一句话说明**：早起\n\n- 第一点' } });
+    expect(view.html).not.toContain('**');
+    expect(view.html).toContain('<strong>一句话说明</strong>');
+    expect(view.html).toContain('<li>');
+    expect(view.html).toContain('aria-label="一句话说明：早起的好处"');
+  });
   it('asks before deleting and says the reply stays', () => {
     const view = card({ mode: 'delete' });
     expect(view.html).toContain('生成它的回复仍保留在对话里');
