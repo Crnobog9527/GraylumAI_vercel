@@ -4,8 +4,9 @@
 // HTML, must already be light. Dark routes (expert-consult, agent-first-preview, library/scan-check) are deliberately not listed.
 // publish-monitor covers the data review page, the account confirmation page and one-click publishing: all three sit in WorkspaceFrame.
 // publish-schedule is the schedule page (PUBLISH-SCHEDULE), also in WorkspaceFrame.
+// chats and tools are a phone's 对话 and 功能 pages (MOBILE-UX), both in WorkspaceFrame.
 const LIGHT_PREFIXES = ['/app/positioning', '/app/runtime', '/app/library', '/app/workbench/marketplace', '/app/workbench/search', '/app/profile',
-  '/app/publish-monitor', '/app/publish-schedule'];
+  '/app/publish-monitor', '/app/publish-schedule', '/app/chats', '/app/tools'];
 const LIGHT_EXACT = ['/app'];
 const DARK_UNDER_LIGHT = ['/app/library/scan-check'];
 
