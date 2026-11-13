@@ -66,14 +66,21 @@ export function voiceExamplesText(passages: ReadonlyArray<{ text: string }>): st
 /** The load_skill result (a JSON object as a string) with the examples added as `writingVoiceExamples`, dropping passages from
  * the end until it fits `maxBytes` (what admission reserved for one load); unchanged when nothing fits or the result is not JSON. */
 export function withVoiceExamples(result: string, passages: ReadonlyArray<{ text: string }>, maxBytes: number): string {
+  return fitVoiceExamples(result, passages, maxBytes).result;
+}
+/** The same, also saying which passages (as the model was shown them) went in: PR-3 checks the draft against exactly these. */
+export function fitVoiceExamples(result: string, passages: ReadonlyArray<{ text: string }>, maxBytes: number):
+  { result: string; shown: string[] } {
   let parsed: Record<string, unknown>;
-  try { parsed = JSON.parse(result) as Record<string, unknown>; } catch { return result; }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return result;
+  try { parsed = JSON.parse(result) as Record<string, unknown>; } catch { return { result, shown: [] }; }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { result, shown: [] };
   for (let n = passages.length; n > 0; n--) {
     const text = voiceExamplesText(passages.slice(0, n));
-    if (!text) return result;
+    if (!text) return { result, shown: [] };
     const next = JSON.stringify({ ...parsed, writingVoiceExamples: text });
-    if (Buffer.byteLength(JSON.stringify(next)) <= maxBytes) return next;
+    if (Buffer.byteLength(JSON.stringify(next)) <= maxBytes) {
+      return { result: next, shown: passages.slice(0, n).map(item => excerpt(item.text)).filter(Boolean) };
+    }
   }
-  return result;
+  return { result, shown: [] };
 }

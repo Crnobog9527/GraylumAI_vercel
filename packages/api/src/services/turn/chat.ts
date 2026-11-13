@@ -39,6 +39,7 @@ import { prepareChatTools, type ChatSelection, type ChatToolDeps, type ChatTools
 import { savedSteps } from './tools/toolStage';
 import { createRuntimeBudget } from './settings/budget';
 import { REPLY_CUT, REPLY_CUT_FAILURE, shownSoFar } from './shownReply';
+import { reviseVoiceDraft } from './voiceRevise';
 import { RESEARCH_INPUT_BYTES } from './tools/plan';
 import { fitToolTurn } from './tools/capacity';
 import { chatImages, imageMark, withImages } from './chatImage';
@@ -247,7 +248,8 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
   if (startCredits === undefined) return emit({ type: 'error', code: 'TURN_START_THRESHOLD_UNCONFIGURED' });
   // A resume keeps to what the paused turn has left and replays its receipts.
   const resume = input.resume?.read;
-  const limits = { model: 1 + toolLimits.paidTools + toolLimits.freeTools, ...toolLimits, decisions: 1 };
+  // VOICE-2 PR-3: a reply that may be shown past passages keeps one more call for rewriting the sentences it copied.
+  const limits = { model: 1 + toolLimits.paidTools + toolLimits.freeTools + (tools?.voiceRewrite ? 1 : 0), ...toolLimits, decisions: 1 };
   const replay = resume ? new TurnReplay(resume.calls) : undefined;
   const frozenLimits = resume ? resumeLimits(limits, resume.limits, 0, replay?.replayedModels) : limits;
   const policy = turnPolicy({ topUp: true, q: quote.q, multiplier: quote.multiplier, modelUpperUsd: quote.upperUsd,
@@ -414,12 +416,16 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
     const full = output || reply;
     // The numbers the coach read from screenshots: the block is cut from what is saved and shown, its checked items go to the close.
     const captured = tools?.coachCapture ? extractScreenshots(full) : null;
-    const answer = captured ? captured.body : full;
+    const drafted = captured ? captured.body : full;
     // The fallback refusal: never shown or saved; Graylum bears the model cost (the stop-loss still counts it).
-    if (fallback && isPositioningRefusal(answer)) {
+    if (fallback && isPositioningRefusal(drafted)) {
       await close('failed', { refundAll: true, failureCode: 'positioning_required' });
       return emit({ type: 'error', code: 'POSITIONING_REQUIRED', turnId: opened.turnId });
     }
+    // VOICE-2 PR-3: the sentences copied from the past passages this reply was shown are rewritten, only those, before it is saved.
+    const shown = built?.voiceShown?.() ?? [];
+    const { text: answer, revised: voiceRevised } = shown.length ? await reviseVoiceDraft({ draft: drafted, shown, quote,
+      callDeps, callPolicy, callGate }) : { text: drafted, revised: 0 };
     // 6. Close: settle once, save both messages. A tombstone found here closes as erased and saves nothing.
     answered = true;
     const closed = await close('completed', { delivered: true,
@@ -434,7 +440,8 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
     if (photos) await photos;
     // The held-back tail of a reply that has a hidden block (a lone backtick the stream could not yet tell from its start) goes out now.
     if (captured && answer.length > sentChars && answer.startsWith(reply.slice(0, sentChars))) emit({ type: 'text', delta: answer.slice(sentChars) });
-    emit({ type: 'result', turnId: opened.turnId, body: answer, chargedCredits: closed.chargedCredits, settlement: closed.settlement });
+    emit({ type: 'result', turnId: opened.turnId, body: answer, chargedCredits: closed.chargedCredits, settlement: closed.settlement,
+      ...(voiceRevised ? { voiceRevised } : {}) });
   } catch (error) {
     const thrown = stopped ? stopped.code : error instanceof TurnStop ? error.code : error instanceof TurnDatabaseError ? error.code : 'TURN_FAILED';
     // A turn with images never pauses: a resume could not send them to the model again, so it ends now, refunded in full,

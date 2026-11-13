@@ -12,6 +12,7 @@ import { workItemFromResearchCall, type WorkItem } from '@/components/chat-displ
 import { readTurnView } from '@/app/(zh-hans)/app/positioning/[draftId]/mentor-turn-path';
 import { turnBusyForCredits } from '@/components/opc/credits-label';
 import { announceTurnClosed, onTurnClosed } from './turn-closed-channel';
+import { VOICE_REVISED, voiceRevisedNotice } from './voice-notices';
 import { turnCodeNotice, trimmedToolNotices } from './turn-notices';
 
 /*
@@ -172,7 +173,12 @@ export function useTurnChat(sessionId: string, onSettled: () => void, fetcher: t
     if (!alive.current) return 'unknown';
     setSending(false); setLive(null); settle();
     if (outcome.state === 'lost') return 'unknown';
-    if (!code || code === 'TURN_REQUEST_REPLAYED') return 'done';
+    if (!code || code === 'TURN_REQUEST_REPLAYED') {
+      // VOICE-2 PR-3: the saved reply (read again above) has its copied sentences rewritten; say how many.
+      const revised = outcome.state === 'finished' && outcome.last.type === 'result' ? outcome.last.voiceRevised ?? 0 : 0;
+      if (revised > 0) setNotice({ code: VOICE_REVISED, text: voiceRevisedNotice(revised) });
+      return 'done';
+    }
     if (said) return 'kept';
     setNotice({ code, text: turnCodeNotice(code).text });
     // An error event carries its turn only once one is open: without it (or refused before the stream) nothing was stored or charged,

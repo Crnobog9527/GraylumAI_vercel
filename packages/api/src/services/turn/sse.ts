@@ -39,7 +39,9 @@ export type TurnEvent =
     /** V2-5: what the kind's close did (the mentor's checklist capture: applied fields, versions). */
     kindResult?: unknown;
     /** A report: how it closed (completed, or stopped by its user) and whether it is a complete report. */
-    closeKind?: string; delivered?: boolean }
+    closeKind?: string; delivered?: boolean;
+    /** VOICE-2 PR-3: how many sentences copied from the user's past passages were rewritten before the reply was saved. */
+    voiceRevised?: number }
   | { type: 'error'; code: string; turnId?: number };
 /** Everything one stream may carry, whichever kind of turn it is. */
 export type StreamEvent = TurnEvent | CompareEvent | { type: 'review'; turnId: number; reviewId: string; state: string; reservedCredits: number };
