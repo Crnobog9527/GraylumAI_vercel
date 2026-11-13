@@ -42,7 +42,7 @@ export async function loadShotvivaClient(deps: ShotvivaDeps): Promise<ShotvivaCl
 }
 
 type ProfileRow = { shotviva_account_id: string | null; status: string; is_deleted: unknown };
-async function readProfile(admin: SupabaseClient, profileId: string): Promise<ProfileRow> {
+export async function readProfile(admin: SupabaseClient, profileId: string): Promise<ProfileRow> {
   const { data, error } = await admin.from('profiles').select('shotviva_account_id,status,is_deleted').eq('id', profileId)
     .maybeSingle();
   if (error) throw new ShotvivaConnectError('SHOTVIVA_UNAVAILABLE');
@@ -53,7 +53,7 @@ const active = (row: ProfileRow) => row.status === 'active' && String(row.is_del
 
 /** Pro or Gold only, read live (an expired membership is free); any other or missing level is refused. */
 const PAID_LEVELS: readonly string[] = ['pro', 'gold'];
-async function paidMember(admin: SupabaseClient, profileId: string): Promise<boolean> {
+export async function paidMember(admin: SupabaseClient, profileId: string): Promise<boolean> {
   try { return PAID_LEVELS.includes(String((await readOwnDataTier(admin, profileId))?.level)); }
   catch { throw new ShotvivaConnectError('SHOTVIVA_UNAVAILABLE'); }
 }
@@ -141,7 +141,8 @@ export async function readShotvivaStatus(deps: ShotvivaDeps & { profileId: strin
   }
 }
 
-async function clearLink(admin: SupabaseClient, profileId: string, accountId: string | null) {
+/** Forget the link here; with an account id, only while it is still that id (a newer link is never cleared). */
+export async function clearLink(admin: SupabaseClient, profileId: string, accountId: string | null) {
   const update = admin.from('profiles').update({ shotviva_account_id: null }).eq('id', profileId);
   const { error } = await (accountId === null ? update : update.eq('shotviva_account_id', accountId));
   if (error) throw new ShotvivaConnectError('SHOTVIVA_UNAVAILABLE');

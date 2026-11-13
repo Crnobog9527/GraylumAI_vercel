@@ -17,7 +17,9 @@ import type { TurnDatabase } from '../db';
  */
 
 /** Tools a turn may offer. Research names come from research/tools/names.ts. */
-export type FreeToolName = 'read_source' | 'load_skill' | 'read_skill_file';
+export type FreeToolName = 'read_source' | 'load_skill' | 'read_skill_file' | ImageToolName;
+/** INTEGRATION-SHOTVIVA: image generation through the linked Shotviva account (free here; Shotviva charges its own credits). */
+export type ImageToolName = 'list_image_templates' | 'generate_image';
 export type GeneralResearchToolName = 'social_search' | 'social_account' | 'web_search' | 'web_fetch';
 export type TurnToolName = FreeToolName | GeneralResearchToolName;
 
@@ -27,7 +29,9 @@ export type TrimReason =
   | 'disabled' // the admin switch (chat research, research config) is off
   | 'no_route' // no priced, verified supplier route
   | 'no_key' // the supplier key slot is empty
-  | 'limit'; // the turn's call limits leave no room
+  | 'limit' // the turn's call limits leave no room
+  | 'not_entitled' // the account's membership does not include the tool (Shotviva: free members, Owner 2026-11-05)
+  | 'not_linked'; // the tool needs a connected external account (Shotviva) and there is none
 
 export type ToolAvailability = {
   /** Usable this turn, in offer order. */

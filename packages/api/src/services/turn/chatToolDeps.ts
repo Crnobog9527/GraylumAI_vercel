@@ -15,6 +15,9 @@ import type { ChatToolDeps } from './tools/chatTools';
 import { FREE_RESULT_RESERVE_BYTES } from './tools/plan';
 import { prepareSkills, withPinnedSkill } from './tools/skills';
 import { memberCatalog } from './skills/coachGate';
+import { readShotvivaRouteEnv } from '../../lib/envValidator';
+import { loadShotvivaClient, readProfile } from '../connectors/shotviva/connect';
+import { generateImage, listImageTemplates } from '../connectors/shotviva/images';
 
 /*
  * CORE-PATH-V2 V2-6: what POST /api/turn gives a free chat for its tools. All of it runs before turn_open: the Skill catalog with
@@ -25,8 +28,25 @@ export function chatToolDeps(admin: SupabaseClient, user: () => SupabaseClient):
   // One plan read per request (this object is made for one request): the Skill list and the workspace both ask for it.
   let ownTier: ReturnType<typeof readOwnDataTier> | undefined;
   const tierOf = (actorId: string) => (ownTier ??= readOwnDataTier(admin, actorId));
+  // INTEGRATION-SHOTVIVA: offered on every turn where the deployment names a Shotviva origin (a configuration fact, so the tool list
+  // stays the same through a session); a missing partner key, a free member or an unlinked account trims them for the turn.
+  const shotviva = readShotvivaRouteEnv().shotvivaBaseUrl;
+  const shotvivaDeps = { admin, baseUrl: shotviva };
   return {
     library: true,
+    ...(shotviva ? { images: {
+      async ready(actorId: string) {
+        const [client, tier, profile] = await Promise.all([loadShotvivaClient(shotvivaDeps), tierOf(actorId), readProfile(admin, actorId)]);
+        if (!client) return 'disabled' as const;
+        if (!tier || (tier.level !== 'pro' && tier.level !== 'gold')) return 'not_entitled' as const;
+        return profile.shotviva_account_id ? true as const : 'not_linked' as const;
+      },
+      calls: (actorId: string, sessionId: string) => ({ sessionId,
+        listTemplates: () => listImageTemplates({ ...shotvivaDeps, profileId: actorId }),
+        generate: (input: { idempotencyKey: string; templateId: string; copy: Record<string, string>; aspectRatio?: string }) =>
+          generateImage({ ...shotvivaDeps, profileId: actorId, callId: input.idempotencyKey, templateId: input.templateId,
+            copy: input.copy, ...(input.aspectRatio ? { aspectRatio: input.aspectRatio } : {}) }) }),
+    } } : {}),
     async skills(actorId, pin) {
       const client = user();
       // The request's reads shared by every Skill below: who the caller is (asked once) and which modules the caller can see

@@ -142,3 +142,27 @@ describe('the steps kept after a reply closed', () => {
     expect(savedSteps(many)).toHaveLength(16);
   });
 });
+
+describe('INTEGRATION-SHOTVIVA: an image step', () => {
+  const JOB = '00000000-0000-4000-8000-0000000000bb';
+  it('starts as an image and ends with its job, or with why it was not made', () => {
+    expect(stepStart('generate_image', { template_id: 'freeform', prompt: 'a private prompt' }, new Set())).toEqual({ tool: 'image' });
+    expect(stepEnd('image', JSON.stringify({ status: 'succeeded', jobId: JOB, creditsCharged: 2 }))).toEqual({ state: 'done', job: JOB });
+    expect(stepEnd('image', JSON.stringify({ status: 'running', jobId: JOB }))).toEqual({ state: 'done', reason: 'running', job: JOB });
+    expect(stepEnd('image', JSON.stringify({ status: 'running' }))).toEqual({ state: 'done', reason: 'running' });
+    expect(stepEnd('image', JSON.stringify({ status: 'failed', code: 'IDENTITY_SWAP_REFUSED' })))
+      .toEqual({ state: 'failed', reason: 'IDENTITY_SWAP_REFUSED' });
+    expect(stepEnd('image', JSON.stringify({ status: 'failed', code: 'quota_exhausted' }))).toEqual({ state: 'failed', reason: 'quota_exhausted' });
+    for (const code of ['not_linked', 'membership_required', 'unavailable'])
+      expect(stepEnd('image', JSON.stringify({ status: 'failed', code }))).toEqual({ state: 'skipped', reason: code });
+    // An unknown code or a malformed job id never reaches the page or the saved step as such.
+    expect(stepEnd('image', JSON.stringify({ status: 'failed', code: 'something_new', jobId: 'https://x' })))
+      .toEqual({ state: 'skipped', reason: 'unavailable' });
+    expect(stepEnd('image', 'not json')).toEqual({ state: 'skipped', reason: 'unavailable' });
+  });
+  it('is kept with its job and reason (and no detail)', () => {
+    expect(savedSteps([{ type: 'step', id: '1', tool: 'image', state: 'done', job: JOB },
+      { type: 'step', id: '2', tool: 'image', state: 'failed', reason: 'content_rejected' }]))
+      .toEqual([{ id: '1', tool: 'image', state: 'done', job: JOB }, { id: '2', tool: 'image', state: 'failed', reason: 'content_rejected' }]);
+  });
+});

@@ -62,8 +62,9 @@ export function turnCodeNotice(code: string): { text: string; kept: boolean } {
 }
 
 const TOOL_LABEL: Record<string, string> = { social_search: '社媒搜索', social_account: '账号数据', web_search: '网页搜索', web_fetch: '网页读取',
-  read_source: '读取资料', load_skill: '加载技能', read_skill_file: '读取技能文件' };
-const REASON_LABEL: Record<string, string> = { capacity: '本轮内容已接近输入上限', disabled: '暂未开启', no_route: '暂不可用', no_key: '暂不可用', limit: '本轮次数已用完' };
+  read_source: '读取资料', load_skill: '加载技能', read_skill_file: '读取技能文件', list_image_templates: '图片模板', generate_image: 'Shotviva 生图' };
+const REASON_LABEL: Record<string, string> = { capacity: '本轮内容已接近输入上限', disabled: '暂未开启', no_route: '暂不可用', no_key: '暂不可用', limit: '本轮次数已用完',
+  not_entitled: 'Pro 或 Gold 会员可用', not_linked: '还没连接 Shotviva 账号' };
 
 /** 2.7: a tool the turn cannot use is never dropped silently. One line per reason, in the order the server sent them. */
 export function trimmedToolNotices(tools: ToolAvailability | undefined): string[] {

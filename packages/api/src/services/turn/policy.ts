@@ -26,7 +26,8 @@ export function callCredits(q: string, upperUsd: string, multiplier: string): nu
 }
 
 export const turnLimits = z.object({ model: z.number().int().min(1).max(16), paidTools: z.number().int().min(0).max(8),
-  freeTools: z.number().int().min(0).max(8), decisions: z.number().int().min(0).max(1),
+  // 8 → 10 for INTEGRATION-SHOTVIVA: read_source (5 with own posts) + load_skill (2) + the two image tools (1 each).
+  freeTools: z.number().int().min(0).max(10), decisions: z.number().int().min(0).max(1),
   /** Receipt rows paidTools may use (a benchmark call settles in batches); absent: one row per call. Adds no model call. */
   toolRows: z.number().int().min(1).max(16).optional(),
   /** A resume whose first model call is answered by its receipt (resume.ts): that call is not a call this turn makes. */

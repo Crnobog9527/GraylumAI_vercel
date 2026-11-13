@@ -4,6 +4,7 @@ import { Check, ChevronDown, Loader2, Minus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { stepLine, stepsOpen, stepsSummary, visibleSteps, type ReplyStep } from './turn-step-list-model';
 import styles from './turn-step-list.module.css';
+import { ImageStepCards } from './image-step-cards';
 
 /**
  * The steps of one reply, above its text, in every conversation that shows them (usage: docs/launch/tasks/TURN-STEP-LIST.md).
@@ -21,8 +22,10 @@ export function TurnStepList({ steps, live = false, hasText = false, thinkLabel 
   const shown = visibleSteps(steps, live, hasText).map(step => step.tool === 'think' && thinkLabel ? { ...step, label: thinkLabel } : step);
   if (!shown.length) return null;
   const open = stepsOpen(steps, live, hasText, chosen);
+  // INTEGRATION-SHOTVIVA: an image stays visible under the steps whether the list is folded or open.
+  const images = <ImageStepCards steps={steps}/>;
   if (!open) {
-    return (
+    return (<>
       <div className={styles.wrap} data-turn-step-list="folded">
         <button type="button" className={styles.fold} aria-expanded={false} onClick={() => setChosen(true)}>
           <Check aria-hidden size={14} className={cn(styles.icon, styles.done)} style={{ marginTop: 0 }}/>
@@ -30,9 +33,10 @@ export function TurnStepList({ steps, live = false, hasText = false, thinkLabel 
           <ChevronDown aria-hidden size={14} className={styles.chevron}/>
         </button>
       </div>
-    );
+      {images}
+    </>);
   }
-  return (
+  return (<>
     <div className={styles.wrap} data-turn-step-list="open">
       {!live && (
         <button type="button" className={styles.fold} aria-expanded onClick={() => setChosen(false)}>
@@ -55,5 +59,6 @@ export function TurnStepList({ steps, live = false, hasText = false, thinkLabel 
         })}
       </ul>
     </div>
-  );
+    {images}
+  </>);
 }

@@ -99,3 +99,31 @@ describe('research rounds (Owner 10-20 fallback B, 10-27 pasted links count)', (
     expect(fallbackEligible({ qualified: 3, rounds: { keywordSearches: 1, linkChecks: 0 } })).toBe(false);
   });
 });
+
+describe('INTEGRATION-SHOTVIVA: the image tools', () => {
+  const offered = ['load_skill', 'list_image_templates', 'generate_image'] as const;
+  it('usable: both available, one call each, and the turn still freezes validly with every free tool at its most', async () => {
+    const { plan } = await planTurnTools(input({ offered: [...offered] }));
+    expect(plan.available).toEqual([...offered]);
+    expect(plan.limits).toEqual({ paidTools: 0, freeTools: 4 });
+    // read_source with own posts (5) + load_skill (2) + the two image tools: within turnLimits (10), M = 1 + 3 + 9 = 13 <= 16.
+    expect(() => turnPolicy({ q: '100', multiplier: '6', modelUpperUsd: '0.01', limits: { model: 13, paidTools: 3, freeTools: 9, decisions: 0 },
+      paidToolUpperUsd: ['0.04', '0.04', '0.04'], stopLoss: { limitUsd: 100, p: 8, poolSize: 8, uFastUsd: 1, uBigUsd: 5 },
+      historyItems: 10, inputBytes: 150_000, startThresholdCredits: 1 })).not.toThrow();
+  });
+
+  it('a free member or an unlinked account: both trimmed with the reason and said so, nothing frozen for them', async () => {
+    for (const reason of ['not_entitled', 'not_linked', 'disabled'] as const) {
+      const { plan } = await planTurnTools(input({ offered: [...offered], imagesReady: reason }));
+      expect(plan.available).toEqual(['load_skill']);
+      expect(plan.trimmed).toEqual([{ name: 'list_image_templates', reason }, { name: 'generate_image', reason }]);
+      expect(plan.limits.freeTools).toBe(2);
+      expect(plan.note).toContain(`generate_image (${reason})`);
+    }
+  });
+
+  it('no room for their results: trimmed as capacity', async () => {
+    const { plan } = await planTurnTools(input({ offered: ['list_image_templates', 'generate_image'], requiredBytes: 86_000, inputBytes: 90_000 }));
+    expect(plan.trimmed).toEqual([{ name: 'list_image_templates', reason: 'capacity' }, { name: 'generate_image', reason: 'capacity' }]);
+  });
+});

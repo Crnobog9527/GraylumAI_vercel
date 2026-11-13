@@ -5,7 +5,8 @@ import type { RuntimeTool } from '../agent/runner';
 import type { StepEvent } from '../sse';
 
 /** The tool whose call is the reply itself (a question card): no step is shown for it. */
-const SILENT_TOOLS: ReadonlySet<string> = new Set(['ask_question']);
+// The image template list is a quick read before the image; the image itself is the step the page shows.
+const SILENT_TOOLS: ReadonlySet<string> = new Set(['ask_question', 'list_image_templates']);
 
 /** The step id of the mentor's method, read before the first model call; a `read_skill_file` of the same turn shows on that line. */
 export const METHOD_STEP_ID = 'method';

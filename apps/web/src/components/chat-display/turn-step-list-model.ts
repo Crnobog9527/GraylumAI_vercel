@@ -6,15 +6,19 @@ import type { StepEvent, StepKind, StepState } from '@repo/api/src/services/turn
  * result or Skill text ever reaches the page, so a saved step can hold nothing more.
  */
 export type ReplyStepKind = StepKind | 'think';
-export type ReplyStep = { id: string; tool: ReplyStepKind; state: StepState; label?: string; detail?: string; count?: number; reason?: 'no_brand' };
+export type ReplyStep = { id: string; tool: ReplyStepKind; state: StepState; label?: string; detail?: string; count?: number;
+  reason?: StepEvent['reason'];
+  /** An image step's Shotviva job (INTEGRATION-SHOTVIVA): the card under the reply shows it. */ job?: string };
 
 export const THINKING_STEP: ReplyStep = { id: 'think', tool: 'think', state: 'running' };
 
 /** The step an event describes, in place of the step with the same id (a running step becomes its end), else added last. */
-export function mergeStep(steps: readonly ReplyStep[], event: Pick<StepEvent, 'id' | 'tool' | 'state' | 'label' | 'detail' | 'count' | 'reason'>): ReplyStep[] {
+export function mergeStep(steps: readonly ReplyStep[],
+  event: Pick<StepEvent, 'id' | 'tool' | 'state' | 'label' | 'detail' | 'count' | 'reason' | 'job'>): ReplyStep[] {
   const next: ReplyStep = { id: event.id, tool: event.tool, state: event.state,
     ...(event.label ? { label: event.label } : {}), ...(event.detail ? { detail: event.detail } : {}),
-    ...(event.count !== undefined ? { count: event.count } : {}), ...(event.reason ? { reason: event.reason } : {}) };
+    ...(event.count !== undefined ? { count: event.count } : {}), ...(event.reason ? { reason: event.reason } : {}),
+    ...(event.job ? { job: event.job } : {}) };
   return steps.some(step => step.id === event.id) ? steps.map(step => step.id === event.id ? next : step) : [...steps, next];
 }
 
@@ -30,6 +34,7 @@ export function stepLine(step: ReplyStep): string {
       case 'research': return detail ? `正在联网搜索：${detail}…` : '正在联网搜索…';
       case 'read_source': return '正在查阅资料库…';
       case 'coach_review': return '正在读取你的作品数据…';
+      case 'image': return '正在用 Shotviva 生成图片…';
       default: return '正在处理…';
     }
   }
@@ -39,6 +44,7 @@ export function stepLine(step: ReplyStep): string {
       case 'research': return count === undefined ? '已搜索' : count > 0 ? `已搜索，找到 ${count} 条结果` : '已搜索，没有找到结果';
       case 'read_source': return count === undefined ? '已查阅资料库' : count > 0 ? `已查阅资料库，找到 ${count} 条相关内容` : '已查阅资料库，没有相关内容';
       case 'coach_review': return '已读取你的作品数据';
+      case 'image': return step.reason === 'running' ? '图片还在生成' : '已生成图片';
       default: return '已处理';
     }
   }
@@ -48,6 +54,7 @@ export function stepLine(step: ReplyStep): string {
       case 'research': return '联网搜索暂时没成功，改用已有信息回答';
       case 'read_source': return '资料库暂时读取不了，改为直接回答';
       case 'coach_review': return '作品数据暂时读取不了，改为直接回答';
+      case 'image': return '图片没有生成';
       default: return '这一步没有完成，改为直接回答';
     }
   }
@@ -57,6 +64,7 @@ export function stepLine(step: ReplyStep): string {
     case 'research': return '这次没有联网搜索';
     case 'read_source': return '这次没有查阅资料库';
     case 'coach_review': return '这次没有读取作品数据';
+    case 'image': return '这次没有生成图片';
     default: return '这一步这次没有用到';
   }
 }
