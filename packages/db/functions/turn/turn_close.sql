@@ -99,6 +99,21 @@ BEGIN
       PERFORM public.turn_plan_apply(t, v_kind, p_kind_result);
     ELSIF t.kind = 'voice' THEN
       PERFORM public.turn_voice_apply(t, v_kind, p_kind_result);
+    ELSIF t.kind = 'minutes' THEN
+      -- CONTENT-CONVERSATION-2 (0542): the minutes are one message of the conversation that is never visible, so no later turn's
+      -- history (turn_open step 5) and no page read (turn_session_view) ever holds them; turn_session_minutes lists them. Deleting the
+      -- conversation, its content or the account clears them with every other message.
+      IF jsonb_typeof(p_kind_result) IS DISTINCT FROM 'object' OR jsonb_typeof(p_kind_result->'minutes') IS DISTINCT FROM 'string'
+        OR EXISTS (SELECT 1 FROM jsonb_object_keys(p_kind_result) AS k(key) WHERE k.key <> 'minutes')
+        OR char_length(p_kind_result->>'minutes') NOT BETWEEN 1 AND 40000 THEN
+        RAISE EXCEPTION 'TURN_KIND_RESULT_UNSUPPORTED' USING ERRCODE='22023';
+      END IF;
+      IF v_kind = 'completed' AND p_delivered THEN
+        SELECT coalesce(max(seq), 0) + 1 INTO next_seq FROM session_messages WHERE session_id = t.session_id;
+        INSERT INTO session_messages (session_id, seq, role, turn_id, content, content_hash, visible)
+          VALUES (t.session_id, next_seq, 'assistant', p_turn_id, p_kind_result->>'minutes',
+            encode(sha256(convert_to(p_kind_result->>'minutes', 'UTF8')), 'hex'), false);
+      END IF;
     ELSIF t.kind = 'chat' THEN
       -- PUBLISH-MONITOR: the numbers the coach read from the user's screenshots in this reply, and TURN-STEPS: the steps the reply
       -- showed (a tool kind, an end state, a Skill's public name, a count). Both are best effort: a failure in either never touches

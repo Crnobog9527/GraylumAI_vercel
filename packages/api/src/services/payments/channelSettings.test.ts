@@ -2,6 +2,9 @@
 import { describe, it, expect, vi } from 'vitest';
 import { assertCheckoutChannel, readEffectiveLegacyChannel, readPaymentChannel, paymentChannelSettingSchema } from './channelSettings';
 import type { SupabaseClient } from '@supabase/supabase-js';
+// CHARGEBACK G4 is covered by disputePurchaseBlock.test.ts; these cases are about other purchase rules.
+const disputeBlock = vi.hoisted(() => ({ assert: vi.fn(async () => {}) }));
+vi.mock('./disputePurchaseBlock', async original => ({ ...(await original<object>()), assertNoDisputePurchaseBlock: disputeBlock.assert }));
 
 function database(value: unknown, pending: unknown = null, error: unknown = null, routes: unknown = null) {
   const from = vi.fn((table: string) => {

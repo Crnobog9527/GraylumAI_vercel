@@ -14,7 +14,7 @@ DECLARE
   u_turn numeric; g integer; h integer; available integer; hold uuid; frozen jsonb; history jsonb;
   carried integer := 0;
 BEGIN
-  IF p_kind NOT IN ('chat','mentor','report','plan','compare','jury','jury_adopt','review','voice') THEN
+  IF p_kind NOT IN ('chat','mentor','report','plan','compare','jury','jury_adopt','review','voice','minutes') THEN
     RAISE EXCEPTION 'TURN_KIND_INVALID' USING ERRCODE='22023';
   END IF;
   IF jsonb_typeof(p_policy) <> 'object'
@@ -55,6 +55,11 @@ BEGIN
   ELSE
     SELECT * INTO s FROM runtime_sessions WHERE id = p_session_id AND actor_id = p_actor_id FOR UPDATE;
     IF s.id IS NULL THEN RAISE EXCEPTION 'TURN_SESSION_DENIED' USING ERRCODE='42501'; END IF;
+    -- CONTENT-CONVERSATION-2 (0542): minutes are taken of a conversation the page offers them on (a free conversation or a topic
+    -- window, both of these two scope kinds); no other scope. The session row alone decides, so no other table is read here.
+    IF p_kind = 'minutes' AND s.scope->>'kind' NOT IN ('work_item', 'positioning_draft') THEN
+      RAISE EXCEPTION 'TURN_SESSION_DENIED' USING ERRCODE='42501';
+    END IF;
   END IF;
   -- 2. The same request again: the turn it opened, unchanged.
   SELECT * INTO existing FROM turns WHERE actor_id = p_actor_id AND request_id = p_request_id;
