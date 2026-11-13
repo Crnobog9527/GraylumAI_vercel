@@ -51,6 +51,21 @@ export function saveProblem(reply: string, text: string, items: readonly Session
   return already ? `这段内容已经保存在成果夹里（${RESULT_TYPE_LABEL[already.resultType]}「${already.title}」），不会重复保存。` : '';
 }
 
+/** A reply at most this long, with an image that was not made and none that was, is the failure report and nothing else. */
+export const IMAGE_FAILURE_REPLY_CHARS = 500;
+/**
+ * Whether "保存到成果夹" is offered under a reply. Owner 2026-11-13: a reply that reports an image not made is not a result.
+ * Not offered when the reply has an image step that was not made (failed, or not available to the account), no image step that
+ * was made or is still being made, and a short text (at most IMAGE_FAILURE_REPLY_CHARS characters): a longer reply carries
+ * writing of its own, which stays savable even if its image failed. Every other reply is offered as before.
+ */
+export function offersSave(reply: string, steps: readonly { tool: string; state: string }[]) {
+  const images = steps.filter(step => step.tool === 'image');
+  const notMade = images.some(step => step.state === 'failed' || step.state === 'skipped');
+  const made = images.some(step => step.state === 'done' || step.state === 'running');
+  return !(notMade && !made && Array.from(reply.trim()).length <= IMAGE_FAILURE_REPLY_CHARS);
+}
+
 /** The server accepts only text that appears in the reply verbatim; say so before sending. */
 export function excerptProblem(reply: string, excerpt: string) {
   if (!excerpt.trim()) return '请保留要保存的内容。';

@@ -1,6 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from 'vitest';
-import { imageIdempotencyKey, imageToolBytes, imageToolResult, imageTools, type ImageToolCalls } from './imageTools';
+import { IMAGE_SHOWN_NOTE, IMAGE_TOOLS_INSTRUCTIONS, imageIdempotencyKey, imageToolBytes, imageToolResult, imageTools,
+  type ImageToolCalls } from './imageTools';
+import { IMAGE_STEP_REASONS } from '../sse';
 
 const SESSION = '00000000-0000-4000-8000-000000000051';
 const JOB = '00000000-0000-4000-8000-0000000000aa';
@@ -33,8 +35,7 @@ describe('image tools', () => {
     const c = calls();
     const { generate, onCall } = tools({ calls: c });
     const result = JSON.parse(await generate.execute({ template_id: 'freeform', prompt: 'a red cup' }, 'call-1'));
-    expect(result).toEqual({ status: 'succeeded', jobId: JOB, creditsCharged: 2, creditsRemaining: 8,
-      note: 'The image is shown to the user as a card.' });
+    expect(result).toEqual({ status: 'succeeded', jobId: JOB, creditsCharged: 2, creditsRemaining: 8, note: IMAGE_SHOWN_NOTE });
     expect(JSON.stringify(result)).not.toContain('r2.cloudflarestorage');
     expect(c.generate).toHaveBeenCalledWith({ idempotencyKey: expect.stringMatching(/^graylum:.+:call-1:/), templateId: 'freeform',
       copy: { prompt: 'a red cup' } });
@@ -69,7 +70,7 @@ describe('image tools', () => {
     expect(JSON.parse(await tools({ calls: thrown }).generate.execute({ template_id: 'freeform', prompt: 'x' }, 'c')))
       .toMatchObject({ status: 'failed', code: 'unavailable' });
     const listFails = calls({ listTemplates: vi.fn(async () => { throw new Error('boom'); }) });
-    expect(JSON.parse(await tools({ calls: listFails }).list.execute({}, 'c'))).toEqual({ status: 'failed', code: 'unavailable' });
+    expect(JSON.parse(await tools({ calls: listFails }).list.execute({}, 'c'))).toMatchObject({ status: 'failed', code: 'unavailable' });
   });
 
   it('the template list is short: id, name, category, credits, text fields and ratios only', async () => {
@@ -88,5 +89,28 @@ describe('image tools', () => {
       .toMatchObject({ status: 'failed', code: 'IDENTITY_SWAP_REFUSED' });
     expect(imageToolBytes()).toBe(imageToolBytes());
     expect(imageToolBytes()).toBeGreaterThan(500);
+  });
+
+  // Owner 2026-11-13: on a failed image the reply repeated the user's whole prompt. The model is told, in the instructions and in
+  // every result, to keep it to one sentence and the next step; no result carries the prompt back for it to copy.
+  it('no result invites repeating the prompt; a failure asks for one sentence and the next step', async () => {
+    const prompt = 'a latte on a textured wooden table, morning light';
+    const failures = IMAGE_STEP_REASONS.filter(code => code !== 'running');
+    for (const code of failures) {
+      const c = calls({ generate: vi.fn(async () => ({ status: 'failed' as const, code, topUpUrl: null, jobId: null, refunded: false })) });
+      const text = await tools({ calls: c }).generate.execute({ template_id: 'freeform', prompt }, 'c');
+      expect(text, code).not.toContain('latte');
+      expect(JSON.parse(text).note, code).toMatch(/In one sentence, tell the user why and what they can do next/);
+      expect(JSON.parse(text).note, code).toMatch(/do not repeat the prompt/);
+    }
+    const others = [await tools({ usable: false }).generate.execute({ template_id: 'freeform', prompt }, 'c'),
+      await tools().generate.execute({ template_id: 'freeform', prompt }, 'c'),
+      imageToolResult({ status: 'running', jobId: JOB, viewUrl: 'https://x' })];
+    for (const text of others) {
+      expect(text).not.toContain('latte');
+      expect(JSON.parse(text).note).toMatch(/[Dd]o not repeat the prompt/);
+    }
+    expect(IMAGE_TOOLS_INSTRUCTIONS).toMatch(/never write out the prompt, the description or the template fields/);
+    expect(IMAGE_TOOLS_INSTRUCTIONS).toMatch(/say in one sentence why and what the user can do next/);
   });
 });

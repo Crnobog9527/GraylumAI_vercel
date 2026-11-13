@@ -1,6 +1,9 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
-import { excerptProblem, groupResults, resultErrorText, saveProblem, saveRequestId, savedFromReply, type SessionResultItem } from './session-results';
+import {
+  IMAGE_FAILURE_REPLY_CHARS, excerptProblem, groupResults, offersSave, resultErrorText, saveProblem, saveRequestId, savedFromReply,
+  type SessionResultItem,
+} from './session-results';
 
 const item = (id: string, resultType: SessionResultItem['resultType']): SessionResultItem => ({
   id, familyId: id, version: 1, versions: 1, resultType, title: id, body: 'b', sourceExecutionId: null,
@@ -47,5 +50,26 @@ describe('session results', () => {
   it('maps bounded refusals to plain text and keeps anything else neutral', () => {
     expect(resultErrorText(new Error('OPC_VERSION_CONFLICT'))).toContain('最新版本');
     expect(resultErrorText(new Error('private detail'))).not.toContain('private');
+  });
+});
+
+// Owner 2026-11-13: an image that was not made left "保存到成果夹" under a reply that only said so.
+describe('offersSave', () => {
+  const failed = { tool: 'image', state: 'failed' }, skipped = { tool: 'image', state: 'skipped' };
+  const made = { tool: 'image', state: 'done' }, running = { tool: 'image', state: 'running' };
+  const short = 'Shotviva 的生图额度用完了，充值后再说一声，我就重新生成。';
+  it('not offered under a short reply whose image was not made and none was', () => {
+    expect(offersSave(short, [failed])).toBe(false);
+    expect(offersSave(short, [skipped])).toBe(false);
+    expect(offersSave(short, [{ tool: 'research', state: 'done' }, failed])).toBe(false);
+    expect(offersSave('x'.repeat(IMAGE_FAILURE_REPLY_CHARS), [failed])).toBe(false);
+  });
+  it('offered for every other reply: no image, an image made or still coming, or a long reply with writing of its own', () => {
+    expect(offersSave(short, [])).toBe(true);
+    expect(offersSave(short, [{ tool: 'research', state: 'failed' }])).toBe(true);
+    expect(offersSave(short, [made])).toBe(true);
+    expect(offersSave(short, [failed, made])).toBe(true);
+    expect(offersSave(short, [running])).toBe(true);
+    expect(offersSave('文'.repeat(IMAGE_FAILURE_REPLY_CHARS + 1), [failed])).toBe(true);
   });
 });
