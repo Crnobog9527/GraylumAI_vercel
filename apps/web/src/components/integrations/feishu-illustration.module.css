@@ -1,0 +1,57 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/* FeishuWriteIllustration: a work card on the left moves into the table on the right and becomes its last row. One cycle is
+   3.6s, played twice, then the finished row stays. Reduced motion: the finished row, no movement. */
+.stage { position: relative; display: grid; grid-template-columns: 132px minmax(0, 1fr); align-items: center; gap: 18px; margin: 0;
+  padding: 18px; border: 1px solid var(--gl-border); border-radius: var(--gl-radius-card); background: var(--gl-surface-subtle);
+  overflow: hidden; }
+.work { display: grid; gap: 6px; padding: 12px; border-radius: 12px; background: #fff; box-shadow: 0 0 0 1px rgba(31, 30, 28, .1), 0 6px 16px rgba(31, 30, 28, .08);
+  color: var(--gl-text); }
+.work small { color: var(--gl-text-secondary-aa); font-size: 11px; line-height: 16px; }
+.work b { font-size: 13px; font-weight: 600; line-height: 18px; }
+.work i { display: block; height: 6px; border-radius: 3px; background: #e7e4de; }
+.work i + i { width: 70%; }
+.table { display: grid; border-radius: 10px; background: #fff; box-shadow: 0 0 0 1px rgba(31, 30, 28, .1); overflow: hidden;
+  font-size: 12px; line-height: 18px; color: var(--gl-text-body); }
+.head, .old, .fresh { display: grid; grid-template-columns: 1.6fr 1fr 1fr; }
+.head span, .old span, .fresh span { padding: 7px 9px; border-right: 1px solid var(--gl-border); white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; }
+.head span:last-child, .old span:last-child, .fresh span:last-child { border-right: 0; }
+.head { background: #f4f2ee; color: var(--gl-text-secondary-aa); font-weight: 600; }
+.old, .fresh { border-top: 1px solid var(--gl-border); }
+.old i { display: block; height: 6px; margin: 6px 0; border-radius: 3px; background: #ece9e3; }
+.fresh { background: #e9f3ea; color: var(--gl-text); }
+
+@media (prefers-reduced-motion: no-preference) {
+  .work { animation: carry 3.6s cubic-bezier(.4, 0, .2, 1) 2 both; }
+  .fresh { animation: land 3.6s ease-out 2 both; }
+  .fresh span { animation: fill 3.6s ease-out 2 both; }
+}
+@keyframes carry {
+  0%, 12% { transform: none; opacity: 1; }
+  45% { transform: translateX(70%) scale(.86); opacity: 0; }
+  46%, 74% { transform: none; opacity: 0; }
+  100% { transform: none; opacity: 1; }
+}
+@keyframes land {
+  0%, 40% { background: #fff; }
+  55% { background: #d3ead7; }
+  100% { background: #e9f3ea; }
+}
+@keyframes fill {
+  0%, 44% { color: transparent; }
+  60%, 100% { color: inherit; }
+}
+
+@media (max-width: 479px) {
+  .stage { grid-template-columns: 1fr; gap: 12px; }
+  .work { max-width: 200px; }
+  @media (prefers-reduced-motion: no-preference) {
+    .work { animation-name: carryDown; }
+  }
+}
+@keyframes carryDown {
+  0%, 12% { transform: none; opacity: 1; }
+  45% { transform: translateY(60%) scale(.86); opacity: 0; }
+  46%, 74% { transform: none; opacity: 0; }
+  100% { transform: none; opacity: 1; }
+}

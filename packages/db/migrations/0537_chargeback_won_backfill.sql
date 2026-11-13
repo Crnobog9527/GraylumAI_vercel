@@ -1,7 +1,7 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC.
 -- All rights reserved. This code is proprietary and confidential.
 -- CHARGEBACK G2: withdrawing a dispute hold (won) re-releases the paused monthly credits (Owner 2026-11-14, MASTER_PLAN 2.1;
--- record AD). Number 0531 assigned by the controller; applies after 0530.
+-- record AD). Number 0537 assigned by the controller (renumbered from 0531); applies after 0530.
 -- While a dispute holds an order, pay_waffo_grant_period returns 0, so periods that come due are skipped. Until now they
 -- only came back on a later maintenance run, if at all within its batch. pay_dispute_withdraw (whole definition from
 -- packages/db/functions/pay/ after 0530) now calls pay_waffo_grant_period for every period of a membership order as soon as

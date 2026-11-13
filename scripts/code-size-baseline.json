@@ -22,7 +22,6 @@
   "apps/web/src/app/(zh-hans)/app/workbench/search/page.tsx": {"longLines":9},
   "apps/web/src/components/admin/AdminSidebar.tsx": {"longLines":2},
   "apps/web/src/components/admin/StatsCard.tsx": {"longLines":1},
-  "apps/web/src/components/landing/PublicPageHero.tsx": {"longLines":2},
   "apps/web/src/components/layout/GlobalBanner.tsx": {"longLines":1},
   "apps/web/src/components/opc/content-editor.tsx": {"longLines":9},
   "apps/web/src/components/opc/strategy-overview-dialog.tsx": {"longLines":16},

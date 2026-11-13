@@ -87,15 +87,21 @@ export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,acti
  function startErasure(kind:ContentErasureTarget['kind'],id:string,name:string,related?:string[]){setMenuId('');setErasing({target:{kind,id},name,related});}
  /** The row's "⋯" menu opens below its button, kept inside the window (ChatGPT/Claude style). */
  const menuTrigger=useRef<HTMLElement|null>(null);
- // Esc closes an open row menu and returns focus to its "⋯" button.
+ // Esc closes an open row menu and returns focus to its "⋯" button; a press anywhere outside the menu closes it too (MOBILE-UX:
+ // a tap on blank space did nothing, on the phone and in the desktop rail). Its own "⋯" button still toggles it.
  useEffect(()=>{
   if(!menuId)return;
   function onEscape(event:KeyboardEvent){
    if(event.key!=='Escape')return;
    setMenuId('');menuTrigger.current?.focus();
   }
-  window.addEventListener('keydown',onEscape);
-  return()=>window.removeEventListener('keydown',onEscape);
+  function onOutside(event:PointerEvent){
+   const target=event.target instanceof Element?event.target:null;
+   if(target?.closest('[role="menu"]')||(target&&menuTrigger.current?.contains(target)))return;
+   setMenuId('');
+  }
+  window.addEventListener('keydown',onEscape);document.addEventListener('pointerdown',onOutside,true);
+  return()=>{window.removeEventListener('keydown',onEscape);document.removeEventListener('pointerdown',onOutside,true);};
  },[menuId]);
  function openRowMenu(event:{currentTarget:HTMLElement},id:string){
   menuTrigger.current=event.currentTarget;

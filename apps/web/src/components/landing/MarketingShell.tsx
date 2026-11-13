@@ -9,12 +9,12 @@ import { PublicShell } from '@/components/public-site/PublicShell';
 import { getPublicSiteSettings } from '@/lib/public-site';
 
 /**
- * The Simplified-Chinese marketing pages (pricing, contact, accessibility) on the public shell. `tone` defaults to dark
- * because contact and accessibility are still written for a dark canvas; pricing is on the light tone.
+ * The Simplified-Chinese marketing pages (pricing, contact, accessibility) on the public shell, all on the light tone (the
+ * home page's look, Owner 2026-11-14 PUBLIC-SITE).
  */
 export default async function MarketingShell({
   children,
-  tone = 'dark',
+  tone = 'light',
   mainClassName,
 }: {
   children: ReactNode;
