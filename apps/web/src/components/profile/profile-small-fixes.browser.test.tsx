@@ -26,7 +26,11 @@ const trpcMock = `
     user: { updateUserProfile: { useMutation: () => ({ mutateAsync: async input => input }) } },
     credits: {
       getCreditsSummary: { useQuery: () => ok({ totalSpent: 1284 }) },
-      getCreditTransactions: { useQuery: () => ok({ items: [record('t1', ${JSON.stringify(LONG)}), record('t2', '对话')] }) },
+      // window.__trend: spending on three of the last 14 days (300 today, 150 yesterday, 30 three days ago), for the trend chart.
+      getCreditTransactions: { useQuery: () => ok({ items: window.__trend
+        ? [[0, 300], [1, 150], [3, 30]].map(([daysAgo, amount], index) => ({ ...record('d' + index, '对话'), amount: -amount,
+          created_at: new Date(Date.now() - daysAgo * 86400000).toISOString() }))
+        : [record('t1', ${JSON.stringify(LONG)}), record('t2', '对话')] }) },
     },
     research: { toolCharges: { useQuery: () => ok(undefined) } },
   };
@@ -72,7 +76,7 @@ beforeAll(async () => {
 }, 60000);
 afterAll(async () => { await browser?.close(); }, 30000);
 
-async function open(view: 'header' | 'records' | 'security', width: number): Promise<{ page: Page; errors: string[] }> {
+async function open(view: 'header' | 'records' | 'security', width: number, trend = false): Promise<{ page: Page; errors: string[] }> {
   const page = await browser.newPage({ viewport: { width, height: 800 } });
   const errors: string[] = [];
   // A missing control fails with its own name within seconds instead of running into the test's time limit.
@@ -80,7 +84,7 @@ async function open(view: 'header' | 'records' | 'security', width: number): Pro
   page.on('pageerror', error => errors.push(error.message));
   await page.route('**/*', route => route.abort());
   await page.setContent(`<html lang="zh-Hans"><head><meta charset="utf-8"><style>${css}</style></head><body><div id="root"></div></body></html>`);
-  await page.evaluate(name => { (window as unknown as { __view: string }).__view = name; }, view);
+  await page.evaluate(([name, withTrend]) => Object.assign(window, { __view: name, __trend: withTrend }), [view, trend] as const);
   await page.addScriptTag({ content: code });
   return { page, errors };
 }
@@ -134,3 +138,36 @@ it('the nickname save and cancel buttons have names, and cancel puts the nicknam
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 30000);
+
+// Staging validation, 2026-11-13: "每日消耗趋势" showed 2,959 for 14 days and a flat row of bars. Each bar's height was a share of a
+// box without a height of its own, so every bar fell back to its 4px minimum whatever the day's amount.
+for (const width of [360, 1280]) {
+  it(`${width}px: the daily trend's bars are as tall as their days' spending: the largest fills the chart, half is half, none is a faint mark`, async () => {
+    const { page, errors } = await open('records', width, true);
+    try {
+      const chart = page.getByTestId('credit-trend');
+      await browserExpect(chart).toBeVisible();
+      const bars = await chart.locator('[title$=" 积分"]').evaluateAll(elements => elements.map(element => ({
+        amount: Number(/: (\d+) 积分$/.exec(element.getAttribute('title') ?? '')?.[1]), height: element.getBoundingClientRect().height })));
+      expect(bars).toHaveLength(14);
+      const height = (amount: number) => bars.filter(bar => bar.amount === amount).map(bar => bar.height);
+      const [full] = height(300), [half] = height(150), [tenth] = height(30);
+      // The chart is 200px high; on a computer the date under each bar takes some of it.
+      expect(full).toBeGreaterThan(150);
+      expect(full).toBeLessThanOrEqual(200);
+      expect(half / full).toBeCloseTo(0.5, 1);
+      expect(tenth / full).toBeCloseTo(0.1, 1);
+      // The eleven days without spending: a 2px mark each, not a bar.
+      expect(height(0)).toEqual(Array(11).fill(2));
+      // The bars stand on one line, inside the chart.
+      const box = await chart.boundingBox();
+      const bottoms = await chart.locator('[title$=" 积分"]')
+        .evaluateAll(elements => elements.map(element => Math.round(element.getBoundingClientRect().bottom)));
+      expect(new Set(bottoms).size).toBe(1);
+      expect(bottoms[0]).toBeLessThanOrEqual(Math.round(box!.y + box!.height));
+      await browserExpect(page.getByText('14日总计')).toBeVisible();
+      await browserExpect(page.getByText('480', { exact: true })).toBeVisible();
+      expect(errors).toEqual([]);
+    } finally { await page.close(); }
+  }, 30000);
+}
