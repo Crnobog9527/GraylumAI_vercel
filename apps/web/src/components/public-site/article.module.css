@@ -81,8 +81,8 @@
 .pillLight:hover { border-color: var(--pub-ink); }
 @media (prefers-reduced-motion: reduce) { .pill:hover { translate: none; } }
 
-/* The one-line definition: a gold rule, as the home page marks the current step. */
-.definition { margin-top: clamp(40px, 5vw, 56px); padding: 4px 0 4px 20px; border-left: 3px solid var(--gl-accent-gold, #ffbb17); }
+/* The one-line definition: a quiet warm box, the home page's tag tint (no side rule). */
+.definition { margin-top: clamp(40px, 5vw, 56px); padding: 18px 20px; border-radius: 14px; background: rgba(255, 244, 214, .6); }
 .definition p { margin: 0; color: var(--pub-body); }
 .definition strong { color: var(--pub-ink); font-weight: 600; }
 
