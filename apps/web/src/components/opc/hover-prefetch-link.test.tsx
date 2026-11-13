@@ -62,10 +62,12 @@ function anchors(html: string): Anchor[] {
 
 const FIXED = ['/app/positioning', '/app/workbench/marketplace' + RETURN, '/app/workbench/search' + RETURN, '/app/library' + RETURN];
 const SWITCHED_ON = ['/app/publish-schedule' + RETURN, '/app/publish-monitor' + RETURN];
+// INTEGRATION-SHOTVIVA PR D: 集成, last of the rail's function links.
+const INTEGRATIONS = '/app/integrations';
 
-it('only the fixed entries of the rail fetch ahead while pointed at: four of them, six once 发布排期 and 数据复盘 are links', () => {
-  expect(anchors(shell(false)).filter(a => a.ahead).map(a => a.href)).toEqual(FIXED);
-  expect(anchors(shell(true)).filter(a => a.ahead).map(a => a.href)).toEqual([...FIXED, ...SWITCHED_ON]);
+it('only the fixed entries of the rail fetch ahead while pointed at: five of them, seven once 发布排期 and 数据复盘 are links', () => {
+  expect(anchors(shell(false)).filter(a => a.ahead).map(a => a.href)).toEqual([...FIXED, INTEGRATIONS]);
+  expect(anchors(shell(true)).filter(a => a.ahead).map(a => a.href)).toEqual([...FIXED, ...SWITCHED_ON, INTEGRATIONS]);
 });
 
 it('the top bar, the announcement and every row of the lists stay links that fetch on the click', () => {
