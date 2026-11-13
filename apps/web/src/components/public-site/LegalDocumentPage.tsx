@@ -6,6 +6,7 @@
 
 import { readLegalDoc, type LegalDocName } from '@/lib/legal-docs';
 import { SiteShell } from './SiteShell';
+import { LegalDocNav } from './LegalDocNav';
 import styles from './legal-document.module.css';
 
 /**
@@ -20,7 +21,9 @@ export function LegalDocumentPage({ name }: { name: LegalDocName }) {
         <p className="mb-6 rounded-lg border border-[#2b2b2b] bg-[#141414] px-4 py-3 text-sm text-[#9a9a9a]">
           本页是英文法律文本，以英文为准。如有疑问，请联系 support@graylum.com。
         </p>
-        <div lang="en" className={styles.doc} dangerouslySetInnerHTML={{ __html: html }} />
+        <div lang="en" data-legal-doc className={styles.doc} dangerouslySetInnerHTML={{ __html: html }} />
+        {/* A phone's way round the long documents (the list of sections, from a button in the corner). */}
+        <LegalDocNav />
       </article>
     </SiteShell>
   );

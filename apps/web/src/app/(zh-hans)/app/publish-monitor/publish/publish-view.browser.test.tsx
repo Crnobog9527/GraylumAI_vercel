@@ -2,6 +2,7 @@
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { chromium, expect as ui, type Browser, type Page } from '@playwright/test';
+import tailwind from '@tailwindcss/postcss';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 
 // The layout of one-click publishing inside the workbench's center panel (its real CSS), against simulated tRPC answers;
@@ -35,8 +36,8 @@ beforeAll(async () => {
   const bundle = await build({ configFile: false, logLevel: 'silent',
     define: { 'process.env.NODE_ENV': JSON.stringify('development') },
     oxc: { jsx: { runtime: 'automatic' } },
-    // Only the CSS modules are needed; the app's PostCSS setup (Tailwind) is not loaded.
-    css: { postcss: { plugins: [] } },
+    // The app's own styles (Tailwind and globals.css), so the shared dialog sits where it does in the app (the phone sheet).
+    css: { postcss: { plugins: [tailwind({ base: fileURLToPath(new URL('../../../../../', import.meta.url)) })] } },
     resolve: { alias: { '@': fileURLToPath(new URL('../../../../../', import.meta.url)) } },
     plugins: [{ name: 'publish-layout-fixture', enforce: 'pre',
       resolveId(target: string) {
@@ -53,6 +54,7 @@ beforeAll(async () => {
         return `import React from 'react'; import {createRoot} from 'react-dom/client';
           import {QueryClient,QueryClientProvider} from '@tanstack/react-query';
           import {httpLink} from '@trpc/client'; import {trpc} from ${file('../../../../../trpc/client.ts')};
+          import ${file('../../../../globals.css')};
           import frame from ${file('../../../../../components/opc/workspace-frame.module.css')};
           import {PublishView} from ${file('./publish-view.tsx')};
           const queryClient=new QueryClient({defaultOptions:{queries:{retry:false}}});
@@ -81,7 +83,9 @@ async function open(width: number, height: number) {
   await page.route('**/*', async route => {
     const url = new URL(route.request().url());
     if (!url.pathname.startsWith('/api/trpc/')) {
-      return route.fulfill({ contentType: 'text/html', body: '<body style="margin:0"><div id="root"></div></body>' });
+      // Marked light as the app marks this page (light-app-paths.ts), so the dialog takes the page's light colours.
+      return route.fulfill({ contentType: 'text/html', body: '<html data-first-paint="light"><body style="margin:0">'
+        + '<span data-first-paint="light" hidden></span><div id="root"></div></body></html>' });
     }
     const data = ANSWERS[url.pathname.replace('/api/trpc/', '')] ?? {};
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ result: { data } }) });
@@ -134,3 +138,44 @@ it('on a 360px phone nothing widens the page and the publish button stays in rea
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 30000);
+
+const SHOTS = process.env.PUBLISH_SHOTS;
+for (const [width, height] of [[390, 844], [360, 740]] as const) {
+  it(`on a ${width}px phone the form reads like an app and the confirmation rises from the bottom edge`, async () => {
+    const { page, errors } = await open(width, height);
+    try {
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(width);
+      // One account per full-width row; the brand's own account (X) is picked for this topic.
+      const rows = await page.locator('li[data-ready]').evaluateAll(nodes => nodes.map(node => Math.round(node.getBoundingClientRect().width)));
+      expect(new Set(rows).size).toBe(1);
+      expect(rows[0]).toBeGreaterThan(width - 80);
+      // Fields at 16px, so a phone does not zoom into them.
+      expect(await page.getByRole('textbox').evaluate(node => getComputedStyle(node).fontSize)).toBe('16px');
+      // The bar: the summary and the credits on the left, the button on the right, at the foot of the screen.
+      const bar = page.getByRole('complementary', { name: '发布摘要' });
+      await ui(bar.getByText('最多 6 积分', { exact: false })).toBeVisible();
+      await ui(bar.getByText('X', { exact: true })).toBeVisible();
+      const button = await page.getByRole('button', { name: '发布', exact: true }).boundingBox();
+      const words = await bar.getByText('最多 6 积分', { exact: false }).boundingBox();
+      expect(button!.x).toBeGreaterThan(words!.x + words!.width - 1);
+      expect(button!.height).toBeGreaterThanOrEqual(48);
+      expect(button!.y + button!.height).toBeGreaterThan(height - 80);
+      if (SHOTS) await page.screenshot({ path: `${SHOTS}/publish-${width}.png` });
+
+      await page.getByRole('button', { name: '发布', exact: true }).click();
+      const dialog = page.getByRole('dialog', { name: '确认发布' });
+      await ui(dialog).toBeVisible();
+      await page.waitForTimeout(400);
+      const sheet = await dialog.boundingBox();
+      expect(Math.round(sheet!.width)).toBe(width);
+      expect(Math.round(sheet!.y + sheet!.height)).toBe(height);
+      const confirm = await dialog.getByRole('button', { name: '确认发布' }).boundingBox();
+      expect(confirm!.height).toBeGreaterThanOrEqual(48);
+      await ui(dialog.getByRole('button', { name: '确认发布' })).toBeDisabled();
+      if (SHOTS) await page.screenshot({ path: `${SHOTS}/publish-${width}-sheet.png` });
+      await dialog.getByRole('button', { name: '取消' }).click();
+      await ui(dialog).toBeHidden();
+      expect(errors).toEqual([]);
+    } finally { await page.close(); }
+  }, 30000);
+}

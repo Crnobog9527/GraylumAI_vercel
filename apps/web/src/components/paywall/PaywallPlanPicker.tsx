@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 'use client';
 
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Check, Minus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { trpc } from '@/trpc/client';
@@ -97,7 +97,12 @@ export function PaywallPlanPicker({ plans, billing, selected, disabled, quoteOpt
  */
 export function PaywallCompareTable({ plans }: { plans: PaywallPlan[] }) {
   const features = trpc.publishMonitor.features.useQuery(undefined, { retry: false, staleTime: 300_000 }).data;
+  // A phone (under 640px; Owner 2026-11-12, phone plan A): three columns do not fit, so the table shows one plan at a time and
+  // a switch above it picks which. A computer shows every plan side by side and no switch. The rows and their words are the same.
+  const [picked, setPicked] = useState<PaywallPlan['level'] | null>(null);
   if (plans.length < 2) return null;
+  const shown = plans.find(plan => plan.level === picked)?.level ?? plans[0].level;
+  const otherPlan = (plan: PaywallPlan) => plan.level !== shown && 'max-sm:hidden';
   const yes = <Check className="inline h-4 w-4" aria-label="有" style={{ color: 'var(--success)' }} />;
   const no = <Minus className="inline h-4 w-4" aria-label="没有" style={{ color: 'var(--text-disabled)' }} />;
   const rows: Array<[string, (plan: PaywallPlan) => ReactNode]> = [
@@ -120,18 +125,31 @@ export function PaywallCompareTable({ plans }: { plans: PaywallPlan[] }) {
     ['优先体验内测新功能', plan => (PLAN_EARLY_ACCESS[plan.level] ? yes : no)],
   ];
   return (
-    <table className="w-full text-left text-sm" data-testid="paywall-compare">
+    <table className="w-full text-left text-sm" data-testid="paywall-compare" data-shown={shown}>
+      <caption className="pb-3 sm:hidden">
+        <div role="tablist" aria-label="选择要看的会员档" className="grid gap-1 rounded-lg p-1"
+          style={{ gridTemplateColumns: `repeat(${plans.length}, minmax(0, 1fr))`, background: 'var(--bg-tertiary)' }}>
+          {plans.map(plan => (
+            <button key={plan.id} type="button" role="tab" aria-selected={plan.level === shown} onClick={() => setPicked(plan.level)}
+              className="min-h-11 rounded-md text-sm font-medium"
+              style={plan.level === shown ? { background: 'var(--bg-secondary)', color: 'var(--text-primary)' }
+                : { color: 'var(--text-secondary)' }}>{LABEL[plan.level]}</button>
+          ))}
+        </div>
+      </caption>
       <thead>
         <tr style={{ color: 'var(--text-tertiary)' }}>
           <th className="py-1.5 font-medium">Pro 和 Gold 对比</th>
-          {plans.map(plan => <th key={plan.id} className="py-1.5 font-medium">{LABEL[plan.level]}</th>)}
+          {plans.map(plan => <th key={plan.id} className={cn('py-1.5 font-medium max-sm:w-[42%] max-sm:pl-3 max-sm:text-right',
+            otherPlan(plan))}>{LABEL[plan.level]}</th>)}
         </tr>
       </thead>
       <tbody>
         {rows.map(([label, cell]) => (
           <tr key={label} className="border-t" style={{ borderColor: 'var(--border-primary)', color: 'var(--text-secondary)' }}>
-            <td className="py-1.5">{label}</td>
-            {plans.map(plan => <td key={plan.id} className="py-1.5">{cell(plan)}</td>)}
+            <td className="py-1.5 max-sm:py-2.5">{label}</td>
+            {plans.map(plan => <td key={plan.id} className={cn('py-1.5 max-sm:py-2.5 max-sm:pl-3 max-sm:text-right',
+              otherPlan(plan))}>{cell(plan)}</td>)}
           </tr>
         ))}
       </tbody>

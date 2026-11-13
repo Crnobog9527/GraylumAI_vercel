@@ -110,7 +110,9 @@ async function open(width: number, height: number) {
 it('the month fills the panel; a chip opens the post, and 改期 opens the reschedule dialog', async () => {
   const { page, errors, ranges, close } = await open(1440, 900);
   try {
-    expect(ranges[0]).toEqual({ from: '2026-10-26T07:00:00.000Z', to: '2026-12-07T08:00:00.000Z' });
+    // The page asks for its first range a moment after it loads: wait for it (as the week case below does) instead of reading it at once.
+    // Read at once it was sometimes not there yet (CI, 2026-11-13: "expected undefined to deeply equal").
+    await expect.poll(() => ranges[0]).toEqual({ from: '2026-10-26T07:00:00.000Z', to: '2026-12-07T08:00:00.000Z' });
     await ui(page.getByRole('button', { name: '15:00 小红书、抖音，已排期，示例文案 a' })).toBeVisible();
     await ui(page.getByRole('button', { name: /20:30 抖音，失败/ })).toBeVisible();
     await ui(page.getByText('还有 2 条')).toBeVisible();
@@ -127,11 +129,15 @@ it('the month fills the panel; a chip opens the post, and 改期 opens the resch
     await ui(dialog.getByText('冻结 12 积分', { exact: false })).toBeVisible();
     await ui(dialog.getByText('小红书')).toBeVisible();
     if (SHOTS) await page.screenshot({ path: `${SHOTS}/detail.png` });
+    // The corner icon is named in Chinese too (screen readers said "Close"; validation of #1928): it and the footer button.
+    await ui(dialog.getByRole('button', { name: '关闭', exact: true })).toHaveCount(2);
     await dialog.getByRole('button', { name: '改期' }).click();
     await ui(page.getByRole('dialog').getByLabel('新的发布时间')).toBeVisible();
-    await page.getByRole('button', { name: '关闭' }).click();
-    // The sent post links to itself.
+    // The footer's 关闭 comes before the corner icon.
+    await page.getByRole('dialog').getByRole('button', { name: '关闭', exact: true }).first().click();
+    // The sent post says so in words and links to itself.
     await page.getByRole('button', { name: /09:00 小红书，已发布/ }).click();
+    await ui(page.getByRole('dialog').getByText('小红书 · 已发布')).toBeVisible();
     await ui(page.getByRole('dialog').getByRole('link', { name: '查看帖子' })).toHaveAttribute('href', 'https://example.com/c');
     expect(errors).toEqual([]);
   } finally { await close(); }
@@ -151,6 +157,15 @@ it('"还有 2 条" opens that week on the time axis, scrolled inside the panel; 
       page.getByRole('button', { name: new RegExp(name) }).boundingBox()));
     expect(a!.x + a!.width).toBeLessThanOrEqual(b!.x + 1);
     expect(Math.abs(a!.y - b!.y)).toBeLessThan(25);
+    // Side by side (58px each at 1440px) a card reads its time on a line of its own, nothing cut after it; its platforms below.
+    // Before (validation of #1928) the first line was "15:00 · 已排期" and showed as "15:00…".
+    for (const name of ['15:00 小红书、抖音', '15:20 Instagram']) {
+      const first = await page.getByRole('button', { name: new RegExp(name) }).evaluate(card => {
+        const line = card.firstElementChild as HTMLElement;
+        return { text: line.textContent, cut: line.scrollWidth > line.clientWidth + 1 };
+      });
+      expect(first).toEqual({ text: name.slice(0, 5), cut: false });
+    }
     // The week opens at 8:00 (the earliest post is 9:00): its 9:00 card is in view inside the panel.
     const card = await page.getByRole('button', { name: /09:00 小红书/ }).boundingBox();
     expect(card!.y).toBeGreaterThan(100);
@@ -189,7 +204,7 @@ it('a 375px phone shows the whole month as a grid, today picked; another day lis
     await page.getByRole('button', { name: '今天', exact: true }).click();
     await page.getByRole('button', { name: /15:00 小红书、抖音/ }).click();
     await ui(page.getByRole('dialog').getByRole('button', { name: '取消排期' })).toBeVisible();
-    await page.getByRole('dialog').getByRole('button', { name: '关闭' }).click();
+    await page.getByRole('dialog').getByRole('button', { name: '关闭', exact: true }).first().click();
     // Paging to December lands on the 1st.
     await page.getByRole('button', { name: '下一月' }).click();
     await ui(page.getByRole('group', { name: /2026年12月，选一天/ }).getByRole('button', { name: /12月1日 周二/ }))

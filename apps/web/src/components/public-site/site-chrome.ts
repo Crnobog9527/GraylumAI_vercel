@@ -125,3 +125,6 @@ export const LANGUAGE_NAMES: Record<SiteLocale, string> = {
   'zh-Hans': '简体中文',
   'zh-TW': '繁體中文（台灣）',
 };
+
+/** A link in the crumbs above a page's title. On a phone (under 640px) it is a 44px target; on a computer the small link it was. */
+export const CRUMB_LINK = 'hover:text-[#FFD700] max-sm:inline-flex max-sm:min-h-11 max-sm:items-center';

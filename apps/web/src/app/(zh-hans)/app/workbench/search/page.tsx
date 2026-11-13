@@ -8,6 +8,8 @@ import { useScrollPosition } from '@/components/opc/use-scroll-position';
 import styles from './workspace-search.module.css';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 import { asRequiredLevel, memberOnlyNote } from '@/lib/member-only';
+// The platform names in Chinese (小红书, 抖音), never the stored code (#1904's table).
+import { platformName } from '@/components/publish-monitor/labels';
 
 type Work = { workItemId:string;sessionId:string;title:string;chatName?:string;brief:string|null;archived?:boolean;deleted?:boolean;uiRevision?:number };
 type Account = { projectId:string;platform:string;account:string;displayName?:string;strategyDraftId?:string|null;items:Work[] };
@@ -24,13 +26,15 @@ export default function WorkspaceSearch(){
  const back=/^\/app\/(runtime\?session=[0-9a-f-]{36}|positioning\/[0-9a-f-]{36}(\/topics)?)([&#?].*)?$/i.test(returnTo)?returnTo:'/app/positioning';
  const profile=trpc.user.getUserProfile.useQuery();
  const scrollProps=useScrollPosition(profile.data?.id?'opc-search-scroll:'+profile.data.id+':'+(query):null,library.isSuccess&&drafts.isSuccess&&modules.isSuccess);
+ // A platform matches by its code and by the Chinese name the rows show (小红书 as well as xiaohongshu).
  const normalized=query.trim().toLocaleLowerCase();
  const matches=(...values:(string|undefined|null)[])=>!normalized||values.some(value=>value?.toLocaleLowerCase().includes(normalized));
  const accounts=((library.data?.businesses??[]) as Business[]).flatMap(business=>business.accounts);
- const works=accounts.flatMap(account=>account.items.filter(item=>!item.deleted&&matches(item.chatName??item.title,item.brief,account.platform,account.account,account.displayName)).map(item=>({account,item})))
+ const works=accounts.flatMap(account=>account.items.filter(item=>!item.deleted&&matches(item.chatName??item.title,item.brief,account.platform,platformName(account.platform),account.account,account.displayName)).map(item=>({account,item})))
   .sort((a,b)=>Number(Boolean(a.item.archived))-Number(Boolean(b.item.archived)));
  const assigned=new Set(accounts.map(account=>account.strategyDraftId).filter(Boolean));
- const strategies=accounts.filter(account=>account.strategyDraftId&&matches('定位策略',account.platform,account.account,account.displayName));
+ const strategies=accounts.filter(account=>account.strategyDraftId
+  &&matches('定位策略',account.platform,platformName(account.platform),account.account,account.displayName));
  const unassigned=((drafts.data?.drafts??[]) as Draft[]).filter(draft=>!assigned.has(draft.draftId)&&matches(draft.businessName,'定位分析'));
  const skills=(modules.data?.modules??[]).filter(module=>matches(module.title,module.description));
  async function restore(item:Work){
@@ -51,8 +55,8 @@ export default function WorkspaceSearch(){
   {error&&<p role="alert" className={styles.error}>{error}</p>}
   <div className={styles.results}>
    <section aria-label="工作记录"><h2>工作记录</h2>
-    {strategies.map(account=><Link className={styles.row} href={'/app/positioning/'+account.strategyDraftId} key={'strategy-'+account.projectId}><strong>定位策略</strong><small>{account.platform} · {account.displayName??account.account}</small></Link>)}
-    {works.map(({account,item})=><div className={styles.workRow} key={item.workItemId}><Link className={styles.row} href={'/app/runtime?session='+encodeURIComponent(item.sessionId)}><strong>{item.chatName??item.title}</strong><small>{account.platform} · {account.displayName??account.account}{item.archived?' · 已归档':''}</small></Link>{item.archived&&<button type="button" disabled={Boolean(restoring)} onClick={()=>void restore(item)}>{restoring===item.workItemId?'恢复中…':'恢复'}</button>}</div>)}
+    {strategies.map(account=><Link className={styles.row} href={'/app/positioning/'+account.strategyDraftId} key={'strategy-'+account.projectId}><strong>定位策略</strong><small>{platformName(account.platform)} · {account.displayName??account.account}</small></Link>)}
+    {works.map(({account,item})=><div className={styles.workRow} key={item.workItemId}><Link className={styles.row} href={'/app/runtime?session='+encodeURIComponent(item.sessionId)}><strong>{item.chatName??item.title}</strong><small>{platformName(account.platform)} · {account.displayName??account.account}{item.archived?' · 已归档':''}</small></Link>{item.archived&&<button type="button" disabled={Boolean(restoring)} onClick={()=>void restore(item)}>{restoring===item.workItemId?'恢复中…':'恢复'}</button>}</div>)}
     {unassigned.map(draft=><Link className={styles.row} href={'/app/positioning/'+draft.draftId} key={draft.draftId}><strong>{draft.businessName??'新账号'} · 定位分析</strong><small>{draft.state==='published'?'已确认':'进行中'}</small></Link>)}
     {!library.isLoading&&!drafts.isLoading&&!strategies.length&&!works.length&&!unassigned.length&&<p className={styles.empty}>没有匹配的工作。</p>}
    </section>

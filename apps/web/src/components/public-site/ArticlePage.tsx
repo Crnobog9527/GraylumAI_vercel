@@ -10,7 +10,7 @@ import { JsonLd } from '@/components/seo/JsonLd';
 import type { ArticleBlock, ArticleContent } from '@/lib/seo/article';
 import { blogPostingJsonLd, breadcrumbJsonLd, faqPageJsonLd, softwareApplicationJsonLd, webPageJsonLd } from '@/lib/seo/structured-data';
 import { SiteShell } from './SiteShell';
-import { SITE_CHROME, visibleHref } from './site-chrome';
+import { CRUMB_LINK, SITE_CHROME, visibleHref } from './site-chrome';
 
 const TEXT = 'text-base leading-8 text-[#C8C8C8]';
 
@@ -73,12 +73,13 @@ export function ArticlePage({ content, supportEmail, demo }: {
       <article className={`mx-auto px-4 py-10 sm:px-6 md:py-14 ${demo ? 'max-w-4xl' : 'max-w-3xl'}`}>
         {content.breadcrumb.length > 1 ? (
           <nav aria-label={chrome.breadcrumbLabel} className="mb-6 text-sm text-[#8A8A8A]">
-            <ol className="flex flex-wrap gap-2">
+            {/* On a phone each crumb is a 44px target (max-sm:), and the row's pieces sit on one line. */}
+            <ol className="flex flex-wrap items-center gap-2">
               {content.breadcrumb.map((item, index) => (
-                <li key={item.path} className="flex gap-2">
+                <li key={item.path} className="flex items-center gap-2">
                   {index > 0 ? <span aria-hidden="true">/</span> : null}
                   {index < content.breadcrumb.length - 1
-                    ? <Link href={visibleHref(item.path)} className="hover:text-[#FFD700]">{item.name}</Link>
+                    ? <Link href={visibleHref(item.path)} className={CRUMB_LINK}>{item.name}</Link>
                     : <span aria-current="page">{item.name}</span>}
                 </li>
               ))}
@@ -121,18 +122,24 @@ export function ArticlePage({ content, supportEmail, demo }: {
             <h2 className="text-2xl font-semibold">{section.h2}</h2>
             <Block block={section} />
             {section.table ? (
-              <div className="mt-6 overflow-x-auto rounded-xl border border-[#262626]" role="region" aria-label="对比表格" tabIndex={0}>
-                <table className="w-full min-w-[34rem] border-collapse text-left text-sm leading-7 text-[#C8C8C8]">
+              // A phone (under 640px; Owner 2026-11-12, phone plan A): the table was 561px wide in a 328px column, so its last column
+              // (on the comparison page, Graylum's own) was off the screen with nothing saying so. There each row is a card: what is
+              // compared, then every column's answer under that column's name. From 640px it is the table it was. Same words.
+              <div className={'mt-6 overflow-x-auto rounded-xl border border-[#262626] '
+                + 'max-sm:overflow-visible max-sm:rounded-none max-sm:border-0'} role="region" aria-label="对比表格" tabIndex={0}>
+                <table className="w-full min-w-[34rem] border-collapse text-left text-sm leading-7 text-[#C8C8C8] max-sm:block max-sm:min-w-0">
                   <caption className="sr-only">{section.table.caption}</caption>
-                  <thead className="bg-[#141414] text-white">
+                  <thead className="bg-[#141414] text-white max-sm:sr-only">
                     <tr>{section.table.head.map(cell => <th key={cell} scope="col" className="px-4 py-3 font-semibold">{cell}</th>)}</tr>
                   </thead>
-                  <tbody>
+                  <tbody className="max-sm:grid max-sm:gap-3">
                     {section.table.rows.map(row => (
-                      <tr key={row[0]} className="border-t border-[#262626] align-top">
+                      <tr key={row[0]} className={'border-t border-[#262626] align-top '
+                        + 'max-sm:block max-sm:rounded-xl max-sm:border max-sm:bg-[#101010] max-sm:p-4'}>
                         {row.map((cell, index) => index === 0
-                          ? <th key={cell} scope="row" className="px-4 py-3 font-semibold text-white">{cell}</th>
-                          : <td key={cell} className="px-4 py-3">{cell}</td>)}
+                          ? <th key={cell} scope="row" className="px-4 py-3 font-semibold text-white max-sm:block max-sm:p-0 max-sm:text-base">{cell}</th>
+                          : <td key={cell} className="px-4 py-3 max-sm:mt-3 max-sm:block max-sm:p-0">
+                            <span className="hidden text-xs font-semibold text-[#FFD700] max-sm:block">{section.table!.head[index]}</span>{cell}</td>)}
                       </tr>
                     ))}
                   </tbody>

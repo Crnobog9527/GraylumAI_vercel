@@ -3,7 +3,8 @@
 // real page, the real list (ProfileMobileHub), the real section menu and the app's CSS, with the server calls and the
 // cards of each section replaced by a line naming them. What is checked: the address without a tab is the list; a row
 // opens its section as a page with a way back; the phone's own back returns to the list; a link straight to a section
-// still has a way back; and above 639px the profile center is what it was. PROFILE_MOBILE_SHOTS=<dir> saves screenshots.
+// still has a way back; the list carries the phone's bottom bar with "我的" marked, and a section does not; and above 639px the
+// profile center is what it was. PROFILE_MOBILE_SHOTS=<dir> saves screenshots.
 import { mkdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -43,8 +44,10 @@ const STUBS: Record<string, string> = {
   '@/hooks/use-profile-prefetch': `export const useProfilePrefetch = () => undefined;`,
   '@/lib/supabase': `export const createClient = () => ({ auth: { signOut: async () => { window.signedOut = true; } } });`,
   '@/lib/site-config': `export const buildAppHref = path => '#signed-out' + path;`,
-  '@/components/profile/ProfileShell': `import { createElement } from 'react';
-    export const ProfileShell = ({ children }) => createElement('div', { style: { background: '#f7f7f7', minHeight: '100vh' } }, children);`,
+  // The real shell and top bar (ProfileShell, GlobalHeader) and the real bottom bar (PhoneTabs); only what they need from the app.
+  'next/link': `import { createElement } from 'react'; export default function Link({ prefetch, ...props }) { return createElement('a', props); }`,
+  '@/components/layout/LanguageSwitch': `import { createElement } from 'react';
+    export const LanguageSwitch = () => createElement('button', { type: 'button', 'aria-label': '语言：简体中文' }, '简');`,
   '@/components/layout/GlobalBanner': `export default () => null;`,
   '@/components/founder/FounderBadge': `export const FounderBadge = () => null;`,
   '@/components/founder/FounderProfileCard': `export const FounderProfileCard = () => null;`,
@@ -108,6 +111,8 @@ const hub = (page: Page) => page.getByTestId('profile-hub');
 const card = (page: Page, name: string) => page.locator(`[data-card="${name}"]`);
 const tab = (page: Page) => page.evaluate(() => new URLSearchParams(location.search).get('tab'));
 const sideways = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth - innerWidth);
+const tabs = (page: Page) => page.getByRole('navigation', { name: '主导航' });
+const topLinks = (page: Page) => page.getByRole('navigation', { name: '全局导航' });
 
 for (const width of [390, 360]) {
   it(`${width}px, no section in the address: the "我的" list, with the account, the balance and the five sections as rows`, async () => {
@@ -125,6 +130,20 @@ for (const width of [390, 360]) {
         hub(page).getByRole('button', { name: '在线反馈' }), hub(page).getByRole('button', { name: '退出登录' })]) {
         expect((await name.boundingBox())!.height).toBeGreaterThanOrEqual(44);
       }
+      // The phone's bottom bar, on the bottom edge, with "我的" marked as where one is. The top bar's own three links and the button
+      // that opened the drawer are gone: the bottom bar is the way round, as on the other pages that show it.
+      await browserExpect(tabs(page)).toBeVisible();
+      expect(await tabs(page).getByRole('link').allInnerTexts()).toEqual(['首页', '对话', '功能', '我的']);
+      expect(await tabs(page).getByRole('link', { name: '我的' }).getAttribute('aria-current')).toBe('page');
+      const bar = await tabs(page).boundingBox();
+      expect(Math.round(bar!.y + bar!.height)).toBe(780);
+      await browserExpect(topLinks(page)).toBeHidden();
+      await browserExpect(page.getByRole('button', { name: '打开导航' })).toBeHidden();
+      // The last row can be brought clear of the bar.
+      await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+      const last = await hub(page).getByRole('button', { name: '退出登录' }).boundingBox();
+      expect(last!.y + last!.height).toBeLessThanOrEqual(bar!.y);
+      await page.evaluate(() => window.scrollTo(0, 0));
       // The section behind the list and the drawer's button are not on screen; nothing scrolls sideways.
       await browserExpect(card(page, 'UserProfileHeader')).toBeHidden();
       await browserExpect(page.getByRole('button', { name: '菜单' })).toBeHidden();
@@ -142,6 +161,8 @@ it('a row opens its section as a page with its name and a way back; the back but
     await browserExpect(hub(page)).toHaveCount(0);
     await browserExpect(card(page, 'SecuritySettingsCard')).toBeVisible();
     await browserExpect(page.getByRole('heading', { level: 1, name: '账户安全' })).toBeVisible();
+    // A section is a page of its own: no bottom bar under it, and the way back is its top row.
+    await browserExpect(tabs(page)).toHaveCount(0);
     if (shots) await page.screenshot({ path: `${shots}/section-390.png` });
     const back = page.getByRole('button', { name: '返回我的' });
     expect((await back.boundingBox())!.width).toBeGreaterThanOrEqual(44);
@@ -209,6 +230,7 @@ it('700px (between the phone and the desktop widths): no list and no back row; t
     await browserExpect(card(page, 'SecuritySettingsCard')).toBeVisible();
     await browserExpect(page.getByRole('button', { name: '菜单' })).toBeVisible();
     await browserExpect(page.getByRole('button', { name: '返回我的' })).toBeHidden();
+    await browserExpect(topLinks(page)).toBeVisible();
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 30000);
@@ -219,6 +241,9 @@ it('1280px: the profile center is what it was: the section menu on the left, 个
     await browserExpect(card(page, 'UserProfileHeader')).toBeVisible();
     await browserExpect(hub(page)).toBeHidden();
     await browserExpect(page.getByRole('heading', { name: '个人中心' })).toBeVisible();
+    // No bottom bar on a computer (it is in the page, drawn only on a phone), and the top bar keeps its three links.
+    await browserExpect(tabs(page)).toBeHidden();
+    await browserExpect(topLinks(page)).toBeVisible();
     await page.getByRole('button', { name: '积分记录' }).click();
     expect(await tab(page)).toBe('credits');
     await browserExpect(card(page, 'CreditRecordsCard')).toBeVisible();

@@ -2,6 +2,7 @@
 'use client';
 
 import { AsDemo } from '@/components/chat-display/display-heading';
+import { DEMO_LABEL } from '@/components/landing/demo/demo-script';
 import { J_FIELD_VALUES, J_FIELDS, J_STEPS } from '@/lib/landing/landing-copy-j-persona';
 import { J_BENCHMARK_TABLE } from '@/lib/landing/landing-copy-j-takeover';
 import { L_LATER_FLYWHEEL } from '@/lib/landing/landing-copy-l-later';
@@ -26,6 +27,11 @@ export const HERO_JUDGEMENTS = {
   left: ['goal', 'benchmark_findings'],
   right: ['feasibility', 'platform_choice'],
 } as const;
+/**
+ * The benchmark card's title. The table's own title ends in （示例）; the card carries the 示例 tag beside its title like the
+ * other five, so the word is said once (staging review of #1929).
+ */
+export const HERO_BENCHMARK_TITLE = J_BENCHMARK_TABLE.title.replace(`（${DEMO_LABEL}）`, '');
 export const heroJudgement = (id: string) => ({ title: FIELD_TITLES.get(id) ?? '', value: plain(J_FIELD_VALUES[id]?.value ?? '') });
 
 function Judgement({ id }: { id: string }) {
@@ -55,7 +61,7 @@ export function HeroWindowL() {
       <div className={styles.side} data-side="left" aria-hidden="true">
         <Judgement id={goal} />
         <div className={styles.card}>
-          <h3>{J_BENCHMARK_TABLE.title}<DemoTag /></h3>
+          <h3>{HERO_BENCHMARK_TITLE}<DemoTag /></h3>
           <ul>{J_BENCHMARK_TABLE.rows.slice(0, 3).map(([account, state]) => <li key={account}>{account}<span>{state}</span></li>)}</ul>
         </div>
         <Judgement id={findings} />

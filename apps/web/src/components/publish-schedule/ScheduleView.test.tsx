@@ -163,6 +163,13 @@ describe('a post opened from the calendar', () => {
       targets: [{ connectionId: 'c1', platform: 'xiaohongshu', status: 'published', url: 'https://example.com/p/1' }] }) as never}
       onClose={() => {}} onChange={() => {}} />);
     expect(sent).toMatch(/<a[^>]*href="https:\/\/example.com\/p\/1"[^>]*>查看帖子<\/a>/);
+    expect(text(sent)).toContain('小红书 · 已发布');
+    // Sent without an address from the platform: still says 已发布, with no link (validation of #1928).
+    const noLink = renderToStaticMarkup(<ScheduleDetailDialog entry={post('j6', inHours(-2), { state: 'completed', chargedCredits: 6,
+      targets: [{ connectionId: 'c1', platform: 'xiaohongshu', status: 'published', url: null }] }) as never}
+      onClose={() => {}} onChange={() => {}} />);
+    expect(text(noLink)).toContain('小红书 · 已发布');
+    expect(noLink).not.toContain('查看帖子');
   });
 });
 

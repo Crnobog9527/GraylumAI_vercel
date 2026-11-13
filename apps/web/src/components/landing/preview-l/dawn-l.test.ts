@@ -9,7 +9,7 @@ import { J_BENCHMARK_TABLE } from '@/lib/landing/landing-copy-j-takeover';
 import { L_FLOW_ONE } from '@/lib/landing/landing-copy-l-flow';
 import { L_LATER_FLYWHEEL } from '@/lib/landing/landing-copy-l-later';
 import { L_PLAIN_SWAPS, L_POSITIONING_MOMENTS } from '@/lib/landing/landing-copy-l-positioning';
-import { HERO_JUDGEMENTS, heroJudgement, HeroWindowL } from './HeroWindowL';
+import { HERO_BENCHMARK_TITLE, HERO_JUDGEMENTS, heroJudgement, HeroWindowL } from './HeroWindowL';
 import { STEP_ONE_PICTURES } from './StepOneFlowL';
 
 const SRC = join(__dirname, '../../..');
@@ -47,7 +47,7 @@ describe('the home page\'s 晨光 layer and the first screen\'s product window',
     const picture = text(renderToStaticMarkup(createElement('div', null, STEP_ONE_PICTURES[2].draw(null))));
     const [review] = L_LATER_FLYWHEEL.review.rows;
     const known = [
-      ...J_STEPS.map(step => step.title), DEMO_LABEL, J_BENCHMARK_TABLE.title,
+      ...J_STEPS.map(step => step.title), DEMO_LABEL, HERO_BENCHMARK_TITLE,
       ...J_BENCHMARK_TABLE.rows.slice(0, 3).flatMap(([account, state]) => [account, state]),
       L_LATER_FLYWHEEL.review.notice, ...review,
       ...judgements.flatMap(id => [heroJudgement(id).title, heroJudgement(id).value]),
@@ -93,12 +93,19 @@ describe('the home page\'s 晨光 layer and the first screen\'s product window',
     for (const side of sides) expect(side[2].match(new RegExp(`<h3>[^<]*<span class="[^"]*tag[^"]*">${DEMO_LABEL}</span></h3>`, 'g'))).toHaveLength(3);
     expect(html.split('aria-hidden="true"').length - 1).toBeGreaterThanOrEqual(2);
     const cards = html.slice(0, html.indexOf(J_STEPS[0].title));
-    expect(cards).toContain(J_BENCHMARK_TABLE.title);
+    // Staging review of #1929: the benchmark table's own title ends in （示例）; beside the tag that said it twice.
+    expect(J_BENCHMARK_TABLE.title).toBe(`${HERO_BENCHMARK_TITLE}（${DEMO_LABEL}）`);
+    expect(cards).toContain(`<h3>${HERO_BENCHMARK_TITLE}<span`);
+    const titles = [...cards.matchAll(/<h3>(.*?)<\/h3>/g)].map(match => text(match[1]));
+    expect(titles).toHaveLength(6);
+    for (const title of titles) expect(title.split(DEMO_LABEL).length - 1, title).toBe(1);
     expect(cards).toContain(L_LATER_FLYWHEEL.review.notice);
     // The cards are laid over the stage's edges: they are positioned columns, shown only on a very wide screen.
     const layer = read('components/landing/preview-l/dawn-l.module.css');
     expect(layer).toMatch(/\.side \{\s*position: absolute;/);
     expect(layer).toContain('@media (max-width: 1599px) { .side { display: none; } }');
+    // Staging review of #1929: a long title turned inside a word ("…变 / 现方式）"). It turns at a bracket or a comma.
+    expect(layer).toContain('.card h3 { word-break: keep-all; overflow-wrap: anywhere; }');
   });
 
   it('puts the layer on the home page only: one root carries it, one first screen draws the window', () => {

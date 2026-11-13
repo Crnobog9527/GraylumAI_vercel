@@ -10,6 +10,8 @@ import { trpc } from '@/trpc/client';
 import { logClientDevError } from '@/lib/client-log';
 import { useTicketAttachments } from '@/hooks/use-ticket-attachments';
 import { categoryOptions, type MockUser } from './ticketsShared';
+// Phones only (639px and below): the app-style layout of the ticket pages; a computer is unchanged.
+import phone from './tickets-phone.module.css';
 
 // 创建工单表单
 export const CreateTicketForm = memo(function CreateTicketForm({
@@ -52,7 +54,7 @@ export const CreateTicketForm = memo(function CreateTicketForm({
 
   return (
     <div
-      className="rounded-2xl p-6"
+      className={`rounded-2xl p-6 ${phone.card}`}
       style={{
         background: 'var(--bg-secondary)',
         border: '1px solid var(--border-primary)',
@@ -62,16 +64,16 @@ export const CreateTicketForm = memo(function CreateTicketForm({
       <Button
         variant="ghost"
         onClick={onBack}
-        className="mb-4 -ml-2"
+        className={`mb-4 -ml-2 ${phone.back}`}
         style={{ color: 'var(--text-secondary)' }}
       >
         <ArrowLeft className="h-4 w-4 mr-2" />
         返回工单列表
       </Button>
 
-      <h3 className="text-lg font-bold mb-6" style={{ color: 'var(--text-primary)' }}>创建新工单</h3>
+      <h3 className={`text-lg font-bold mb-6 ${phone.title}`} style={{ color: 'var(--text-primary)' }}>创建新工单</h3>
 
-      <form onSubmit={handleSubmit} className="space-y-6">
+      <form onSubmit={handleSubmit} className={`space-y-6 ${phone.form}`}>
         <div>
           <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-primary)' }}>
             标题 <span style={{ color: 'var(--error)' }}>*</span>
@@ -98,7 +100,7 @@ export const CreateTicketForm = memo(function CreateTicketForm({
             </SelectTrigger>
             <SelectContent>
               {categoryOptions.map(opt => (
-                <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                <SelectItem key={opt.value} value={opt.value} className={phone.option}>{opt.label}</SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -175,6 +177,8 @@ export const CreateTicketForm = memo(function CreateTicketForm({
                     type="button"
                     variant="ghost"
                     size="sm"
+                    className={phone.remove}
+                    aria-label={`移除 ${att.name}`}
                     onClick={() => removeAttachment(index)}
                     style={{ color: 'var(--text-tertiary)' }}
                   >
@@ -186,7 +190,7 @@ export const CreateTicketForm = memo(function CreateTicketForm({
           )}
         </div>
 
-        <div className="flex justify-end gap-3">
+        <div className={`flex justify-end gap-3 ${phone.actions}`}>
           <Button
             type="button"
             variant="outline"

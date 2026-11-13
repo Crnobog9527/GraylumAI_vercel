@@ -9,7 +9,7 @@ import { JsonLd } from '@/components/seo/JsonLd';
 import { REFUND_PAGE } from '@/lib/seo/content/refund';
 import { breadcrumbJsonLd, webPageJsonLd } from '@/lib/seo/structured-data';
 import { SiteShell } from './SiteShell';
-import { SITE_CHROME, visibleHref } from './site-chrome';
+import { CRUMB_LINK, SITE_CHROME, visibleHref } from './site-chrome';
 
 const TEXT = 'text-base leading-8 text-[#C8C8C8]';
 
@@ -27,9 +27,9 @@ export function RefundPage({ supportEmail }: { supportEmail?: string | null }) {
       ]} />
       <article className="mx-auto max-w-3xl px-4 py-10 sm:px-6 md:py-14">
         <nav aria-label={chrome.breadcrumbLabel} className="mb-6 text-sm text-[#8A8A8A]">
-          <ol className="flex flex-wrap gap-2">
-            <li><Link href={visibleHref('/')} className="hover:text-[#FFD700]">{REFUND_PAGE.crumbs[0].name}</Link></li>
-            <li className="flex gap-2"><span aria-hidden="true">/</span><span aria-current="page">{REFUND_PAGE.crumbs[1].name}</span></li>
+          <ol className="flex flex-wrap items-center gap-2">
+            <li><Link href={visibleHref('/')} className={CRUMB_LINK}>{REFUND_PAGE.crumbs[0].name}</Link></li>
+            <li className="flex items-center gap-2"><span aria-hidden="true">/</span><span aria-current="page">{REFUND_PAGE.crumbs[1].name}</span></li>
           </ol>
         </nav>
         <h1 className="text-3xl font-bold leading-tight sm:text-4xl">{REFUND_PAGE.h1}</h1>

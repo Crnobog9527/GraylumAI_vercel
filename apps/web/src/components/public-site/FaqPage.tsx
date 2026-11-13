@@ -10,7 +10,7 @@ import { JsonLd } from '@/components/seo/JsonLd';
 import { FAQ_PAGE, faqEntries, faqGroups } from '@/lib/seo/content/faq';
 import { breadcrumbJsonLd, faqPageJsonLd, webPageJsonLd } from '@/lib/seo/structured-data';
 import { SiteShell } from './SiteShell';
-import { SITE_CHROME, visibleHref } from './site-chrome';
+import { CRUMB_LINK, SITE_CHROME, visibleHref } from './site-chrome';
 
 /** /faq: the landing page's FAQ on its own page; the FAQPage data is made from the same groups the page shows. */
 export function FaqPage({ supportEmail }: { supportEmail?: string | null }) {
@@ -28,9 +28,9 @@ export function FaqPage({ supportEmail }: { supportEmail?: string | null }) {
       ]} />
       <div className="mx-auto max-w-3xl px-4 pt-10 sm:px-6 md:pt-14">
         <nav aria-label={chrome.breadcrumbLabel} className="mb-6 text-sm text-[#8A8A8A]">
-          <ol className="flex flex-wrap gap-2">
-            <li><Link href={visibleHref('/')} className="hover:text-[#FFD700]">{FAQ_PAGE.breadcrumb[0].name}</Link></li>
-            <li className="flex gap-2"><span aria-hidden="true">/</span><span aria-current="page">{FAQ_PAGE.breadcrumb[1].name}</span></li>
+          <ol className="flex flex-wrap items-center gap-2">
+            <li><Link href={visibleHref('/')} className={CRUMB_LINK}>{FAQ_PAGE.breadcrumb[0].name}</Link></li>
+            <li className="flex items-center gap-2"><span aria-hidden="true">/</span><span aria-current="page">{FAQ_PAGE.breadcrumb[1].name}</span></li>
           </ol>
         </nav>
         <h1 className="text-3xl font-bold leading-tight sm:text-4xl">{FAQ_PAGE.h1}</h1>
