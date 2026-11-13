@@ -85,7 +85,8 @@ BEGIN
       SELECT credits INTO balance FROM public.profiles WHERE id = p_profile_id;
       INSERT INTO public.credit_transactions(user_id, amount, type, description, idempotency_key,
         balance_before, balance_after, ledger_type, reason_code, source_type, metadata)
-      VALUES (p_profile_id, 0, 'addition', 'Opening grant refused: ' || refusal,
+      VALUES (p_profile_id, 0, 'addition', CASE refusal WHEN 'paused' THEN 'Opening grant refused: paused'
+        WHEN 'same_ip' THEN 'Opening grant refused: same IP' ELSE 'Opening grant refused: daily cap' END,
         'opening_grant:' || p_profile_id::text, balance, balance, 'adjustment', 'opening_grant_ineligible', 'system',
         jsonb_build_object('refusal', refusal));
       RETURN false;

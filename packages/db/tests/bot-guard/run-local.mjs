@@ -162,7 +162,11 @@ try {
     WHERE user_id=ANY($1::uuid[]) AND idempotency_key='opening_grant:'||user_id::text`, [[sameIp, capped, zero, paused]])).rows;
   assert.equal(rows.length, 4);
   for (const row of rows) assert.deepEqual(row, { amount: 0, ledger_type: 'adjustment', reason_code: 'opening_grant_ineligible', balance_before: 0, balance_after: 0 });
-  report.checks.push('each refusal is one zero-value opening_grant_ineligible decision row');
+  const described = await v(`SELECT jsonb_object_agg(metadata->>'refusal',description) v FROM credit_transactions
+    WHERE user_id=ANY($1::uuid[]) AND idempotency_key='opening_grant:'||user_id::text`, [[sameIp, capped, paused]]);
+  assert.deepEqual(described, { same_ip: 'Opening grant refused: same IP', daily_cap: 'Opening grant refused: daily cap',
+    paused: 'Opening grant refused: paused' }, 'fixed descriptions the credit records page translates');
+  report.checks.push('each refusal is one zero-value opening_grant_ineligible decision row with its fixed description');
 
   // The Waffo path (p_allow_grant false) never reaches the gate: no lock, no count, no row.
   const waffo = await profile(), before = (await today()).granted;
