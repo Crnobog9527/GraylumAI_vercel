@@ -61,7 +61,8 @@ function PricingPlansInner({ plans: source, links, offers }: {
       </div>
 
       <div className="grid gap-4 md:grid-cols-3">
-        <section data-testid="pricing-plan-free" className="grid content-start gap-3 rounded-[var(--pub-radius-card,18px)] border p-5" style={card}>
+        <section data-testid="pricing-plan-free" data-card=""
+          className="grid content-start gap-3 rounded-[var(--pub-radius-card,18px)] border p-5" style={card}>
           <h2 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>{COPY.freeName}</h2>
           <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>{COPY.freeFit}</p>
           <p><b className="text-3xl" style={{ color: 'var(--text-primary)' }}>$0</b></p>
@@ -73,7 +74,7 @@ function PricingPlansInner({ plans: source, links, offers }: {
           founderUsd={founderUsd} />)}
       </div>
 
-      <div className="rounded-[var(--pub-radius-card,18px)] border p-4" style={card}>
+      <div data-card="" className="rounded-[var(--pub-radius-card,18px)] border p-4" style={card}>
         <PaywallCompareTable plans={plans} />
       </div>
     </div>
@@ -86,7 +87,7 @@ function PaidPlanCard({ plan, billing, membershipHref, offers, founderUsd }: {
   const quote = paywallQuote(plan, billing, { goldFirstMonthUsd: offers?.goldFirstMonth, founderUsd });
   const ready = quote?.checkoutReady === true;
   return (
-    <section data-testid={`pricing-plan-${plan.level}`} className="grid content-start gap-3 rounded-[var(--pub-radius-card,18px)] border p-5"
+    <section data-testid={`pricing-plan-${plan.level}`} data-card="" className="grid content-start gap-3 rounded-[var(--pub-radius-card,18px)] border p-5"
       style={{ ...card, borderColor: plan.level === 'gold' ? 'var(--plan-gold-border, var(--warning))' : card.borderColor }}>
       <h2 className="flex items-center gap-2 text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
         {LABEL[plan.level]}

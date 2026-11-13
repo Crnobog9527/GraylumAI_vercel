@@ -79,7 +79,7 @@ export const AUTH_INPUT_CLASS = [
 ].join(' ');
 export const AUTH_LABEL_CLASS = 'text-sm font-medium text-[var(--pub-ink)]';
 export const AUTH_PRIMARY_BUTTON_CLASS = [
-  'h-[52px] w-full rounded-full bg-[var(--pub-ink)] px-7 text-[17px] font-medium text-white', 'hover:bg-[var(--pub-action-hover)]',
+  'h-[52px] w-full rounded-full px-7 text-[17px] font-medium text-white',
   // The home page's dark gradient pill (dawn-l.module.css values, set on the shell), the plain ink where they are not set.
   '[background:var(--j-pill-bg,var(--pub-ink))] hover:[background:var(--j-pill-bg-hover,var(--pub-action-hover))] shadow-[var(--j-pill-shadow,none)]',
 ].join(' ');
