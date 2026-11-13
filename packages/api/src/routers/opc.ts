@@ -1,3 +1,4 @@
+import { listSessionMinutes, sessionMinutesList } from '../services/opc/sessionMinutes';
 import { archiveBusinessInput, archiveBusiness, listBusinesses } from '../services/opc/businessArchive';
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { capturePendingInput, captureResolveInput } from "../services/opc/capture";
@@ -116,6 +117,9 @@ export const opcRouter = router({
     .input(conversationRename)
     .mutation(({ ctx, input }) => renameConversation(ctx.supabaseAdmin, ctx.user.id, input)),
   // C1-lite: this conversation's results folder. The user confirms every write; the AI never writes here.
+  // CONTENT-CONVERSATION-2: the conversation's minutes (made by a turn of kind minutes), newest first.
+  sessionMinutes: resultReadProcedure.input(sessionMinutesList)
+    .query(({ ctx, input }) => listSessionMinutes(ctx.supabaseAdmin, ctx.user.id, input)),
   sessionResults: resultReadProcedure.input(sessionResultsList)
     .query(({ ctx, input }) => sessionResultsService(ctx.supabaseAdmin, ctx.user.id).list(input)),
   sessionResultVersions: resultReadProcedure.input(sessionResultFamily)

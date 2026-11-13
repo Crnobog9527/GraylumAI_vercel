@@ -33,3 +33,9 @@ it('shows the placeholder when the preview has no text, and the caret after the 
   const typing = renderToStaticMarkup(<ComposerTextPreview paragraphs={[['第一行'], ['第二']]} caret={<i data-caret=""/>}/>);
   expect(typing).toContain('<p>第一行</p><p>第二<i data-caret=""></i></p>');
 });
+
+// CONTENT-CONVERSATION-2: the topic window has no "使用技能" button; every other box keeps it.
+it('hides the skill button only when asked to', () => {
+  expect(renderToStaticMarkup(<ComposerView fileHint="x" editor={null}/>)).toContain('使用技能');
+  expect(renderToStaticMarkup(<ComposerView fileHint="x" editor={null} hideSkills/>)).not.toContain('使用技能');
+});

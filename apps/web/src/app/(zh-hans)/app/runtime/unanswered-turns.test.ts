@@ -20,6 +20,13 @@ describe('questions with no saved reply (VOICE-ABORT-FIX)', () => {
     expect(unansweredByPlace([m(2, 'assistant', 1), m(1, 'user', 1)]).size).toBe(0);
     expect(unansweredByPlace([]).size).toBe(0);
   });
+  // The work item's conversation (选题 / 稿件) runs the same free-chat turn, voice included: it draws them too.
+  it('the work item page draws them, in place and at the end, with the note', () => {
+    const page = readFileSync(join(__dirname, 'work-item-workspace.tsx'), 'utf8');
+    expect(page).toContain('{unansweredAt(index)}');
+    expect(page).toContain('{unansweredAt(replies.length)}');
+    expect(page).toContain('{UNANSWERED_NOTE}');
+  });
   it('the conversation page draws them, in place and at the end, with the note', () => {
     const page = readFileSync(join(__dirname, 'turn-workspace.tsx'), 'utf8');
     expect(page).toContain('{unansweredAt(index)}');

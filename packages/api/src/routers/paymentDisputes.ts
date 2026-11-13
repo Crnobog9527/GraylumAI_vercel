@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { router, adminProcedure, protectedProcedure } from '../trpc';
 import { createSafeServiceUnavailableError } from '../lib/publicError';
 import { withdrawDisputeHold } from '../services/payments/disputeWithdraw';
+import { readDisputeEvidence } from '../services/payments/disputeEvidence';
 
 export const paymentDisputesRouter = router({
   notice: protectedProcedure.query(async ({ ctx }) => {
@@ -39,6 +40,12 @@ export const paymentDisputesRouter = router({
       if (result.error) throw new Error('PAY_DISPUTE_EXTERNAL_UNAVAILABLE');
       return { resolved: true };
     } catch (error) { throw createSafeServiceUnavailableError(error, '未能结案，请核实是否已有对应订单'); }
+  }),
+  evidence: adminProcedure.input(z.object({ disputeId: z.uuid() }).strict()).query(async ({ ctx, input }) => {
+    try {
+      if (!ctx.hasSupabaseAdminPrivileges) throw new Error('PAY_DISPUTE_DB_UNAVAILABLE');
+      return await readDisputeEvidence(ctx.supabaseAdmin, input.disputeId);
+    } catch (error) { throw createSafeServiceUnavailableError(error, '申诉材料暂时无法读取，请确认这笔拒付已对应到订单'); }
   }),
   confirmLost: adminProcedure.input(z.object({ disputeId: z.uuid() }).strict()).mutation(async ({ ctx, input }) => {
     try {
