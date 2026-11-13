@@ -11,5 +11,7 @@ AS $function$
  SELECT jsonb_build_object(
   'cap', coalesce((SELECT least((s.value #>> '{}')::bigint,100000)::int FROM system_settings s
    WHERE s.key='signup_gift_daily_cap' AND (s.value #>> '{}') ~ '^[0-9]{1,9}$'),30),
-  'paused', coalesce((SELECT lower(s.value #>> '{}')='true' FROM system_settings s WHERE s.key='signup_gift_paused'),false))
+  'paused', coalesce((SELECT lower(s.value #>> '{}')='true' FROM system_settings s WHERE s.key='signup_gift_paused'),false),
+  'ip_limit', coalesce((SELECT CASE WHEN (s.value #>> '{}') ~ '^[0-9]{1,4}$'
+   THEN nullif(least(greatest((s.value #>> '{}')::int,0),50),0) END FROM system_settings s WHERE s.key='signup_gift_ip_limit'),5))
 $function$;

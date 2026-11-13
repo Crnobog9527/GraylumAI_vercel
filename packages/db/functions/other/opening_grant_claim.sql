@@ -8,7 +8,7 @@ CREATE OR REPLACE FUNCTION public.opening_grant_claim(p_profile_id uuid, p_diges
  SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-DECLARE p public.profiles;
+DECLARE p public.profiles; v_granted boolean;
 BEGIN
   SELECT * INTO p FROM public.profiles WHERE id = p_profile_id FOR UPDATE;
   IF p.id IS NULL THEN RAISE EXCEPTION 'OPENING_GRANT_PROFILE_MISSING' USING ERRCODE = 'P0002'; END IF;
@@ -16,5 +16,8 @@ BEGIN
     OR EXISTS (SELECT 1 FROM public.account_erasure_requests WHERE profile_id = p_profile_id) THEN
     RAISE EXCEPTION 'ACCOUNT_CLOSED' USING ERRCODE = '42501';
   END IF;
-  RETURN jsonb_build_object('granted', public.opening_grant_remember(p_profile_id, p_digests, true, p_ip));
+  v_granted := public.opening_grant_remember(p_profile_id, p_digests, true, p_ip);
+  IF NOT v_granted THEN RETURN jsonb_build_object('granted', false); END IF;
+  -- BOT-GUARD: today's count after this grant, for the Owner's half / 90% alert (read inside the gift gate's lock).
+  RETURN jsonb_build_object('granted', true, 'gift', public.signup_gift_today() - 'paused' - 'ip_limit');
 END $function$;

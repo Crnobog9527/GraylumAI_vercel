@@ -23,12 +23,12 @@ import { ResearchToolsSettings } from '@/components/admin/ResearchToolsSettings'
 import { RuntimeStopLossSettings, RuntimeStopLossTabTrigger } from '@/components/admin/stop-loss/RuntimeStopLossSettings';
 import { SettingsLoadFailure, SettingsLoading } from '@/components/admin/stop-loss/SettingsLoadFailure';
 import { MentorBudgetTabContent, MentorBudgetTabTrigger } from '@/components/admin/MentorBudgetSettings';
-import { changedSettings, mergeReadSettings, pausesSignupGift } from './changedSettings';
+import { changedSettings, mergeReadSettings } from './changedSettings';
 import { MembershipPlanPermissions } from '@/components/admin/MembershipPlanPermissions';
 import { FUSION_COMPARE_SETTING_KEY, FusionCompareSetting } from '@/components/admin/FusionCompareSetting';
 import { FusionReviewSettings } from '@/components/admin/FusionReviewSettings';
 import { PaymentFailoverSetting } from '@/components/admin/PaymentFailoverSetting';
-import { SignupGiftToday } from '@/components/admin/SignupGiftToday';
+import { SignupGuardCard } from '@/components/admin/SignupGuardCard';
 import type { MembershipPlanRow } from '@/components/admin/membershipEntitlementDraft';
 
 // 完整的系统设置定义
@@ -46,15 +46,6 @@ const defaultSettings: Record<string, { value: string; type: 'string' | 'number'
   },
   billing_credits_per_usd: { value: '', type: 'number', label: '每美元积分数', description: '留空 = 未配置（计费按缺省值 100 计算，财务页显示未配置）；只影响新操作' },
   billing_token_price_multiplier: { value: '', type: 'number', label: '全站默认加价倍数', description: '留空 = 未配置（计费缺省 6）；1–20，最多两位小数' },
-  // BOT-GUARD (Owner 2026-11-13): read by the opening grant in the database; a refused account is never topped up later.
-  signup_gift_daily_cap: {
-    value: '30', type: 'number', label: '每日注册赠送上限',
-    description: '北京时间每天最多给多少个新账号送开户积分（0–100000，0 = 今天一律不送）；超出的账号以后也不补发',
-  },
-  signup_gift_paused: {
-    value: 'false', type: 'boolean', label: '暂停注册赠送',
-    description: '打开后新账号一律不送开户积分（发现有人刷号时用）；暂停期间注册的账号以后也不补发',
-  },
   first_purchase_bonus_percent: { value: '20', type: 'number', label: '首充赠送%', description: '历史兼容字段，当前运行时未消费该配置' },
 
   // Features
@@ -70,8 +61,7 @@ const defaultSettings: Record<string, { value: string; type: 'string' | 'number'
 // 设置分组
 const settingGroups = {
   general: ['site_name', 'support_email', 'maintenance_mode'],
-  billing: ['new_user_credits', 'signup_gift_daily_cap', 'signup_gift_paused', 'report_fixed_price_credits',
-    'billing_credits_per_usd', 'billing_token_price_multiplier'],
+  billing: ['new_user_credits', 'report_fixed_price_credits', 'billing_credits_per_usd', 'billing_token_price_multiplier'],
   experience: ['home_show_onboarding', 'home_show_featured_modules'],
   features: ['primary_model_id', 'v3_summary_model_id', 'v3_summary_max_tokens', 'search_surcharge_credits', 'max_input_characters'],
 };
@@ -90,7 +80,6 @@ export default function AdminSettingsPage() {
   const [settings, setSettings] = useState<Record<string, SettingData>>({});
   const [saving, setSaving] = useState(false);
   const [tab, setTab] = useState('general');
-  const [giftRefresh, setGiftRefresh] = useState(0);
 
   const {
     data: dashboard,
@@ -121,10 +110,7 @@ export default function AdminSettingsPage() {
     try {
       const changes = changedSettings(settings, savedSettings, defaultSettings);
       if (changes.length === 0) { toast.success('没有需要保存的修改'); return; }
-      const pauseText = '确定暂停注册赠送？暂停期间注册的新账号一律不送开户积分，以后也不补发。';
-      if (pausesSignupGift(changes) && !window.confirm(pauseText)) return;
       await updateSettingsBulk.mutateAsync(changes);
-      setGiftRefresh(key => key + 1);
       toast.success('设置保存成功');
       void refetchDashboard();
     } catch (error) {
@@ -310,6 +296,7 @@ export default function AdminSettingsPage() {
 
         {/* Billing Tab */}
         <TabsContent value="billing">
+          <SignupGuardCard />
           <PaymentFailoverSetting />
           <Card data-testid="admin-settings-billing-section" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
             <CardHeader>
@@ -350,7 +337,6 @@ export default function AdminSettingsPage() {
                 <h4 className="text-sm font-medium mb-3" style={{ color: 'var(--text-secondary)' }}>
                   有效设置
                 </h4>
-                <SignupGiftToday refreshKey={giftRefresh} />
                 {renderSettingGroup(settingGroups.billing)}
               </div>
 

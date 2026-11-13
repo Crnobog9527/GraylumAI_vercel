@@ -69,12 +69,13 @@ BEGIN
   first_grant := least(first_grant, prior_grant);
   IF first_grant IS NULL AND p_allow_grant AND NOT decided THEN
     -- BOT-GUARD gift gate: one site-wide lock, taken last and only by a claim that is about to grant.
+    -- Same IP: at most signup_gift_ip_limit grants per IP in 24 hours (0528, Owner 2026-11-13: 5).
     PERFORM pg_advisory_xact_lock(hashtextextended('opening_grant:gift_gate', 0));
     gift := public.signup_gift_settings();
     IF (gift->>'paused')::boolean THEN
       refusal := 'paused';
-    ELSIF p_ip IS NOT NULL AND EXISTS (SELECT 1 FROM public.signup_gift_ips g
-      WHERE g.ip = p_ip AND g.granted_at > now() - interval '24 hours') THEN
+    ELSIF p_ip IS NOT NULL AND (SELECT count(*) FROM public.signup_gift_ips g
+      WHERE g.ip = p_ip AND g.granted_at > now() - interval '24 hours') >= (gift->>'ip_limit')::int THEN
       refusal := 'same_ip';
     ELSIF coalesce((SELECT d.granted FROM public.signup_gift_days d WHERE d.day = public.signup_gift_day()), 0)
       >= (gift->>'cap')::int THEN
@@ -89,6 +90,11 @@ BEGIN
         WHEN 'same_ip' THEN 'Opening grant refused: same IP' ELSE 'Opening grant refused: daily cap' END,
         'opening_grant:' || p_profile_id::text, balance, balance, 'adjustment', 'opening_grant_ineligible', 'system',
         jsonb_build_object('refusal', refusal));
+      INSERT INTO public.signup_gift_days(day, refused_paused, refused_same_ip, refused_daily_cap)
+      VALUES (public.signup_gift_day(), (refusal = 'paused')::int, (refusal = 'same_ip')::int, (refusal = 'daily_cap')::int)
+      ON CONFLICT (day) DO UPDATE SET refused_paused = public.signup_gift_days.refused_paused + excluded.refused_paused,
+        refused_same_ip = public.signup_gift_days.refused_same_ip + excluded.refused_same_ip,
+        refused_daily_cap = public.signup_gift_days.refused_daily_cap + excluded.refused_daily_cap;
       RETURN false;
     END IF;
     -- Existing monetary writer, same transaction; no change to purchases/refunds/settlement.

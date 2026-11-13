@@ -44,6 +44,8 @@ export type OwnerAlertFacts = {
   ops_backlog: { code: string; level: 'warning' | 'error' | 'fatal' };
   /** Many server errors in a short time (what the Sentry error mail covered). */
   error_spike: { count: number; minutes: number };
+  /** BOT-GUARD: the day's opening grants (Beijing day) passed half, or 90%, of the daily cap. */
+  signup_gift_level: { day: string; level: 'half' | 'near_full'; granted: number; cap: number };
   /** A test message: an admin runs the stop-loss diagnostic by hand (production smoke, REL-1 K10). */
   test: { note: string };
 };
@@ -83,6 +85,8 @@ export const RULES: { [K in OwnerAlertKind]: Rule<K> } = {
   // A new, worse level is a new message; the same level at most every six hours.
   ops_backlog: { key: f => `${f.code}:${f.level}`, ttlSeconds: 6 * HOUR },
   error_spike: { key: () => 'site', ttlSeconds: ERROR_SPIKE.cooldownSeconds },
+  // Once per Beijing day and level.
+  signup_gift_level: { key: f => `${f.day}:${f.level}`, ttlSeconds: 2 * DAY },
   test: { key: (_f, now) => hour(now), ttlSeconds: 60 },
 };
 

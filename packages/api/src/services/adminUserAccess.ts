@@ -25,7 +25,7 @@ export type AdminActivityEntry = {
   user_id: string;
   admin_id: string;
   action: string;
-  action_type: 'status_change' | 'role_change' | 'membership_change' | 'credit_adjustment';
+  action_type: 'status_change' | 'role_change' | 'membership_change' | 'credit_adjustment' | 'signup_gift_settings';
   details: Record<string, unknown>;
 };
 

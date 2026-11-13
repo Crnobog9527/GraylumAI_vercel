@@ -174,7 +174,7 @@ export function getPublicReadClient(ctx: {
   return ctx.supabasePublic ?? ctx.supabase;
 }
 
-async function assertSettingsWriter(client: SupabaseClient<any, 'public', any>, profileId:string) {
+export async function assertSettingsWriter(client: SupabaseClient<any, 'public', any>, profileId:string) {
   const {data,error}=await client.from('profiles').select('role,status,is_deleted').eq('id',profileId).single();
   if (error) {
     logger.warn('system', 'settings_writer_profile_read_failed', { code: error.code });
