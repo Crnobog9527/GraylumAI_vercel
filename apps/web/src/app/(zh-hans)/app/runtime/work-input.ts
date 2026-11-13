@@ -1,6 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 /** How a work item's protocol messages read, on either path. */
-export type VideoChoice = 'both' | 'storyboard' | 'editing';
 // Presentation only: preserve the immutable Runtime request/result for replay.
 export function displayReply(input: string | null, body: string | null) {
   if (!body) return '正在核实结果，请保留原任务。';
@@ -53,12 +52,4 @@ export function shownRuntimeInput(input: string) {
     : input.includes('只生成剪辑建议')
       ? '请基于已保存的分镜生成剪辑建议。'
       : '请先完成分镜脚本，再基于分镜生成剪辑建议。';
-}
-export function requestedVideoChoice(value: string): VideoChoice | 'end' | null {
-  const text = value.trim().replace(/[。.!！?？]/g, '');
-  if (/^(暂时结束|先结束|先到这里|暂时不生成)$/.test(text)) return 'end';
-  if (/^(先做分镜[，,、\s]*再生成剪辑建议|分镜\s*[+＋和与、]\s*剪辑建议都生成|都生成|生成分镜和剪辑建议)$/.test(text)) return 'both';
-  if (/^(只生成分镜|仅生成分镜|生成分镜)$/.test(text)) return 'storyboard';
-  if (/^(只生成剪辑建议|仅生成剪辑建议|生成剪辑建议)$/.test(text)) return 'editing';
-  return null;
 }

@@ -93,3 +93,11 @@ it('passes the admin identity to the lost-dispute confirmation and hides databas
   await expect(failed.caller.confirmLost({ disputeId: ID }))
     .rejects.toMatchObject({ message: '未能结案，请先在原支付渠道核实这笔拒付已判输' });
 });
+
+it('reads dispute evidence for admins only and hides database details', async () => {
+  for (const role of ['user', 'anonymous'] as const) {
+    await expect(harness(role).caller.evidence({ disputeId: ID })).rejects.toMatchObject({ code: role === 'user' ? 'FORBIDDEN' : 'UNAUTHORIZED' });
+  }
+  await expect(harness('admin', { message: 'private database details' }).caller.evidence({ disputeId: ID }))
+    .rejects.toMatchObject({ message: '申诉材料暂时无法读取，请确认这笔拒付已对应到订单' });
+});

@@ -4,6 +4,8 @@ import { listAdminPaymentOrders } from '../services/payments/adminOrders';
 import { billingDescription, projectBillingStatus, projectOrderPayment, type BillingRecord, type PaymentOrderBillingRow }
   from '../services/payments/orderProjection';
 import { assertCheckoutChannel } from '../services/payments/channelSettings';
+import { asRecord, getAuditNumber } from './paymentsAuditFields';
+import { assertNoDisputePurchaseBlock } from '../services/payments/disputePurchaseBlock';
 import { hasUnpaidSubscription, unpaidRenewalEntry } from '../services/payments/methodPurchaseError';
 /*
  * Copyright (c) 2026 Grayscale Luminary LLC.
@@ -365,20 +367,9 @@ function logSyncCheckoutStageFailure(
   });
 }
 
-function asRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : {};
-}
-
 function getAuditString(record: Record<string, unknown>, key: string) {
   const value = record[key];
   return typeof value === 'string' ? maskKnownIdentifiers(value.slice(0, 160)) : null;
-}
-
-function getAuditNumber(record: Record<string, unknown>, key: string) {
-  const value = record[key];
-  return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
 function getAuditStringArray(record: Record<string, unknown>, key: string) {
@@ -726,6 +717,7 @@ async function validateSubscriptionUpgrade(ctx: {
   supabase: SupabaseClient; supabaseAdmin: SupabaseClient; profileId: string; headers: Headers; hasSupabaseAdminPrivileges: boolean;
 }, input: ChangeSubscriptionPlanInput) {
   assertPaymentPersistenceConfigured(ctx.hasSupabaseAdminPrivileges);
+  await assertNoDisputePurchaseBlock(ctx.supabaseAdmin, ctx.profileId); // CHARGEBACK G4: upgrades charge the card at once
   const profile = await readSubscriptionChangeData<{ membership_level: string }>({
     query: ctx.supabase.from('profiles').select('membership_level').eq('id', ctx.profileId).maybeSingle(),
     changeInput: input, stage: 'profile_read', operation: '用户资料服务' });
