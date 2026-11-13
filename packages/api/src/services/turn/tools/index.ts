@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { TurnReplay } from '../resume';
 import { IMAGE_TOOL_NAMES, imageTools, type ImageToolCalls } from './imageTools';
+import { REQUEST_MINUTES_TOOL, requestMinutesTool } from './requestMinutes';
 import type { CanonicalAccount } from '../../research/tools/accountLinks';
 import { GENERAL_RESEARCH_TOOLS } from '../../research/tools/names';
 import { FREE_CHAT_RESEARCH_INSTRUCTIONS } from '../research/freeChatResearch';
@@ -89,6 +90,10 @@ export function turnTools(input: TurnToolsInput): TurnTools {
       tools.push(usable(name) && input.skills
         ? turnLoadSkillTool(input.skills, LOAD_SKILL_CALLS, () => { freeCalls++; }, input.skillExtras)
         : loadSkillTool(async () => SKILL_LOAD_REFUSED));
+      continue;
+    }
+    if (name === REQUEST_MINUTES_TOOL) {
+      tools.push(requestMinutesTool({ usable: usable(name), onCall: () => { freeCalls++; } }));
       continue;
     }
     if (name === 'read_skill_file') {

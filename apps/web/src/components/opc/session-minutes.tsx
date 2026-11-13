@@ -1,11 +1,11 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 'use client';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { MessageMarkdown } from '@/components/chat/MessageMarkdown';
 import { trpc } from '@/trpc/client';
 import { runTurn } from '@/lib/turn-stream';
-import { minutesFileName, minutesNotice, type MinutesItem } from '@/lib/session-minutes';
+import { chatMinutesRequestId, minutesFileName, minutesNotice, type MinutesItem } from '@/lib/session-minutes';
 
 /*
  * CONTENT-CONVERSATION-2 (Owner 2026-11-14): "整理纪要" of a free conversation and "整理本选题" of a topic window. Only when the
@@ -27,17 +27,19 @@ export type SessionMinutes = ReturnType<typeof useSessionMinutes>;
 export function useSessionMinutes(sessionId: string, onSettled?: () => void) {
   const utils = trpc.useUtils();
   const [running, setRunning] = useState(false), [live, setLive] = useState(''), [notice, setNotice] = useState('');
-  const [held, setHeld] = useState(false);
+  const [held, setHeld] = useState(false), [fromChat, setFromChat] = useState(false);
+  // Requests the chat asked for that this page already started (or found started): one each, whatever re-renders.
+  const asked = useRef(new Set<string>());
   const list = trpc.opc.sessionMinutes.useQuery({ sessionId }, { refetchInterval: query =>
     (query.state.data as MinutesItem[] | undefined)?.some(item => item.state !== 'closed') ? 4000 : false });
   useEffect(() => { setHeld(Boolean(readKey(sessionId))); }, [sessionId]);
   const started = useRef(false);
-  const start = useCallback(async () => {
+  const start = useCallback(async (chosen?: string) => {
     if (started.current) return;
     started.current = true;
-    const requestId = readKey(sessionId) ?? crypto.randomUUID();
+    const requestId = chosen ?? readKey(sessionId) ?? crypto.randomUUID();
     writeKey(sessionId, requestId);
-    setRunning(true); setLive(''); setNotice(''); setHeld(false);
+    setRunning(true); setLive(''); setNotice(''); setHeld(false); setFromChat(Boolean(chosen));
     try {
       const outcome = await runTurn({ kind: 'minutes', sessionId, requestId }, event => {
         if (event.type === 'text') setLive(text => text + event.delta);
@@ -56,9 +58,19 @@ export function useSessionMinutes(sessionId: string, onSettled?: () => void) {
       onSettled?.();
     }
   }, [sessionId, utils, onSettled]);
-  const items = (list.data ?? []) as MinutesItem[];
-  return { items, running: running || items.some(item => item.state !== 'closed'), live, notice, held, start, error: list.error,
-    retry: () => list.refetch() };
+  const items = useMemo(() => (list.data ?? []) as MinutesItem[], [list.data]);
+  /** CONTENT-CONVERSATION-2 PR3b: the reply of `turnId` asked for the minutes (request_minutes). Started once, with a request id
+   *  derived from that turn, so a reload or another tab finds it started (turn_open replays it) and nothing is charged twice. True
+   *  when this call started it. */
+  const startFromChat = useCallback((turnId: number) => {
+    const id = chatMinutesRequestId(turnId);
+    if (!list.isSuccess || asked.current.has(id) || items.some(item => item.requestId === id)) return false;
+    asked.current.add(id);
+    void start(id);
+    return true;
+  }, [list.isSuccess, items, start]);
+  return { items, running: running || items.some(item => item.state !== 'closed'), live, notice, held, fromChat, start, startFromChat,
+    error: list.error, retry: () => list.refetch() };
 }
 
 /** The button: "整理纪要" in a free conversation, "整理本选题" in a topic window. */
@@ -107,6 +119,8 @@ export function SessionMinutesPanel({ minutes, title, children }: { minutes: Ses
   return <section ref={box} aria-label={title} className="space-y-3 border-b border-[var(--border-primary)] p-4 text-sm">
     <header className="flex items-center justify-between gap-2"><h2 className="font-medium">{title}</h2>{children}</header>
     <p className="text-xs text-[var(--text-tertiary)]">点了才整理，按实际用量扣积分；纪要不会写进对话。可以复制或导出 Markdown。</p>
+    {minutes.running && minutes.fromChat && <p role="status" className="text-xs text-[var(--text-secondary)]">
+      已按你在聊天里的要求开始整理纪要；这次整理单独按实际用量扣积分。</p>}
     {minutes.notice && <p role="status" className="text-xs text-[var(--text-warning,#b45309)]">{minutes.notice}</p>}
     {minutes.running && <div aria-live="polite" className="rounded-xl border border-dashed border-[var(--border-primary)] p-3">
       {minutes.live ? <MessageMarkdown text={minutes.live} streaming/>

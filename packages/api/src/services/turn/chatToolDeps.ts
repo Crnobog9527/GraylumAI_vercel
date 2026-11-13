@@ -39,6 +39,8 @@ export function chatToolDeps(admin: SupabaseClient, user: () => SupabaseClient, 
   const shotvivaDeps = { admin, baseUrl: shotviva };
   return {
     library: true,
+    // CONTENT-CONVERSATION-2 PR3b: free chats and topic windows can start their minutes from the chat.
+    minutes: true,
     ...(shotviva ? { images: {
       async ready(actorId: string) {
         const [client, tier, profile] = await Promise.all([loadShotvivaClient(shotvivaDeps), tierOf(actorId), readProfile(admin, actorId)]);

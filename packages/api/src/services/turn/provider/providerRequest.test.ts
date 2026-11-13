@@ -163,3 +163,21 @@ describe('INTEGRATION-SHOTVIVA: the image tools',()=>{
   expect(()=>body(request(['read_source','generate_image']),free({tools:['read_source']}),'ordinary')).toThrow('RUNTIME_REAL_TOOLS_DISABLED');
  });
 });
+
+describe('CONTENT-CONVERSATION-2 PR3b: the minutes signal',()=>{
+ const free=(patch:Partial<RequestContext>={}):RequestContext=>({...older('serial-tools-v6-reasoning'),libraryRetrieval:true,
+  tools:['read_source','request_minutes'],minutesSignal:true,...patch});
+ const request=(names:string[])=>JSON.stringify({model:'m/x',messages:[{content:'I',role:'system'},{role:'user',content:'hello'}],
+  tools:names.map(tool),max_tokens:100,stream:false,store:false,reasoning_effort:'none'});
+ it('sends it where the free chat froze minutesSignal',()=>{
+  const sent=JSON.parse(body(request(['read_source','request_minutes']),free(),'ordinary'));
+  expect(sent.tools.map((t:{function:{name:string}})=>t.function.name)).toEqual(['read_source','request_minutes']);
+ });
+ it.each([
+  ['without the frozen marker',free({minutesSignal:undefined})],
+  ['on another format',free({providerRequestFormat:'serial-tools-v4-stream'})],
+  ['when the context did not list it',free({tools:['read_source']})],
+ ])('refuses it %s',(_case,context)=>{
+  expect(()=>body(request(['read_source','request_minutes']),context,'ordinary')).toThrow('RUNTIME_REAL_TOOLS_DISABLED');
+ });
+});
