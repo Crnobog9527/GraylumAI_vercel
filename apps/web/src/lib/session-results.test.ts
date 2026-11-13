@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
 import {
-  IMAGE_FAILURE_REPLY_CHARS, excerptProblem, groupResults, offersSave, resultErrorText, saveProblem, saveRequestId, savedFromReply,
+  IMAGE_FAILURE_REPLY_CHARS, excerptProblem, groupResults, guessResultType, offersSave, plainTitle, resultErrorText, saveProblem, saveRequestId, savedFromReply,
   type SessionResultItem,
 } from './session-results';
 
@@ -71,5 +71,27 @@ describe('offersSave', () => {
     expect(offersSave(short, [failed, made])).toBe(true);
     expect(offersSave(short, [running])).toBe(true);
     expect(offersSave('文'.repeat(IMAGE_FAILURE_REPLY_CHARS + 1), [failed])).toBe(true);
+  });
+});
+
+describe('UI-FINISH: what a save starts with', () => {
+  it('takes the type from the Skill the reply loaded: a 口播稿 Skill saves as 口播稿, not 正文', () => {
+    expect(guessResultType({ skills: ['视频口播稿'], reply: '今天聊聊早起。' })).toBe('script');
+    expect(guessResultType({ skills: ['short-video-script'], reply: 'x' })).toBe('script');
+    expect(guessResultType({ skills: ['分镜脚本'], reply: 'x' })).toBe('storyboard');
+    expect(guessResultType({ skills: ['剪辑建议'], reply: 'x' })).toBe('editing');
+    expect(guessResultType({ skills: ['每周选题'], reply: 'x' })).toBe('topic_list');
+  });
+  it('else from the reply\'s opening line, and 正文 only when nothing says', () => {
+    expect(guessResultType({ reply: '## 60 秒口播稿\n大家好……' })).toBe('script');
+    expect(guessResultType({ skills: ['Hooks'], reply: '这是一篇文章。\n口播的部分在后面。' })).toBe('body');
+    expect(guessResultType({ reply: '' })).toBe('body');
+  });
+  it('a title without Markdown marks', () => {
+    expect(plainTitle('**一句话说明**：早起')).toBe('一句话说明：早起');
+    expect(plainTitle('## 标题')).toBe('标题');
+    expect(plainTitle('- *重点* 和 `代码`')).toBe('重点 和 代码');
+    expect(plainTitle('2026年计划')).toBe('2026年计划');
+    expect(plainTitle('**')).toBe('**');
   });
 });

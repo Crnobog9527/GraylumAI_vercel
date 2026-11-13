@@ -23,11 +23,18 @@ export function mergeStep(steps: readonly ReplyStep[],
 }
 
 const quoted = (label?: string) => label ? `「${label}」` : '';
+/**
+ * LOAD-SKILL: a Skill's internal package name (e.g. short-video-script) is never shown. The server now sends the display title, but a
+ * reply saved before that kept the package name; such a name is dropped here, so the line reads "已读取方法".
+ */
+const INTERNAL_NAME = /^[a-z0-9]+(?:[-_][a-z0-9]+)+$/;
+const skillName = (label?: string) => label && !INTERNAL_NAME.test(label.trim()) ? label : undefined;
 
 /** The one line of a step. Neutral words: a step that did not work says what happens instead, not "error". */
 export function stepLine(step: ReplyStep): string {
-  const { tool, state, label, detail, count } = step;
-  if (tool === 'think') return label || '正在思考…';
+  const { tool, state, detail, count } = step;
+  if (tool === 'think') return step.label || '正在思考…';
+  const label = tool === 'load_skill' ? skillName(step.label) : step.label;
   if (state === 'running') {
     switch (tool) {
       case 'load_skill': return label ? `正在读取${quoted(label)}方法…` : '正在读取方法…';

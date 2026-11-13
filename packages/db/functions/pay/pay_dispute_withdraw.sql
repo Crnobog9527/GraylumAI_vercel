@@ -8,7 +8,7 @@ CREATE OR REPLACE FUNCTION public.pay_dispute_withdraw(p_actor uuid, p_dispute u
  SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-DECLARE d payment_disputes;u profiles;total integer:=0;g record;member jsonb;
+DECLARE d payment_disputes;u profiles;total integer:=0;g record;member jsonb;o payment_orders;i integer;backfilled integer:=0;
 BEGIN
  IF NOT EXISTS(SELECT 1 FROM profiles WHERE id=p_actor AND role='admin' AND status='active' AND is_deleted='false') THEN
   RAISE EXCEPTION 'PAY_DISPUTE_ADMIN_REQUIRED' USING ERRCODE='42501'; END IF;
@@ -37,10 +37,22 @@ BEGIN
   VALUES(u.id,total,'adjustment','Payment dispute hold withdrawn','adjustment','dispute_withdraw','payment_order',d.order_id,
    'dispute:'||d.id||':withdraw',u.credits,u.credits+total);
  END IF;
+ -- CHARGEBACK G2: once nothing holds this order, release now every period that came due during the hold, each on its
+ -- original dates. pay_waffo_grant_period is idempotent per period, never starts a period before it is due, never goes past
+ -- entitlement_end and keeps refusing refunded, terminated or erased cases.
+ IF NOT pay_dispute_order_frozen(d.order_id) THEN
+  SELECT * INTO o FROM payment_orders WHERE id=d.order_id;
+  IF o.item_type='membership_plan' AND o.subscription_id IS NOT NULL THEN
+   FOR i IN 1..CASE o.billing_cycle WHEN 'yearly' THEN 12 ELSE 1 END LOOP
+    backfilled:=backfilled+pay_waffo_grant_period(o.id,i);
+   END LOOP;
+  END IF;
+ END IF;
  PERFORM pay_common_settle_membership_level(u.id);
  member:=pay_common_membership_facts(u.id)->'internal_membership';
  IF member->>'mapping_state'='internal_paid' AND member->>'membership_level' IN ('pro','gold') THEN
   UPDATE profiles SET membership_level=member->>'membership_level' WHERE id=u.id;
  END IF;
- RETURN jsonb_build_object('restored',total,'duplicate',false);
+ RETURN jsonb_build_object('restored',total,'duplicate',false,'backfilled',backfilled,
+  'userId',u.id,'orderId',d.order_id,'status',d.status);
 END $function$;

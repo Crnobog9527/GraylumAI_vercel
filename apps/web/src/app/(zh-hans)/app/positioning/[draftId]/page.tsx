@@ -34,7 +34,7 @@ import { useLiveReply, useMentorTurnPath } from "./use-live-reply";
 import { PublishFootnote, PublishNext, ReportEntry, reportPublishes } from "./report-panel";
 import { DraftArchiveGate, ReadonlyDraftView, retryUnlessMissing } from './readonly-draft-view';
 import { InformationExport } from "./InformationExport";
-import { enterTopicWorkspace } from "./topic-consent";
+import { enterTopicWorkspace, useTopicsEntry } from "./topic-consent";
 import { EXISTING_WELCOME } from "../start-entry";
 import { isStepSummaryInput, offersStepSummary, STEP_SUMMARY_INPUT, STEP_SUMMARY_LABEL, stepSummaryRequest, summaryRefusal,
   summaryShown } from "./step-summary";
@@ -54,7 +54,7 @@ export default function PositioningDraft({ params }: { params: Promise<{ draftId
 function PositioningDraftContent({draftId}:{draftId:string}){
   const router = useRouter();
   const utils = trpc.useUtils();
-  const read = trpc.opc.read.useQuery({ draftId }, { retry: retryUnlessMissing });
+  const read = trpc.opc.read.useQuery({ draftId }, { retry: retryUnlessMissing }), topicsEntry = useTopicsEntry(draftId, read.data);
   const library = trpc.opc.library.useQuery({search:'',from:null,to:null});
   const discussionAccounts = ((library.data?.businesses??[]) as Array<{accounts:Array<{strategyDraftId?:string;pendingStrategyDraftId?:string|null;displayName?:string;account:string;platform:string}>}>).flatMap(business=>business.accounts).filter(account=>account.pendingStrategyDraftId===draftId||account.strategyDraftId===draftId);
   const discussionAccount = discussionAccounts.length===1?discussionAccounts[0]:undefined;
@@ -828,7 +828,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
           .then(failure => { if (!failure) setConsentOpen(true); })} // Only with the finalized version read back.
         confirmed={!hasUnconfirmedRequired && !hasPendingConfirmation && !(d.accountRevision ? nextReviewStep : steps.some(x => !snap.steps[x.id].valid))} />}
       </div><p><PublishFootnote workflow={snap.workflow}/></p>
-      {d.report?.available && <Link href={`/app/positioning/${draftId}/topics`}>进入选题工作对话 →</Link>}
+      {topicsEntry && <Link href={`/app/positioning/${draftId}/topics`}>进入选题工作对话 →</Link>}
       </footer>}
       {consentOpen && (
         <div
