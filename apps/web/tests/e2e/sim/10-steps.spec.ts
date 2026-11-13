@@ -9,6 +9,10 @@ import { armFault, replies, resetSim, signIn, startFreeChat } from './support';
  */
 test.beforeEach(resetSim);
 
+// LOAD-SKILL: a step names a Skill by its module's title (seed.ts: 模拟定位方法), never by the package name the model calls.
+const SHOWN = '已读取「模拟定位方法」方法';
+const INTERNAL = /synthetic-method/;
+
 test('a load_skill step ends as "已读取…", the reply is thinking until the text, then the steps fold and open on a click', async ({ page }) => {
   await signIn(page, 'alice');
   // The reply's first call is only load_skill for the seeded method; the call after it (with the method in hand) is held back for 6 s.
@@ -16,7 +20,8 @@ test('a load_skill step ends as "已读取…", the reply is thinking until the 
   await armFault({ mode: 'slow', delayMs: 6_000 });
   await startFreeChat(page, '帮我按方法写一段分镜。');
   const steps = page.getByRole('status', { name: '这条回复的步骤' });
-  await expect(steps.getByText('已读取「synthetic-method」方法')).toBeVisible({ timeout: 60_000 });
+  await expect(steps.getByText(SHOWN)).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByText(INTERNAL)).toHaveCount(0);
   await expect(steps.getByText('正在思考…')).toBeVisible();
   await expect(page.getByText('正在回复…')).toHaveCount(0);
   await expect(replies(page).first()).toBeVisible({ timeout: 120_000 });
@@ -24,17 +29,19 @@ test('a load_skill step ends as "已读取…", the reply is thinking until the 
   // The text flows: the list is one folded line, the detail is out of sight until it is opened.
   const fold = page.getByRole('button', { name: '已完成 1 个步骤' });
   await expect(fold).toBeVisible();
-  await expect(page.getByText('已读取「synthetic-method」方法')).toHaveCount(0);
+  await expect(page.getByText(SHOWN)).toHaveCount(0);
   await fold.click();
-  await expect(page.getByText('已读取「synthetic-method」方法')).toBeVisible();
+  await expect(page.getByText(SHOWN)).toBeVisible();
   // A reload reads the steps back from the server (they were kept at the close): the folded line is still above the reply.
   await page.reload();
   await expect(replies(page).first()).toBeVisible({ timeout: 60_000 });
   const again = page.getByRole('button', { name: '已完成 1 个步骤' });
   await expect(again).toBeVisible();
-  await expect(page.getByText('已读取「synthetic-method」方法')).toHaveCount(0);
+  await expect(page.getByText(SHOWN)).toHaveCount(0);
   await again.click();
-  await expect(page.getByText('已读取「synthetic-method」方法')).toBeVisible();
+  await expect(page.getByText(SHOWN)).toBeVisible();
+  // Nor after a reload, from the steps the server kept.
+  await expect(page.getByText(INTERNAL)).toHaveCount(0);
 });
 
 test('a read_source step ends in its own words (the local library cannot answer, so it may say so), the same way', async ({ page }) => {

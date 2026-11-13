@@ -31,6 +31,19 @@ export function WithdrawConfirm({ status, pending, onConfirm, onCancel, provider
   </div>;
 }
 
+// CHARGEBACK G1: the Owner confirms a lost dispute by hand (Owner 2026-11-14). Stripe must already show "lost";
+// Waffo has no outcome feed, so its rows ask the admin to check the Waffo dashboard first.
+export function ConfirmLost({ provider, pending, onConfirm, onCancel }:
+  { provider: string; pending: boolean; onConfirm: () => void; onCancel: () => void }) {
+  return <div className="space-y-2" data-testid="confirm-lost">
+    <p>确认这笔拒付判输并结案？结案后：冻结的积分作为最终收回（不会再多扣），这份会员结束、以后的按月积分不再发放，
+      是创始会员的结束创始身份。结案后不能再撤回冻结。</p>
+    {provider === 'waffo' ? <p role="alert" className="font-bold">Waffo 不会把判决结果推送给我们，请先在 Waffo 后台核实这笔已判输。</p> : null}
+    <Button disabled={pending} onClick={onConfirm}>确认判输结案</Button>
+    <Button variant="outline" disabled={pending} onClick={onCancel}>返回</Button>
+  </div>;
+}
+
 export function AdminPaymentDisputes() {
   const [offset, setOffset] = useState(0);
   const rows = trpc.paymentDisputes.list.useQuery({ offset });
@@ -44,6 +57,15 @@ export function AdminPaymentDisputes() {
       void utils.paymentDisputes.invalidate();
     },
     onError: () => setMessage('未能结案，请核实是否已有对应订单。'),
+  });
+  const [lostSelected, setLostSelected] = useState<string | null>(null);
+  const confirmLost = trpc.paymentDisputes.confirmLost.useMutation({
+    onSuccess: () => {
+      setMessage('已判输结案：冻结的积分作为最终收回，这份会员已结束。'); setLostSelected(null);
+      void utils.paymentDisputes.invalidate();
+      void utils.payments.invalidate();
+    },
+    onError: () => setMessage('未能结案，请先在原支付渠道核实这笔拒付已判输。'),
   });
   const withdraw = trpc.paymentDisputes.withdraw.useMutation({
     onSuccess: result => {
@@ -93,10 +115,20 @@ export function AdminPaymentDisputes() {
               </div> : <Button variant="outline"
                 onClick={() => { setExternalSelected(row.id); setSelected(null); }}>已核实站外付款</Button>
             ) : null}
-            {row.freeze_state === 'frozen' ? (
+            {row.lost_confirmed_at ? <p className="font-bold">已判输结案（{new Date(row.lost_confirmed_at).toLocaleString('zh-CN')}）</p> : null}
+            {row.freeze_state === 'withdrawn' && row.status === 'lost' ? <p role="alert">
+              这笔拒付在撤回冻结后被判输，系统不会自动再扣，请人工核对处理。</p> : null}
+            {row.freeze_state === 'frozen' && !row.lost_confirmed_at && (row.status === 'lost' || row.provider === 'waffo') ? (
+              lostSelected === row.id ? <ConfirmLost provider={row.provider} pending={confirmLost.isPending}
+                onConfirm={() => confirmLost.mutate({ disputeId: row.id })} onCancel={() => setLostSelected(null)} />
+              : <Button variant="outline" onClick={() => { setLostSelected(row.id); setSelected(null); setExternalSelected(null); }}>
+                确认判输结案</Button>
+            ) : null}
+            {row.freeze_state === 'frozen' && !row.lost_confirmed_at ? (
               selected === row.id ? <WithdrawConfirm status={row.status} pending={withdraw.isPending} providerLabel={providerLabel}
                 onConfirm={() => withdraw.mutate({ disputeId: row.id })} onCancel={() => setSelected(null)} />
-              : <Button variant="outline" onClick={() => { setSelected(row.id); setExternalSelected(null); }}>撤回冻结</Button>
+              : <Button variant="outline" onClick={() => { setSelected(row.id); setExternalSelected(null); setLostSelected(null); }}>
+                撤回冻结</Button>
             ) : null}
           </article>
         );
