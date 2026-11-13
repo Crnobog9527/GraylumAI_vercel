@@ -51,7 +51,7 @@ export function PricingStudio() {
         <h2 className="text-xl font-semibold" style={{ color: 'var(--text-primary)' }}>{COPY.studioTitle}</h2>
         <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>{COPY.studioLede}</p>
       </div>
-      <Link href="/contact" className="rounded-lg border px-4 py-2 text-center text-sm font-medium max-sm:py-3 max-sm:text-base"
+      <Link href="/contact" className="rounded-full border px-5 py-2.5 text-center text-sm font-medium max-sm:py-3 max-sm:text-base"
         style={{ borderColor: 'var(--border-primary)', color: 'var(--text-primary)' }}>{COPY.contactCta}</Link>
     </section>
   );

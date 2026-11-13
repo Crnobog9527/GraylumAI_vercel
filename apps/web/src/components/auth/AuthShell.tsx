@@ -2,16 +2,21 @@ import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { Loader2 } from 'lucide-react';
 import light from '@/components/design/light-tokens.module.css';
+import { BackdropJ } from '@/components/landing/preview-j/BackdropJ';
+import dawn from '@/components/landing/preview-l/dawn-l.module.css';
 import { resolveSiteName } from '@/lib/site-config';
 import styles from './auth-shell.module.css';
 
 /**
  * The one shell of the sign-in pages (login, sign-up, email verification, forgot and reset password) and of the maintenance and
  * access-denied pages: the public layer's canvas, a brand header that leads back to the home page, and a white card. Look only.
+ * In the home page's "晨光" look (Owner 2026-11-14, PUBLIC-SITE): its backdrop (grid and three pools of light, in their first
+ * position; nothing to follow on a one-card page), its .dawn values for the pill, a glass card.
  */
 export function AuthShell({ children, siteName, homeHref = '/' }: { children: ReactNode; siteName?: string; homeHref?: string }) {
   return (
-    <main className={`${light.light} ${styles.shell}`}>
+    <main className={`${light.light} ${dawn.dawn} ${styles.shell}`} data-zone="hero">
+      <BackdropJ />
       <header className={styles.header}>
         <Link href={homeHref} className={styles.brand}>
           <img src="/graylum-logo.svg" alt="" aria-hidden="true" className={styles.logo} />
@@ -75,6 +80,8 @@ export const AUTH_INPUT_CLASS = [
 export const AUTH_LABEL_CLASS = 'text-sm font-medium text-[var(--pub-ink)]';
 export const AUTH_PRIMARY_BUTTON_CLASS = [
   'h-[52px] w-full rounded-full bg-[var(--pub-ink)] px-7 text-[17px] font-medium text-white', 'hover:bg-[var(--pub-action-hover)]',
+  // The home page's dark gradient pill (dawn-l.module.css values, set on the shell), the plain ink where they are not set.
+  '[background:var(--j-pill-bg,var(--pub-ink))] hover:[background:var(--j-pill-bg-hover,var(--pub-action-hover))] shadow-[var(--j-pill-shadow,none)]',
 ].join(' ');
 export const AUTH_SECONDARY_BUTTON_CLASS = [
   'h-12 rounded-full border-[var(--pub-line)] bg-white px-5 text-[15px] font-medium text-[var(--pub-ink)]', 'hover:bg-[var(--gl-surface-subtle)]',
