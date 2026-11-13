@@ -169,7 +169,8 @@
  .workspace[data-tabs] .shell.noNotice{height:calc(100dvh - 56px - 56px - env(safe-area-inset-bottom, 0px) - var(--consent-bar-space, 0px))}
  /* The 对话 page: the rail's own list of platforms, accounts and work is the page. Its function links are the 功能 page's, and its
     foot (feedback, credits, the account) is the 我的 page's, so neither shows here. */
- .workspace[data-area=history] .rail{display:flex;position:static;inset:auto;width:auto;padding:0 12px 8px;background:transparent;box-shadow:none;overflow:visible;z-index:auto}
+ /* It scrolls as a whole when the screen is short (the consent bar showing), as the drawer does, so its list is never squeezed to nothing. */
+ .workspace[data-area=history] .rail{display:flex;position:static;inset:auto;width:auto;padding:0 12px 8px;background:transparent;box-shadow:none;z-index:auto}
  .workspace[data-area=history] .center,.workspace[data-area=history] .railMobile,.workspace[data-area=history] .railNav,.workspace[data-area=history] .railBottom{display:none}
  .workspace[data-area=history] .phoneTitle{display:block;margin:10px 4px 0;font-size:28px;font-weight:700;letter-spacing:-.03em;line-height:1.2;color:#1f1e1c}
  .workspace[data-area=history] .newConversation{height:48px;margin:12px 0 6px;border-radius:99px;font-size:15px}
