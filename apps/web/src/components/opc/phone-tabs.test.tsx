@@ -48,6 +48,10 @@ describe('a phone\'s bottom bar', () => {
     expect(phone).toContain('.workspace[data-tabs] .mobileGlobalMenu,.workspace[data-tabs] .global nav{display:none}');
     expect(phone).toMatch(/\.workspace\[data-tabs\] \.shell,\.workspace\[data-tabs\] \.shell\.withRight\{height:calc\(100dvh - 96px - 56px - env\(safe-area-inset-bottom, 0px\) - var\(--consent-bar-space, 0px\)\)\}/);
     expect(phone).toMatch(/\.workspace\[data-area=history\] \.rail\{display:flex;position:static/);
+    // The list page keeps the drawer's own scrolling (overflow-y:auto) and its list's 120px floor: a short screen never squeezes the list away.
+    expect(phone).not.toMatch(/\.workspace\[data-area=history\] \.rail\{[^}]*overflow/);
+    expect(phone).toMatch(/ \.rail\{display:none;position:fixed;[^}]*overflow-y:auto;overscroll-behavior:contain\}/);
+    expect(phone).toContain(' .rail .history{min-height:120px}');
     expect(phone).toMatch(/\.workspace\[data-area=history\] \.center,[^{]*\.railNav,[^{]*\.railBottom\{display:none\}/);
     // The 对话 page's name shows on that page only, and only on a phone.
     expect(css).toContain('.phoneTitle{display:none}');
