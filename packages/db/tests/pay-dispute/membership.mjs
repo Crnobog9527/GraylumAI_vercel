@@ -5,7 +5,8 @@ import assert from 'node:assert/strict';
 import pg from 'pg';
 import {renewalReplayCases} from './renewal-replay.mjs';
 import {turnMoneyCases} from './turn-money.mjs';
-export async function membershipCases({c,v,profile,receive,withdraw,ops,report}) {
+import {confirmLostCases} from './confirm-lost.mjs';
+export async function membershipCases({c,v,profile,pack,receive,withdraw,ops,report}) {
  const facts=async user=>{await c.query('SET ROLE service_role');try{return await v('SELECT pay_common_membership_facts($1) v',[user]);}finally{await c.query('RESET ROLE');}};
  const member=async(start,end,cycle='monthly',level='pro')=>{
   const user=await profile(0),order=randomUUID(),sub=randomUUID(),plan=randomUUID();
@@ -223,5 +224,6 @@ export async function membershipCases({c,v,profile,receive,withdraw,ops,report})
  report.checks.push('monthly refund failure during dispute: source and balance remain frozen; stop survives restore and withdrawal');
  await renewalReplayCases({c,v,receive,withdraw,ops,report,member,facts,start,nextEnd});
  await turnMoneyCases({c,v,receive,withdraw,ops,report,member,facts,start,nextEnd});
+ await confirmLostCases({c,v,profile,pack,receive,withdraw,ops,report,member,start,end});
 
 }
