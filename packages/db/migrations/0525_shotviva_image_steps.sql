@@ -1,7 +1,7 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC.
 -- All rights reserved. This code is proprietary and confidential.
 -- INTEGRATION-SHOTVIVA PR B (Owner 2026-11-12, "打通再上线"): a free chat can make an image through the user's linked Shotviva
--- account. Placeholder number 9999: the controller assigns the real number before applying it.
+-- account. Number 0525 assigned by the controller.
 --   The image is kept with the reply the way its other steps are (turn_chat_steps_apply, called by turn_close for a delivered
 --   completed chat turn): one step {tool:'image', state, job?, reason?}. `job` is the Shotviva job id, never the signed image
 --   address (it expires after 7 days); the page reads a fresh one by the id. `reason` says why an image was not made, or that it
