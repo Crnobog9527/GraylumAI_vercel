@@ -171,6 +171,7 @@ export function TurnWorkspace({ sessionId }: { sessionId: string }) {
             {results.data && reply.turnId !== null && offersSave(reply.content, steps) && <SaveReplyButton sessionId={sessionId}
               turnId={reply.turnId} reply={reply.content}
               savedItems={results.data.filter(item => item.sourceTurnId === reply.turnId)}
+              skills={steps.flatMap(step => step.tool === 'load_skill' && step.label ? [step.label] : [])}
               onOpenResults={() => { setPanelOpen(true); setReveal(count => count + 1); }}/>}
           </RuntimeTurnView>; })}
           {results.isError && <QueryNotice error={results.error} label="本对话成果夹" retry={() => results.refetch()}/>}

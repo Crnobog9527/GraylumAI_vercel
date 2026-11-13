@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
-import { enterTopicWorkspace, TOPIC_SKILL_MISSING_NOTICE, TOPIC_SOURCE_CHANGED_NOTICE, TOPIC_UNVERIFIED_NOTICE } from "./topic-consent";
+import { enterTopicWorkspace, topicsEntryShown, TOPIC_SKILL_MISSING_NOTICE, TOPIC_SOURCE_CHANGED_NOTICE, TOPIC_UNVERIFIED_NOTICE } from "./topic-consent";
 
 const run = (answer: () => Promise<{ bound: boolean; sourceVersionId?: string | null }>) => {
   const push = vi.fn(), bind = vi.fn(answer);
@@ -40,5 +40,21 @@ describe("the positioning page keeps its consent entry after the plan view was r
     expect(page).toContain("enterTopicWorkspace(");
     expect(page).toContain("trpc.opc.consentTopicWorkspace.useMutation()");
     expect(page).not.toMatch(/planView|usePathname|opc-plan-generation/);
+  });
+});
+
+describe("UI-FINISH: the report page's entry to the topics window", () => {
+  it("stays while a revision is open and the topics window is bound to the version in effect", () => {
+    expect(topicsEntryShown(false, true)).toBe(true);
+    expect(topicsEntryShown(undefined, true)).toBe(true);
+    expect(topicsEntryShown(true, false)).toBe(true);
+    // Neither a formal report nor a bound window: nothing to enter.
+    expect(topicsEntryShown(false, false)).toBe(false);
+    expect(topicsEntryShown(undefined, undefined)).toBe(false);
+  });
+  it("is what the page uses, not the report of the open round alone", () => {
+    const page = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+    expect(page).toContain("topicsEntryShown(d.report?.available, topicWorkspace.data?.bound)");
+    expect(page).not.toContain("{d.report?.available && <Link href={`/app/positioning/${draftId}/topics`}>");
   });
 });

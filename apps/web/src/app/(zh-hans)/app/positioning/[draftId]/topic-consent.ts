@@ -32,3 +32,12 @@ export async function enterTopicWorkspace(deps: {
     return { entered: false, notice: topicConsentNotice(cause) };
   }
 }
+
+/**
+ * Whether the report page shows "进入选题工作对话 →". A formal report of this round, or a topic workspace already bound to the version in
+ * effect: while a revision is open the round has no report yet, but the bound workspace keeps working on the confirmed version
+ * (topic_turn_source checks only that it is still the current one), so its entry stays (staging validation #1269).
+ */
+export function topicsEntryShown(reportAvailable: boolean | undefined, workspaceBound: boolean | undefined): boolean {
+  return Boolean(reportAvailable || workspaceBound);
+}
