@@ -7,6 +7,8 @@ CREATE ROLE anon NOLOGIN NOINHERIT;
 CREATE ROLE authenticated NOLOGIN NOINHERIT;
 CREATE ROLE service_role NOLOGIN NOINHERIT BYPASSRLS;
 CREATE ROLE authenticator LOGIN NOINHERIT;
+-- The role Supabase Auth runs Postgres Auth Hooks as (BOT-GUARD's Before User Created hook).
+CREATE ROLE supabase_auth_admin NOLOGIN NOINHERIT;
 GRANT anon, authenticated, service_role TO authenticator;
 GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
 ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public

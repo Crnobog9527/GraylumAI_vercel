@@ -6,7 +6,7 @@ import { ensureWorkspaceServerEnv } from './lib/serverEnv';
 import { logger } from './lib/logger';
 import { assertUsableUserStatus, normalizeUserStatus } from './lib/accountStatus';
 import {createRuntimeBudget,withRuntimeBudget,type RuntimeBudget} from './services/turn/settings/budget';
-import { openingGrantDigests } from './services/accountErasure/openingGrantIdentity';
+import { openingGrantDigests, openingGrantIp } from './services/accountErasure/openingGrantIdentity';
 import { profileIdentityUpdate, profileInsertPhone } from './lib/profileIdentity';
 import { procedureRateLimit } from './middleware/procedureRateLimit';
 export {createRuntimeBudget,withRuntimeBudget};
@@ -168,7 +168,7 @@ async function applyOpeningGrant(ctx: ApiContext, userId: string) {
   if (!ctx.user || ctx.user.id !== userId) throw new Error('OPENING_GRANT_IDENTITY_INVALID');
   const { data, error } = await ctx.supabaseAdmin.rpc('opening_grant_claim', {
     p_profile_id: userId,
-    p_digests: openingGrantDigests(ctx.user),
+    p_digests: openingGrantDigests(ctx.user), p_ip: openingGrantIp(ctx.headers), // BOT-GUARD same-IP rule
   });
 
   if (error) {

@@ -16,7 +16,7 @@ const PROCEDURES = [
   'createPackage', 'deletePackage', 'getPackagesDashboard', 'updatePackage',
   'getAllTickets', 'replyToTicket', 'updateTicketStatus', 'getAllTransactions',
   // adminDashboardStats, adminFinanceStats, adminPerformanceStats, adminSettingsDashboard
-  'getStatistics', 'getFinanceStats', 'getPerformanceStats', 'getSettingsDashboard',
+  'getStatistics', 'getFinanceStats', 'getPerformanceStats', 'getSettingsDashboard', 'getSignupGiftToday',
   // adminRefunds, adminMembershipPlans
   'approveMonthlyRefund', 'decidePackageRefund', 'executeMonthlyRefund', 'executePackageRefund', 'getMonthlyRefundStatus',
   'getPackageRefundStatus', 'previewPackageRefund', 'previewSubscriptionRefund', 'quoteMonthlyRefund', 'reconcilePackageRefund',

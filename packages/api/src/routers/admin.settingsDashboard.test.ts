@@ -131,3 +131,43 @@ describe('settings dashboard structured settings isolation', () => {
     await expect(admin.getSettingsDashboard()).resolves.toEqual({ systemSettings: {}, membershipPlans: [] });
   });
 });
+
+// BOT-GUARD: the opening grant's cap and pause are ordinary settings with strict values; today's count is its own read.
+describe('signup gift settings', () => {
+  it('saves a whole-number cap 0-100000 and a true/false pause, and refuses anything else (an empty box is not 0)', async () => {
+    const { settings, stored } = fixture([]);
+    for (const value of ['30', 0, '100000', ' 45 ']) await settings.updateSystemSettingsBulk([{ key: 'signup_gift_daily_cap', value }]);
+    for (const value of [true, 'false']) await settings.updateSystemSettingsBulk([{ key: 'signup_gift_paused', value }]);
+    expect([stored.get('signup_gift_daily_cap'), stored.get('signup_gift_paused')]).toEqual([' 45 ', 'false']);
+    for (const value of ['', '  ', '-1', '100001', '2.5', 'abc', null, 1.5]) {
+      await expect(settings.updateSystemSettings({ key: 'signup_gift_daily_cap', value }), String(value)).rejects.toThrow();
+      await expect(settings.updateSystemSettingsBulk([{ key: 'signup_gift_daily_cap', value }]), String(value)).rejects.toThrow();
+    }
+    for (const value of ['yes', 1, null, '']) {
+      await expect(settings.updateSystemSettings({ key: 'signup_gift_paused', value }), String(value)).rejects.toThrow();
+    }
+    expect(stored.get('signup_gift_daily_cap')).toBe(' 45 ');
+  });
+
+  it("reads today's count through the service-role function and refuses an unexpected shape", async () => {
+    const today = { day: '2026-11-13', granted: 3, cap: 30, paused: false };
+    const caller = (data: unknown, error: unknown = null) => {
+      return adminRouter.createCaller({
+        headers: new Headers(), user: { id: 'fixture-admin' }, isEmailVerified: true, authProvider: 'email', hasSupabaseAdminPrivileges: true,
+        supabase: profileClient, supabasePublic: profileClient,
+        supabaseAdmin: { ...profileClient, rpc: vi.fn(async (fn: string) => { expect(fn).toBe('signup_gift_today'); return { data, error }; }) },
+      } as unknown as Parameters<typeof adminRouter.createCaller>[0]);
+    };
+    await expect(caller(today).getSignupGiftToday()).resolves.toEqual(today);
+    await expect(caller({ ...today, granted: -1 }).getSignupGiftToday()).rejects.toThrow();
+    await expect(caller(null, { code: '42501' }).getSignupGiftToday()).rejects.toThrow();
+  });
+});
+
+const profileClient = {
+  from(table: string) {
+    if (table !== 'profiles') throw new Error(`Unexpected table ${table}`);
+    return { select() { return this; }, eq() { return this; },
+      single: async () => ({ data: { id: 'fixture-admin', role: 'admin', status: 'active', nickname: 'Fixture', is_deleted: 'false' }, error: null }) };
+  },
+};
