@@ -12,11 +12,11 @@ import { mkdirSync } from 'node:fs';
 import { chromium, expect as ui, type Browser, type Page } from '@playwright/test';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { INTEGRATIONS } from '@/lib/integrations/catalog';
-import { BALANCE, buildIntegrationsPage, openIntroduction, type StateName } from './integrations-browser-harness';
+import { BALANCE, buildIntegrationsPage, openIntroduction, SHOTS, type StateName } from './__tests__/browser-harness';
 
 let browser: Browser;
 let html = '';
-const shots = process.env.INTEGRATION_SHOTS;
+const shots = SHOTS;
 
 beforeAll(async () => {
   html = await buildIntegrationsPage();

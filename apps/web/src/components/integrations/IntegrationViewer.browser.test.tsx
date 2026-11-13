@@ -9,11 +9,11 @@ import { mkdirSync } from 'node:fs';
 import { chromium, expect as ui, type Browser, type Locator, type Page } from '@playwright/test';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { INTEGRATIONS, showcasePairs } from '@/lib/integrations/catalog';
-import { buildIntegrationsPage, openIntroduction } from './integrations-browser-harness';
+import { buildIntegrationsPage, openIntroduction, SHOTS } from './__tests__/browser-harness';
 
 let browser: Browser;
 let html = '';
-const shots = process.env.INTEGRATION_SHOTS;
+const shots = SHOTS;
 const PAIRS = showcasePairs(INTEGRATIONS[0]!);
 const file = (src: string) => src.split('/').pop()!.replace('.webp', '');
 /** A pair by its title, with its two pictures' descriptions and file names. */
@@ -240,7 +240,7 @@ for (const width of [390, 360]) {
       expect(await across()).toEqual([false, true]);
       // What is pressed is thumb-sized; the page does not scroll sideways.
       for (const name of ['上一组', '下一组', '关闭']) expect((await rect(view.getByRole('button', { name }))).height, name).toBeGreaterThanOrEqual(44);
-      for (const name of ['原图', '成品']) expect((await rect(view.getByRole('button', { name }))).height, name).toBeGreaterThanOrEqual(36);
+      for (const name of ['原图', '成品']) expect((await rect(view.getByRole('button', { name }))).height, name).toBeGreaterThanOrEqual(44);
       expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0);
       for (const line of await contrasts(view)) expect(line.contrast, `"${line.text}" cannot be read`).toBeGreaterThanOrEqual(4.5);
       // The next pair, by its arrow, opens on its photo.

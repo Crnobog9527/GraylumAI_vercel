@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 // What the integrations page's browser tests stand on: the real page (IntegrationsView and everything under it) built with the
 // app's CSS (globals.css through Tailwind, the CSS modules) and a stand-in for the server, served to a real browser together
-// with the pictures of the app's public folder. Not a test itself.
+// with the pictures of the app's public folder. Not a test itself: test support, kept under __tests__ like the library sandbox's.
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -9,9 +9,9 @@ import tailwind from '@tailwindcss/postcss';
 import type { Browser, Page } from '@playwright/test';
 import { expect } from 'vitest';
 
-const entry = fileURLToPath(new URL('./__integration_detail_fixture__.js', import.meta.url));
-const src = fileURLToPath(new URL('../../', import.meta.url));
-const PUBLIC = fileURLToPath(new URL('../../../public', import.meta.url));
+const entry = fileURLToPath(new URL('../__integration_detail_fixture__.js', import.meta.url));
+const src = fileURLToPath(new URL('../../../', import.meta.url));
+const PUBLIC = fileURLToPath(new URL('../../../../public', import.meta.url));
 const STUBS: Record<string, string> = {
   '@/trpc/client': `
     import { useState } from 'react';
@@ -25,6 +25,8 @@ const STUBS: Record<string, string> = {
   '@/trpc/read-retry': `export const READ_RETRY = {};`,
   'next/link': `import { createElement } from 'react'; export default function Link({ prefetch, ...props }) { return createElement('a', props); }`,
 };
+/** Where to save screenshots of what is measured (INTEGRATION_SHOTS=<dir>), read here once for both test files; unset: none. */
+export const SHOTS = process.env.INTEGRATION_SHOTS;
 export const BALANCE = { credits: 12, freeCredits: 3, paidUntil: null, topUpUrl: 'https://shotviva.com/pricing?from=graylum' };
 const STATES = {
   off: { available: false, eligible: true, connected: false, balance: null },
@@ -52,8 +54,8 @@ export async function buildIntegrationsPage(): Promise<string> {
       if (id !== entry) return;
       // The page as the workbench shows it: the light, warm canvas the cards sit on.
       return `import React from 'react'; import { createRoot } from 'react-dom/client';
-        import ${file('../../app/globals.css')};
-        import { IntegrationsView } from ${file('./IntegrationsView.tsx')};
+        import ${file('../../../app/globals.css')};
+        import { IntegrationsView } from ${file('../IntegrationsView.tsx')};
         createRoot(document.getElementById('root')).render(React.createElement('div', { style: { height: '100vh', background: '#f7f5f1' } },
           React.createElement(IntegrationsView, { result: {} })));`;
     } }],

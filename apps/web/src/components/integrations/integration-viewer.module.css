@@ -43,7 +43,7 @@
 
 @media (max-width: 639px) {
   .panel {
-    --room: calc(100dvh - 300px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+    --room: calc(100dvh - 316px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
     top: auto; bottom: 0; left: 0; width: 100%; min-width: 0; max-height: calc(100dvh - 28px - env(safe-area-inset-top, 0px));
     padding: 26px 16px calc(12px + env(safe-area-inset-bottom, 0px)); gap: 12px; border-radius: 24px 24px 0 0 !important;
     translate: 0 var(--pulled, 0px);
@@ -52,7 +52,7 @@
   .close { margin: -6px -8px 0 0; }
   /* The two names, as the way from one picture to the other. */
   .sides { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; border-radius: 12px; background: var(--gl-surface-muted); }
-  .sides button { min-height: 36px; padding: 0 8px; border: 0; border-radius: 8px; background: none; color: var(--gl-text-secondary-aa);
+  .sides button { min-height: 44px; padding: 0 8px; border: 0; border-radius: 8px; background: none; color: var(--gl-text-secondary-aa);
     font: inherit; font-size: 14px; line-height: 20px; }
   .sides button[aria-pressed='true'] { background: var(--gl-surface); color: var(--gl-text); font-weight: 600; box-shadow: var(--gl-shadow-raised); }
   /* One picture across the sheet; a swipe sideways brings the other. Up and down belongs to the drag that closes the sheet. */
