@@ -1303,4 +1303,25 @@
   .page .reviewSideTitle button {
     min-height: 44px;
   }
+  /* The forms that add an account and connect one (AddAccountForm, ConnectForm): boxes, buttons and tick lines a thumb's height. */
+  .page .formStack input:not([type='checkbox']):not([type='radio']):not([type='file']),
+  .page .formStack button:not([role='checkbox']) {
+    min-height: 44px;
+  }
+  .page .formStack .check,
+  .page .radios label {
+    align-items: center;
+    min-height: 40px;
+    font-size: 14px;
+  }
+  .page .radios label {
+    display: flex;
+    gap: 8px;
+  }
+  .page .radios input {
+    flex: none;
+    width: 20px;
+    height: 20px;
+    margin: 0;
+  }
 }
