@@ -25,7 +25,7 @@
 
 /* Header: floats over the canvas like ploy's, with the two pills on the right. */
 .header{position:sticky;top:0;z-index:30;padding:12px 0;background:color-mix(in srgb,var(--gl-canvas) 82%,transparent);
-  backdrop-filter:saturate(1.4) blur(14px);-webkit-backdrop-filter:saturate(1.4) blur(14px)}
+  -webkit-backdrop-filter:saturate(1.4) blur(14px);backdrop-filter:saturate(1.4) blur(14px)}
 .headerInner{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .brand{display:flex;align-items:center;gap:9px;color:var(--gl-text);font-size:21px;font-weight:600;letter-spacing:-.04em;text-decoration:none}
 .brand img{width:28px;height:28px;border-radius:var(--gl-radius-sm);background:var(--gl-action)}

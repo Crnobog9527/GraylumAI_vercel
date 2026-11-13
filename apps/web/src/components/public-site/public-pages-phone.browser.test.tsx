@@ -4,8 +4,10 @@
 // change (2026-11-13, 360px): on /graylum-vs-chatgpt the comparison table was 561px wide in a 328px column, so the Graylum
 // column was off the screen with nothing saying so; the crumbs above each page's title were 20px high.
 // PUBLIC_PHONE_SHOTS=<dir> saves screenshots.
+import { createHash } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import tailwind from '@tailwindcss/postcss';
 import { chromium, type Browser, type Page } from '@playwright/test';
@@ -24,6 +26,12 @@ let browser: Browser;
 let css = '';
 const shots = process.env.PUBLIC_PHONE_SHOTS;
 const src = fileURLToPath(new URL('../../', import.meta.url));
+const web = fileURLToPath(new URL('../../../', import.meta.url));
+const MODULES = [
+  './article.module.css', './public-shell.module.css', '../design/light-tokens.module.css', '../landing/preview-j/j.module.css',
+  '../landing/preview-j/chrome-j.module.css', '../landing/preview-j/sections-j.module.css', '../landing/preview-j/backdrop-j.module.css',
+  '../landing/preview-l/dawn-l.module.css',
+];
 const compare = compareHans();
 const table = compare.sections.find(section => section.table)!.table!;
 
@@ -32,9 +40,15 @@ beforeAll(async () => {
   const { build } = await import(pathToFileURL(createRequire(require.resolve('vitest/package.json')).resolve('vite')).href);
   const entry = fileURLToPath(new URL('./__public_phone_fixture__.js', import.meta.url));
   const bundle = await build({
-    configFile: false, logLevel: 'silent', css: { postcss: { plugins: [tailwind({ base: src })] } },
+    configFile: false, logLevel: 'silent',
+    // The pages' CSS modules too (the public shell, the home page's chrome and the reading column, Owner 2026-11-14
+    // PUBLIC-SITE), named as vitest names them in the rendered HTML (its "stable" strategy: _<class>_<sha1 of the path>).
+    css: { postcss: { plugins: [tailwind({ base: src })] }, modules: { generateScopedName: (name: string, filename: string) =>
+      `_${name}_${createHash('sha1').update(relative(web, filename)).digest('hex').slice(0, 6)}` } },
     plugins: [{ name: 'public-phone-css', enforce: 'pre', resolveId(id: string) { if (id === entry) return id; }, load(id: string) {
-      if (id === entry) return `import ${JSON.stringify(fileURLToPath(new URL('../../app/globals.css', import.meta.url)))};`;
+      if (id === entry) return [`import ${JSON.stringify(fileURLToPath(new URL('../../app/globals.css', import.meta.url)))};`,
+        ...MODULES.map((name, index) => `import m${index} from ${JSON.stringify(fileURLToPath(new URL(name, import.meta.url)))}; window.__m${index} = m${index};`)]
+        .join('\n');
     } }],
     build: { write: false, minify: false, cssCodeSplit: false, lib: { entry, name: 'PublicPhoneCss', formats: ['iife'] } },
   });

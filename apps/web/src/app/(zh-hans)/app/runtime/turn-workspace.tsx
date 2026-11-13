@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 'use client';
+import { UNANSWERED_NOTE, unansweredByPlace } from './unanswered-turns';
 import { TurnStepList } from '@/components/chat-display/turn-step-list';
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { ChatInlineNotice, ChatNoticeList } from '@/components/chat/ChatInlineNotice';
@@ -123,6 +124,13 @@ export function TurnWorkspace({ sessionId }: { sessionId: string }) {
   // FUSION-COMPARE: each compare card sits where it was asked (before its own turn's replies), the same before and after a refresh.
   const placedCards = placeCompareCards(compare.cards, turns);
   const asked = (turnId: number | null) => messages.find(m => m.role === 'user' && m.turnId === turnId)?.content ?? null;
+  // VOICE-ABORT-FIX: a question whose round was voided (no saved reply) still shows, where it was asked.
+  const unanswered = unansweredByPlace(messages);
+  const unansweredAt = (place: number) => (unanswered.get(place) ?? []).map(message =>
+    <RuntimeTurnView key={'unanswered-' + message.seq} userText={message.content}
+      photos={message.turnId === null ? undefined : photosByTurn.get(message.turnId)}>
+      <ChatInlineNotice tone="status">{UNANSWERED_NOTE}</ChatInlineNotice>
+    </RuntimeTurnView>);
   const signature = transcriptSignature(messages.map(m => m.seq).join('|'), outgoing ? { text: outgoing } : null);
   useEffect(() => {
     const node = scrollArea.current;
@@ -167,6 +175,7 @@ export function TurnWorkspace({ sessionId }: { sessionId: string }) {
           {turns.map((reply, index) => { const steps = reply.turnId === null ? [] : chat.stepsByTurn.get(reply.turnId) ?? reply.steps ?? [];
             const cardsHere = placedCards.get(index);
             return <Fragment key={reply.seq}>
+            {unansweredAt(index)}
             {cardsHere && <CompareThread cards={cardsHere} names={compare.names} onQuote={update}
               onAdopted={() => { void compare.refresh(); void chat.reload(); }}/>}
             <RuntimeTurnView userText={asked(reply.turnId)}
@@ -180,6 +189,7 @@ export function TurnWorkspace({ sessionId }: { sessionId: string }) {
               skills={steps.flatMap(step => step.tool === 'load_skill' && step.label ? [step.label] : [])}
               onOpenResults={() => { setPanelOpen(true); setReveal(count => count + 1); }}/>}
           </RuntimeTurnView></Fragment>; })}
+          {unansweredAt(turns.length)}
           {results.isError && <QueryNotice error={results.error} label="本对话成果夹" retry={() => results.refetch()}/>}
           {/* FUSION-COMPARE: the cards after every reply (the newest compare, or one whose turn is not listed yet). */}
           {placedCards.get(turns.length) && <CompareThread cards={placedCards.get(turns.length)!} names={compare.names} onQuote={update}

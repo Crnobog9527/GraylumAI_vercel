@@ -2,6 +2,7 @@
 import { z } from 'zod';
 import { router, adminProcedure, protectedProcedure } from '../trpc';
 import { createSafeServiceUnavailableError } from '../lib/publicError';
+import { withdrawDisputeHold } from '../services/payments/disputeWithdraw';
 
 export const paymentDisputesRouter = router({
   notice: protectedProcedure.query(async ({ ctx }) => {
@@ -50,9 +51,7 @@ export const paymentDisputesRouter = router({
   withdraw: adminProcedure.input(z.object({ disputeId: z.uuid() }).strict()).mutation(async ({ ctx, input }) => {
     try {
       if (!ctx.hasSupabaseAdminPrivileges) throw new Error('PAY_DISPUTE_DB_UNAVAILABLE');
-      const result = await ctx.supabaseAdmin.rpc('pay_dispute_withdraw', { p_actor: ctx.profileId, p_dispute: input.disputeId });
-      if (result.error || !result.data) throw new Error('PAY_DISPUTE_WITHDRAW_UNAVAILABLE');
-      return result.data as { restored: number; duplicate: boolean };
+      return await withdrawDisputeHold(ctx.supabaseAdmin, ctx.profileId, input.disputeId);
     } catch (error) { throw createSafeServiceUnavailableError(error, '冻结未撤回，请核对付款和拒付状态后重试'); }
   }),
 });

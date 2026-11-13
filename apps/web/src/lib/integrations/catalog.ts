@@ -37,8 +37,14 @@ export type IntegrationModule = {
   inGraylum?: readonly string[];
   /** The product's own page (Chinese). Tracking is added by trackedLink, never written here. */
   viewUrl: string;
+  /** false: someone else's product (no partner marker or utm_* on their page; controller 2026-11-14 for Feishu). */
+  tracked?: false;
+  /** Without a mark of its own: the plain icon to show (absent: a picture). */
+  glyph?: 'table';
+  /** Without sample pictures: a drawn animation of what it does, under 能做什么 (Owner 2026-11-14 for Feishu). */
+  illustration?: 'feishu-write';
   /** The connector behind it, when Graylum can connect to it. */
-  connector?: 'shotviva';
+  connector?: 'shotviva' | 'feishu_base';
 };
 
 /** A photo and what came of it, as the large view shows them: what the two are about, and each side with its name. */
@@ -107,6 +113,33 @@ export const INTEGRATIONS: readonly IntegrationModule[] = [
     viewUrl: 'https://shotviva.com/zh',
     connector: 'shotviva',
   },
+  {
+    // INTEGRATION-BASE / V3-FEISHU (Owner 2026-11-14): plan B, works written into the user's own Feishu Base; Pro/Gold only.
+    // Wording: the draft the Owner approved on 2026-11-14 ("可以，就这样"); the connection steps are added once the
+    // authorization-code path is verified. No pictures: a drawn animation (Owner: "画示意动效，不用截图").
+    id: 'feishu-base',
+    name: '飞书多维表格',
+    glyph: 'table',
+    tagline: '把 Graylum 里写好的作品，一键存进你自己的飞书多维表格，和团队一起排期、打分、追进度。',
+    features: [
+      '选好要写入的表格，标题、正文、平台、日期等内容按你设定的对应关系填进各列。',
+      '写入前先给你看预览，确认后才写；同一篇作品再写一次，是更新原来那一行，不会重复新增。',
+    ],
+    whenToUse: [
+      '你已经在飞书多维表格里管理选题和发布排期，不想再手动复制粘贴的时候。',
+      '和同事、剪辑或客户一起看稿、改稿的时候。',
+    ],
+    illustration: 'feishu-write',
+    inGraylum: [
+      '作品旁会多一个"写入飞书"按钮。',
+      'Graylum 只保存你这张表格的授权码（加密保存）和表格地址，只用来往这张表写入你确认过的作品；不会读你飞书里的其他内容。',
+      '随时可以在这里断开，断开后授权码立即删除；已经写进飞书的内容还在你自己的表格里。',
+    ],
+    // Feishu's official Base page (checked 2026-11-14: 200, "飞书多维表格｜…- 飞书官网").
+    viewUrl: 'https://www.feishu.cn/product/base',
+    tracked: false,
+    connector: 'feishu_base',
+  },
 ];
 
 /**
@@ -127,6 +160,10 @@ export function showcasePairs(module: IntegrationModule): IntegrationPair[] {
 /** A module's link with the source marked (controller 2026-11-12: Shotviva's partner marker from=graylum, plus utm_* which
  * Shotviva's analytics keeps; not ?ref=, which is the affiliate commission and would be an internal settlement). The one link
  * a module has is 去查看 (Owner 2026-11-13: "只保留'去查看'"), so utm_content is always view. */
+/** The link 去查看 opens: tracked for our own products, the page as it is for someone else's. */
+export const viewLink = (module: IntegrationModule): string =>
+  module.tracked === false ? module.viewUrl : trackedLink(module.viewUrl, module.id);
+
 export function trackedLink(url: string, moduleId: string): string {
   const target = new URL(url);
   target.searchParams.set('from', 'graylum');

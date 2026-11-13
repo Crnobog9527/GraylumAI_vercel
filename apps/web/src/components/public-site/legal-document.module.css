@@ -1,22 +1,24 @@
-/* The formal legal documents (privacy, terms, cookies, refund): plain HTML from content/legal, styled for the dark public site.
+/* The formal legal documents (privacy, terms, cookies, refund): plain HTML from content/legal, styled for the light public site (the home page's look, Owner 2026-11-14 PUBLIC-SITE).
    The classes the HTML carries (meta, toc, table-wrap) are literal, so they must be :global or the module would rename them. */
 .doc {
-  color: #c8c8c8;
+  color: var(--pub-body);
   font-size: 1rem;
   line-height: 1.8;
   overflow-wrap: anywhere;
 }
 
 .doc h1 {
-  color: #ffffff;
-  font-size: 2.25rem;
-  font-weight: 700;
-  line-height: 1.2;
+  color: var(--pub-ink);
+  font-size: clamp(2rem, 4.2vw, 3.25rem);
+  font-weight: 600;
+  letter-spacing: -0.04em;
+  line-height: 1.12;
   margin: 0 0 0.75rem;
 }
 
 .doc h2 {
-  color: #ffffff;
+  color: var(--pub-ink);
+  letter-spacing: -0.02em;
   font-size: 1.5rem;
   font-weight: 600;
   line-height: 1.3;
@@ -25,7 +27,7 @@
 }
 
 .doc h3 {
-  color: #e6e6e6;
+  color: var(--pub-ink);
   font-size: 1.125rem;
   font-weight: 600;
   margin: 1.75rem 0 0.5rem;
@@ -36,7 +38,7 @@
 }
 
 .doc :global(.meta) {
-  color: #8a8a8a;
+  color: var(--pub-muted);
   font-size: 0.875rem;
   margin-bottom: 2rem;
 }
@@ -60,7 +62,8 @@
 }
 
 .doc a {
-  color: #ffd700;
+  color: var(--pub-ink);
+  text-decoration-color: var(--gl-accent-gold, #ffbb17);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
@@ -88,15 +91,15 @@
 
 .doc th,
 .doc td {
-  border: 1px solid #2b2b2b;
+  border: 1px solid var(--pub-line);
   padding: 0.6rem 0.75rem;
   text-align: left;
   vertical-align: top;
 }
 
 .doc th {
-  background: #1a1a1a;
-  color: #ffffff;
+  background: #f4f3ef;
+  color: var(--pub-ink);
 }
 
 @media (min-width: 768px) {
@@ -132,7 +135,7 @@
   }
 
   .doc :global(.toc) li {
-    border-bottom: 1px solid #1f1f1f;
+    border-bottom: 1px solid var(--pub-line);
     margin: 0;
   }
 
@@ -145,7 +148,7 @@
   }
 
   .doc :global(.table-wrap)::before {
-    color: #8a8a8a;
+    color: var(--pub-muted);
     content: '表格较宽，可以左右滑动';
     display: block;
     font-size: 0.8125rem;
@@ -156,12 +159,12 @@
 
   .navButton {
     align-items: center;
-    background: #ffd700;
+    background: var(--j-pill-bg, var(--pub-action));
     border: 0;
     border-radius: 999px;
     bottom: calc(16px + env(safe-area-inset-bottom, 0px) + var(--consent-bar-space, 0px));
-    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
-    color: #141414;
+    box-shadow: var(--j-pill-shadow, 0 6px 20px rgba(20, 19, 18, 0.3));
+    color: #fff;
     display: inline-flex;
     font-size: 0.9375rem;
     font-weight: 600;
@@ -174,10 +177,10 @@
   }
 
   .navSheet {
-    background: #141414;
+    background: #fff;
     border: 0;
     border-radius: 20px 20px 0 0;
-    color: #e6e6e6;
+    color: var(--pub-ink);
     inset: auto 0 0;
     margin: 0;
     max-height: 78dvh;
@@ -190,12 +193,12 @@
   }
 
   .navSheet::backdrop {
-    background: rgba(0, 0, 0, 0.6);
+    background: rgba(20, 19, 18, 0.45);
   }
 
   .navSheet header {
     align-items: center;
-    background: #141414;
+    background: #fff;
     display: flex;
     font-size: 1.0625rem;
     justify-content: space-between;
@@ -208,7 +211,7 @@
     align-items: center;
     background: none;
     border: 0;
-    color: #c8c8c8;
+    color: var(--pub-muted);
     display: grid;
     height: 44px;
     justify-items: center;
@@ -223,7 +226,7 @@
   }
 
   .navSheet li {
-    border-top: 1px solid #262626;
+    border-top: 1px solid var(--pub-line);
   }
 
   .navSheet li > * {
@@ -241,7 +244,7 @@
   }
 
   .navSheet li > button {
-    color: #ffd700;
+    color: var(--pub-gold-text);
   }
 }
 
@@ -261,3 +264,31 @@
   }
 }
 
+
+/* The Chinese parts around the English document: the notice above it, the font licence below the terms. */
+.fontNotice {
+  border-top: 1px solid var(--pub-line);
+  color: var(--pub-body);
+  font-size: 0.875rem;
+  line-height: 1.75;
+  margin-top: 3rem;
+  padding-top: 1.5rem;
+}
+
+.fontNotice h2 {
+  color: var(--pub-ink);
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0 0 0.5rem;
+}
+
+.fontNotice p {
+  margin: 0;
+}
+
+.fontNotice a {
+  color: var(--pub-ink);
+  text-decoration: underline;
+  text-decoration-color: var(--gl-accent-gold, #ffbb17);
+  text-underline-offset: 4px;
+}

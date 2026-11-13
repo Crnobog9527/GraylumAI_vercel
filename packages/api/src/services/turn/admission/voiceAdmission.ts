@@ -51,7 +51,7 @@ export async function readVoiceProfile(db: Rpc, actorId: string, versionId: stri
   return (await readVoiceVersion(db, actorId, versionId))?.profile;
 }
 
-/** VOICE-2 (0539/0540): the version's profile with its code-computed stats and document labels (null/empty before 0539). Labels
+/** VOICE-2 (0543/0544): the version's profile with its code-computed stats and document labels (null/empty before 0543). Labels
  * or stats that do not parse are left out (no examples, no stats line), never a refused turn. */
 export async function readVoiceVersion(db: Rpc, actorId: string, versionId: string):
   Promise<{ profile: VoiceProfile; stats: VoiceStats | null; documents: VoiceDocumentLabel[] } | undefined> {

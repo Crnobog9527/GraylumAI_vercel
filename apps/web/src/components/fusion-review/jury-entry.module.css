@@ -33,6 +33,8 @@
 .chooserRow[data-revising] { background: #fafafa; color: #6b6b6b; }
 .chooserRow small { display: block; color: #6b6b6b; font-size: 12px; line-height: 18px; }
 .chooserList .link { padding-left: 14px; min-height: 28px; font-size: 13px; color: #444; }
+/* MOBILE-UX: on the phone, 「继续修订」 and 「查看上次评审」 under a row are finger-sized (44px), like every other tap target. */
+@media (max-width: 639px) { .chooserList .link { min-height: 44px; } }
 .chooserEmpty { display: grid; justify-items: start; gap: 12px; color: #444; font-size: 14px; line-height: 22px; }
 .chooserEmpty p { margin: 0; }
 .chooserAction {

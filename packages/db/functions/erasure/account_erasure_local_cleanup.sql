@@ -47,6 +47,11 @@ BEGIN
   errors:=array_append(errors,'ERASURE_STORAGE_PENDING');
   UPDATE account_erasure_requests SET storage_verified_at=NULL WHERE profile_id=p_profile_id;
  END IF;
+ -- INTEGRATION-BASE: the user's connector secrets (Vault) go first, then their connection rows.
+ IF EXISTS(SELECT 1 FROM user_connections WHERE profile_id=p_profile_id) THEN
+  DELETE FROM vault.secrets WHERE id IN (SELECT vault_secret_id FROM user_connections WHERE profile_id=p_profile_id);
+  DELETE FROM user_connections WHERE profile_id=p_profile_id;
+ END IF;
  -- No amount, balance, membership, status or original primary key is changed.
  UPDATE profiles SET email=NULL,nickname=NULL,avatar_url=NULL,last_ip=NULL,last_login_at=NULL,signup_attribution=NULL /* ANALYTICS signup attribution */
   ,phone=NULL /* PHONE-OTP verified phone */

@@ -86,6 +86,19 @@ describe('security response headers', () => {
   });
 });
 
+describe('VERCEL-COST-2: type checking in the build', () => {
+  it('is skipped only on Vercel; local and CI builds still check types', async () => {
+    vi.stubEnv('VERCEL', '1');
+    expect((await loadConfig())(PHASE_PRODUCTION_BUILD).typescript?.ignoreBuildErrors).toBe(true);
+    vi.unstubAllEnvs(); vi.resetModules();
+    vi.stubEnv('VERCEL', '');
+    expect((await loadConfig())(PHASE_PRODUCTION_BUILD).typescript?.ignoreBuildErrors).toBe(false);
+    vi.unstubAllEnvs(); vi.resetModules();
+    vi.stubEnv('CI', 'true');
+    expect((await loadConfig())(PHASE_PRODUCTION_BUILD).typescript?.ignoreBuildErrors).toBe(false);
+  });
+});
+
 describe('moved public pages', () => {
   it('sends the old pricing address /landing/pricing to /pricing for good (308, the query kept by Next.js)', async () => {
     const config = (await loadConfig())(PHASE_DEVELOPMENT_SERVER);

@@ -150,7 +150,7 @@ export async function voiceCases(t){
   assert.equal(await balance(a),settled);
   report.checks.push('voice: a repeated request is one turn and one charge; a result for another version is refused');
  }
- // 8. VOICE-2 PR-1 (0539): the code-computed stats and the documents' labels are saved with the profile, only for documents the
+ // 8. VOICE-2 PR-1 (0543): the code-computed stats and the documents' labels are saved with the profile, only for documents the
  // version read; a malformed label set or an unknown key is refused; an edit of the confirmed profile copies them; the user can
  // correct one document's label on their own version only.
  {
@@ -199,7 +199,7 @@ export async function voiceCases(t){
   assert.deepEqual(copy,{stats,documents:[{documentId:read,type:'script',topics:['下班','做饭'],edited:true}]});
   report.checks.push('voice 2.0: stats and labels saved with the profile (only for documents read), malformed ones refused, a label corrected only by its owner on a document the version read, an edited profile keeps them');
  }
- // 9. VOICE-2 PR-2 (0540): voice_examples_read gives the opening text of the version's own documents only: the owner's
+ // 9. VOICE-2 PR-2 (0544): voice_examples_read gives the opening text of the version's own documents only: the owner's
  // confirmed (or superseded) version, a document it read at the same content version, still ready; at most three; the rest left
  // out. voice_profile_read carries the stats and labels.
  {

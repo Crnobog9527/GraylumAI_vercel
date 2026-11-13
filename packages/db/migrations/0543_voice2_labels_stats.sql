@@ -3,13 +3,13 @@
 -- VOICE-2 PR-1 (文风 2.0; Owner 2026-11-14 chose to build phases 1 and 2 before launch): when "学习我的文风" runs, the same single
 -- model call also labels each document it read with a type (short post / long article / video script / other) and a few topic
 -- words, and code computes writing stats (sentence length, openings, punctuation, paragraphs). Both are saved on the profile
--- version, so PR-2 can pick 2-3 past pieces of the same type and a different topic as examples. Number 0539 from the controller (first 0536).
+-- version, so PR-2 can pick 2-3 past pieces of the same type and a different topic as examples. Number 0543 from the controller (first 0536, then 0539).
 --   * voice_profile_versions gains stats (object, at most 4 KB) and documents (array of {documentId,type,topics,edited},
 --     at most 32 KB); both NULL for versions made before. They live on the version row: deleting a document already deletes
 --     every version that read it (voice_library_trigger), deleting a version or the account deletes the row, so nothing new
 --     needs erasure wiring.
 --   * voice_documents_valid: the shape check of documents (types, at most 5 topics of at most 20 characters, at most 200 entries).
---   * turn_voice_apply: whole current definition; also accepts stats and documents (a caller built before 0539 sends neither)
+--   * turn_voice_apply: whole current definition; also accepts stats and documents (a caller built before 0543 sends neither)
 --     and keeps a label only for a document the version read.
 --   * voice_version_view: whole current definition plus stats and documents (the page ignores keys it does not know).
 --   * voice_profile_confirm: whole current definition; editing the confirmed profile copies stats and documents to the new
@@ -52,8 +52,8 @@ CREATE OR REPLACE FUNCTION public.turn_voice_apply(t turns, p_kind text, p_resul
 AS $function$
 BEGIN
   -- {versionId, profile[, stats, documents]}: the profile the caller parsed and checked against the corpus (voice.ts); VOICE-2
-  -- (0539) adds the code-computed writing stats and each read document's type and topics. Nothing else is accepted; a caller
-  -- built before 0539 sends only the first two keys.
+  -- (0543) adds the code-computed writing stats and each read document's type and topics. Nothing else is accepted; a caller
+  -- built before 0543 sends only the first two keys.
   IF jsonb_typeof(p_result) IS DISTINCT FROM 'object' OR jsonb_typeof(p_result->'profile') IS DISTINCT FROM 'object'
     OR jsonb_typeof(p_result->'versionId') IS DISTINCT FROM 'string'
     OR EXISTS (SELECT 1 FROM jsonb_object_keys(p_result) k WHERE k NOT IN ('versionId','profile','stats','documents'))
@@ -115,7 +115,7 @@ BEGIN
    WHERE actor_id=a AND status IN ('generating','draft') AND version>v.version) THEN
    RAISE EXCEPTION 'VOICE_PENDING_RESULT'; END IF;
   IF v.profile=result THEN RETURN voice_state(a); END IF;
-  -- An edit of the confirmed profile is a new version of the same reading: its stats and document labels go with it (0539).
+  -- An edit of the confirmed profile is a new version of the same reading: its stats and document labels go with it (0543).
   INSERT INTO voice_profile_versions(actor_id,request_id,version,status,profile,sources,corpus,billing_settled,confirmed_at,
    stats,documents)
   VALUES(a,gen_random_uuid(),(SELECT max(version) FROM voice_profile_versions WHERE actor_id=a)+1,'confirmed',result,

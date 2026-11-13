@@ -15,6 +15,7 @@ import { readAdmissionSettings, type NewWorkGateResult, type RuntimeCallGate, ty
 import { DECISIONS_MODEL, judgePositioning, POSITIONING_REFUSAL_CAP, type PositioningGatePolicy } from './admission/positioningGate';
 import { freeChatInstructions } from './agent/primaryInstructions';
 import { withInjectedSource } from './agent/contentSource';
+import { WORK_ITEM_INSTRUCTIONS } from './agent/workItemInstructions';
 import { assertRuntimeRequestCapacity } from './agent/context';
 import { isPositioningRefusal, POSITIONING_FALLBACK_INSTRUCTIONS, POSITIONING_MARKER } from './admission/positioningFallback';
 import { FREE_CHAT_REQUEST_FORMAT, openRouterRequestBody, PLAIN_TEXT_STREAM, type RequestContext } from './provider/providerRequest';
@@ -25,7 +26,7 @@ import { runRuntime } from './agent/runner';
 import { serverChatModel } from './agent/serverChatModel';
 import type { PricingDeps } from './admission/pricingAdmission';
 import { ceil12, modelCall, TurnStop } from './call';
-import { turnDatabase, TurnDatabaseError, type CloseKind, type TurnClients, type WorkItemTurn } from './db';
+import { erasedCode, turnDatabase, TurnDatabaseError, voiceRevokedOnly, type CloseKind, type TurnClients, type WorkItemTurn } from './db';
 import { historyRoom, projectHistory, trimHistory, turnSession } from './history';
 import type { CounterStore } from './limiter';
 import { startThresholdCredits, stopLossSettings, turnPolicy } from './policy';
@@ -199,7 +200,10 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
   // The current message with the smallest instructions must fit the input budget, or nothing opens (the request bytes are
   // checked again before sending, with everything in them).
   const guard = settings.ok ? settings.identityGuard ?? true : true;
-  const requiredBytes = Buffer.byteLength(text) + Buffer.byteLength(material) + Buffer.byteLength(withBrandIdentity(freeChatInstructions(false), guard));
+  // A topic window's turn also carries its host rule (CONTENT-CONVERSATION-2), in the site-wide segment.
+  const workRule = work ? WORK_ITEM_INSTRUCTIONS : '';
+  const requiredBytes = Buffer.byteLength(text) + Buffer.byteLength(material) + Buffer.byteLength(withBrandIdentity(freeChatInstructions(false), guard))
+    + Buffer.byteLength(workRule);
   // With tools the research ceiling may hold the message; it is checked again below against what the plan allows.
   if (requiredBytes > (deps.tools ? quote.inputLimit : Math.min(quote.inputLimit, interactiveBytes)))
     return emit({ type: 'error', code: 'TURN_INPUT_TOO_LARGE' });
@@ -234,6 +238,21 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
       }
     } catch { return emit({ type: 'error', code: 'TURN_DATABASE_UNAVAILABLE' }); }
   }
+  // CONTENT-CONVERSATION-2: a video item's saved final script and its storyboard (opc_work_check), given on every turn of the topic
+  // window, so a writing Skill the model loads can write from them and the reply can be saved as a storyboard or editing advice
+  // (opc_content_from_turn reads the frozen list). A turn that chose a derived method keeps its single source above. What does not
+  // fit the input budget is left out, the storyboard first: saving a reply that needed it is then refused by the database.
+  const workSources: Array<{ contentId: string; kind: 'script' | 'storyboard' }> = [];
+  if (work && !workSource) {
+    let added = 0;
+    for (const source of work.sources) {
+      const injected = withInjectedSource('', source.kind, source.version, source.body) + '\n\n';
+      if (requiredBytes + added + Buffer.byteLength(injected) + (tools?.definitionBytes ?? 0) > inputLimit) break;
+      added += Buffer.byteLength(injected);
+      material += injected;
+      workSources.push({ contentId: source.contentId, kind: source.kind });
+    }
+  }
   // The ceiling this turn really has (research usable: the research one; otherwise the interactive one), before anything opens.
   if (tools && requiredBytes + tools.definitionBytes > inputLimit) return emit({ type: 'error', code: 'TURN_INPUT_TOO_LARGE' });
   const toolLimits = tools ? tools.plan.limits : { paidTools: 0, freeTools: 0 };
@@ -266,6 +285,7 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
   let opened;
   try { opened = await db.open({ actorId: input.actorId, sessionId: input.sessionId, requestId: input.requestId, kind: 'chat',
     policy: { ...policy, ...(workSkill ? { workSkill } : {}), ...(workSource ? { workSource } : {}),
+      ...(workSources.length ? { workSources } : {}),
       // Every turn that read a revision: deleting the script it held reaches this turn (content_erasure_scope).
       ...(work && work.materialRevision !== null ? { workMaterial: { revision: work.materialRevision, hash: work.materialHash } } : {}) },
     ...(input.resume ? { resumeOf: input.resume.of } : {}) }); }
@@ -348,7 +368,7 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
     // without a confirmed positioning, the primary model's fallback rule: "Decisions 先判断，主模型兜底"), both cached. The
     // positioning-page redirect is only for an account that has a positioning (as admission.ts).
     const gated = Boolean(gate && !gate.positioned);
-    const shared = withBrandIdentity(freeChatInstructions(!gated), guard) + (tools?.sharedInstructions(gated) ?? '');
+    const shared = withBrandIdentity(freeChatInstructions(!gated), guard) + (tools?.sharedInstructions(gated) ?? '') + workRule;
     const instructions = shared + '\n' + replySettingInstructions(effectiveReplyLocale(opened.replyLanguage))
       + (fallback ? POSITIONING_FALLBACK_INSTRUCTIONS : '') + (tools?.userInstructions ?? '');
     const promptCache = freezeSharedPromptCache({ real: true, model: quote.model, cacheWriteUsdPerMillion:
@@ -437,7 +457,11 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
         // The steps the reply showed: written in the close's own transaction, in a savepoint of their own (turn_close, 0507).
         ...(stepLog.size ? { steps: savedSteps(stepLog.values()) } : {}) } } : {}) });
     markStage('close');
-    if (closed.closeKind === 'erased') return emit({ type: 'error', code: 'TURN_TOMBSTONED', turnId: opened.turnId });
+    // A deleted voice voids only the reply: the user's message (and its photos) was kept (0535).
+    if (closed.closeKind === 'erased') {
+      messageKept = voiceRevokedOnly(closed);
+      return emit({ type: 'error', code: erasedCode(closed), turnId: opened.turnId });
+    }
     messageKept = true;
     // The page reads the photos again on the result: they are uploaded first (they started before the model call).
     if (photos) await photos;
@@ -460,16 +484,21 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
       // by its receipts once the call's cost is known (shownReply.ts). A save that fails falls through to the close below.
       if (code === 'TURN_CALL_UNKNOWN' && saveShown) {
         const kept = await swallow('turn_reply_cut_save_failed', saveShown(), null, { category: 'ai' });
-        if (kept) messageKept = kept.closeKind !== 'erased';
-        if (kept) return emit({ type: 'error', code: kept.closeKind === 'erased' ? 'TURN_TOMBSTONED' : REPLY_CUT, turnId: opened.turnId });
+        if (kept) messageKept = kept.closeKind !== 'erased' || voiceRevokedOnly(kept);
+        if (kept) return emit({ type: 'error', code: kept.closeKind === 'erased' ? erasedCode(kept) : REPLY_CUT, turnId: opened.turnId });
       }
       // Any other failure delivered nothing (no answer shown as final, nothing saved): the user pays nothing; the receipts and
       // the platform's cost stay recorded (e.g. a response truncated before any text, RUNTIME_OUTPUT_TRUNCATED).
       const plan = CLOSES[code] ?? { kind: 'failed' as const, refundAll: true };
       if (answered) noteUnsavedAnswer('chat', opened.turnId, code);
       // A close that fails here is left to recovery (the turn stays open, its freeze kept); logged, never thrown at the client.
-      await swallow('turn_close_failed', close(plan.kind, { refundAll: plan.refundAll, failureCode: code.toLowerCase() }), undefined,
-        { category: 'ai' });
+      // An erased close is handed the user's message: turn_close keeps it only when the deleted voice is the reason (0535).
+      const ended = await swallow('turn_close_failed', close(plan.kind, { refundAll: plan.refundAll, failureCode: code.toLowerCase(),
+        ...(plan.kind === 'erased' ? { messages: [{ role: 'user' as const, content: text }] } : {}) }), undefined, { category: 'ai' });
+      if (plan.kind === 'erased' && voiceRevokedOnly(ended)) {
+        messageKept = true;
+        return emit({ type: 'error', code: 'TURN_VOICE_REVOKED', turnId: opened.turnId });
+      }
     }
     emit({ type: 'error', code, turnId: opened.turnId });
   } finally {
