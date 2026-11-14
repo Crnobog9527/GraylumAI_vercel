@@ -32,5 +32,7 @@ describe('request_minutes', () => {
     expect(requestMinutesToolBytes()).toBeLessThan(1200);
     expect(REQUEST_MINUTES_INSTRUCTIONS).toContain('never write the minutes in your reply');
     expect(REQUEST_MINUTES_INSTRUCTIONS).toContain('not a minutes request');
+    // Staging evaluation of #2012: in a topic window "sort out this topic's progress" did not start the minutes.
+    expect(REQUEST_MINUTES_INSTRUCTIONS).toContain('帮我把这个选题目前的进度整理一下');
   });
 });
