@@ -25,18 +25,18 @@ describe('importing the user\'s own posts (VOICE-2 PR-5)', () => {
     await service.candidates({ connectionId: uuid(1) });
     expect(rpc).toHaveBeenLastCalledWith('voice_import_candidates', { a: uuid(9), cid: uuid(1), routes: importRoutes() });
   });
-  it('a Post for Me connection is not supported even on a platform TikHub reads; a TikHub one keeps its daily-update switch', async () => {
+  it('a Post for Me connection is not supported even on a platform TikHub reads', async () => {
     const listed = [uuid(1), uuid(2), uuid(3)].map((connectionId, i) => ({ connectionId, platform: ['douyin', 'youtube', 'x'][i],
       displayHint: null, supported: true, fetchedAt: null, posts: 0 }));
     const rpc = vi.fn(async () => ({ data: listed, error: null }));
-    const eqRole = vi.fn(async () => ({ data: [{ id: uuid(1), source: 'tikhub', consent_auto_track: false },
-      { id: uuid(2), source: 'postforme', consent_auto_track: true }], error: null }));
+    const eqRole = vi.fn(async () => ({ data: [{ id: uuid(1), source: 'tikhub' },
+      { id: uuid(2), source: 'postforme' }], error: null }));
     const eqActor = vi.fn(() => ({ eq: eqRole }));
     const from = vi.fn(() => ({ select: () => ({ eq: eqActor }) }));
     const sources = await voiceImportService({ rpc, from } as unknown as SupabaseClient, uuid(9)).sources();
     expect(eqActor).toHaveBeenCalledWith('actor_id', uuid(9));
     expect(eqRole).toHaveBeenCalledWith('role', 'own');
-    expect(sources.map(s => [s.supported, s.autoTrack])).toEqual([[true, false], [false, true], [false, false]]);
+    expect(sources.map(s => s.supported)).toEqual([true, false, false]);
   });
   it('a failed connections read is "unavailable", not a list that looks importable', async () => {
     const rpc = vi.fn(async () => ({ data: [], error: null }));

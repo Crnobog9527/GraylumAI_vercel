@@ -59,6 +59,9 @@
 .importList label { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: start; padding: 6px 8px;
   border-radius: 6px; background: #fafafa; font-size: 12px; line-height: 1.6; cursor: pointer; }
 .importList label small { color: #999; white-space: nowrap; }
+.importButtons { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.importState { display: block; margin-top: 4px; color: #6b6b6b; font-size: 12px; line-height: 1.6; }
+.importError { margin-top: 6px; color: #b42318; font-size: 12px; line-height: 1.6; }
 @media (max-width: 640px) {
   .root { margin: 0 16px; }
   .fields div { grid-template-columns: 1fr; gap: 2px; }
@@ -96,6 +99,8 @@
   .labels select, .labels input { min-height: 44px; padding: 8px 12px; border-radius: 12px; font-size: 16px; }
   .importSources > li { padding: 12px; border-radius: 14px; font-size: 14px; }
   .importHead { flex-wrap: wrap; }
+  .importButtons { justify-content: flex-start; }
+  .importState, .importError { font-size: 13px; }
   .importHead button { min-height: 44px; padding: 0 16px; border-radius: 99px; font-size: 14px; white-space: nowrap; }
   .importList label { min-height: 48px; padding: 10px 12px; border-radius: 12px; font-size: 14px; }
 }

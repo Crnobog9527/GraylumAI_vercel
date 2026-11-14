@@ -31,7 +31,8 @@ const KNOWN: DataErrorCode[] = ['PUBLISH_MONITOR_ACCOUNT_CLOSED', 'PUBLISH_MONIT
   'PUBLISH_MONITOR_POST_NOT_FOUND', 'PUBLISH_MONITOR_WORK_ITEM_MISMATCH', 'PUBLISH_MONITOR_REFRESH_UNAVAILABLE',
   'PUBLISH_MONITOR_REFRESH_TOO_SOON', 'PUBLISH_MONITOR_REFRESH_RUNNING'];
 
-async function call<T>(db: Rpc, name: string, args: Record<string, unknown>, schema: z.ZodType<T>): Promise<T> {
+/** A publish-monitor RPC whose refusals surface as their DataError codes. */
+export async function call<T>(db: Rpc, name: string, args: Record<string, unknown>, schema: z.ZodType<T>): Promise<T> {
   const result = await db.rpc(name, args);
   if (result.error) {
     throw new DataError(KNOWN.find(code => result.error?.message?.includes(code)) ?? 'PUBLISH_MONITOR_UNAVAILABLE');
@@ -103,3 +104,4 @@ export async function manualRefresh(db: Db, client: ClientDeps, profileId: strin
   const result = await refreshConnection(db, client, claim, windowDays, pageCap, now() + MANUAL_BUDGET_MS, now);
   return { outcome: result.outcome, inserted: result.inserted };
 }
+
