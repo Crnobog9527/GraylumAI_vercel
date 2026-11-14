@@ -54,9 +54,11 @@ export function parseVoiceDocuments(answer: string, material: VoiceMaterial[]): 
   } catch { items = []; }
   const byFile = new Map<number, { type?: unknown; topics?: unknown }>();
   for (const item of items) {
-    if (item && typeof item === 'object' && Number.isInteger((item as { file?: unknown }).file)) {
-      byFile.set((item as { file: number }).file, item as { type?: unknown; topics?: unknown });
-    }
+    if (!item || typeof item !== 'object') continue;
+    // The file number as the model wrote it: a number, or (seen on staging 11-14) the same number as a string ("1").
+    const file = (item as { file?: unknown }).file;
+    const number = typeof file === 'number' ? file : typeof file === 'string' && /^\s*\d{1,4}\s*$/.test(file) ? Number(file) : NaN;
+    if (Number.isInteger(number)) byFile.set(number, item as { type?: unknown; topics?: unknown });
   }
   return capVoiceDocuments(material.map((doc, index) => {
     const item = byFile.get(index + 1);
