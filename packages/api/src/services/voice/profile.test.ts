@@ -52,6 +52,15 @@ describe('parseVoiceDocuments (VOICE-2 PR-1)', () => {
     expect(labels).toEqual([{ documentId: 'd1', type: 'other', topics: [] }, { documentId: 'd2', type: 'script', topics: ['做饭', '下班'] }]);
     expect(VOICE_INSTRUCTIONS).toContain('documents');
   });
+  // Staging 11-14 (#1994 check): the model wrote "file": "1"; every label was dropped and all documents read as 其他.
+  it('takes the file number written as a string too, and nothing that is not a number', () => {
+    const two = [...material, { documentId: 'd2', filename: null, text: '第二篇' }];
+    expect(parseVoiceDocuments(answer({ documents: [{ file: '1', type: 'script', topics: ['菜市场'] },
+      { file: ' 2 ', type: 'post', topics: ['跑步'] }] }), two)).toEqual([{ documentId: 'd1', type: 'script', topics: ['菜市场'] },
+      { documentId: 'd2', type: 'post', topics: ['跑步'] }]);
+    expect(parseVoiceDocuments(answer({ documents: [{ file: 'one', type: 'post', topics: ['x'] }, { file: 1.5, type: 'post' }] }), material))
+      .toEqual([{ documentId: 'd1', type: 'other', topics: [] }]);
+  });
   it('bounds topics (five, twenty characters) and survives an answer that is not JSON', () => {
     const many = Array.from({ length: 8 }, (_, i) => '话'.repeat(25) + i);
     expect(parseVoiceDocuments(answer({ documents: [{ file: 1, type: 'post', topics: many }] }), material)[0]!.topics)

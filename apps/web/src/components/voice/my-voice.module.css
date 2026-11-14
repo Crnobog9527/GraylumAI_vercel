@@ -65,6 +65,9 @@
   .docs label { grid-template-columns: auto minmax(0, 1fr) auto; }
   .docs small { display: none; }
   .labels li, .labels li.labelEdit { grid-template-columns: minmax(0, 1fr) auto; }
+  /* The file name gets its own line, so the type and 修改 share the next one (staging 11-14: 修改 was squeezed into one column). */
+  .labels li .labelName { grid-column: 1 / -1; }
+  .labels li button { white-space: nowrap; }
   .labels li.labelEdit input { grid-column: 1 / -1; }
 }
 

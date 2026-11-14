@@ -121,12 +121,16 @@ describe('a free chat\'s tools from the route\'s dependencies (CORE-PATH-V2 V2-6
     const setup = await prepare({ skills: async () => ({ catalog: own, prepared }), voice });
     const built = await build(setup, false);
     expect(read).not.toHaveBeenCalled();
+    // VOICE-2 PR-3: such a reply keeps room for one rewrite call, and knows which passages it was shown (none before a load).
+    expect(setup.voiceRewrite).toBe(true);
+    expect(built.voiceShown!()).toEqual([]);
     const loadSkill = built.tools.find(tool => tool.name === 'load_skill')!;
     expect(JSON.parse(String(await loadSkill.execute({ name: 'Hooks' }, 'c1')))).toEqual({ name: 'Hooks', instructions: 'h' });
     expect(read).not.toHaveBeenCalled();
     const loaded = JSON.parse(String(await loadSkill.execute({ name: 'Writer' }, 'c2')));
     expect(read).toHaveBeenCalledWith('x');
     expect(loaded.writingVoiceExamples).toContain('练完腿走路都打颤。');
+    expect(built.voiceShown!()).toEqual(['练完腿走路都打颤。']);
     expect(setup.userInstructions).not.toContain('练完腿');
     await prepare({ skills: async () => ({ catalog: own, prepared }), voice }, { voice_examples: false });
     expect(voice).toHaveBeenLastCalledWith(actorId, own, false);
