@@ -2,7 +2,7 @@
 import type { TurnReplay } from '../resume';
 import { VOICE_EXAMPLES_SETTING, voiceExamplesOn } from '../admission/voiceExamplesSetting';
 import { rowFor } from '../settings/settingsRows';
-import { withVoiceExamples } from '../../voice/examples';
+import { fitVoiceExamples } from '../../voice/examples';
 import { FREE_RESULT_RESERVE_BYTES } from './plan';
 import { swallow } from '../../../lib/swallow';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -79,6 +79,8 @@ export type ChatToolsSetup = {
   userInstructions: string;
   /** Frozen into the turn: revoking this version stops the turn (voice tombstone). */
   voiceVersionId?: string;
+  /** VOICE-2 PR-3: the reply may be shown past passages, so one more model call is frozen for rewriting copied sentences. */
+  voiceRewrite?: true;
   /** What the user chose for this message, as a line for the model, or the code that refuses it before anything opens. */
   selection(chosen: ChatSelection): { note: string; skill?: WorkSkill; social?: true; contentSource?: 'script' | 'storyboard' } | { refused: string };
   /** Context fields of the request format (providerRequest.ts): the tools it may carry. */
@@ -90,7 +92,7 @@ export type ChatToolsSetup = {
     announce?: (event: StepEvent) => void;
     /** This message's chat photos as they are kept (chat.ts keepTurnPhotos), for the image tools. */
     photos?: Promise<readonly ConversationPhoto[]> | null;
-    replay?: TurnReplay }): Promise<ReturnType<typeof turnTools>>;
+    replay?: TurnReplay }): Promise<ReturnType<typeof turnTools> & { voiceShown?: () => string[] }>;
 };
 
 /** A Skill by its exact revision: frozen in a work item's turn, so its result names the method that wrote it. */
@@ -171,6 +173,8 @@ export async function prepareChatTools(input: { admin: SupabaseClient; read: Tur
     coachCapture: Boolean(plan.sourceRoom?.posts && access.posts?.coach && access.posts.windowDays > 0),
     sharedInstructions: gated => researchInstructions(plan) + libraryText + skillCatalogInstructions(allowedSkills(catalog, gated))
       + (imagesOffered ? IMAGE_TOOLS_INSTRUCTIONS : '') + (minutesOffered ? REQUEST_MINUTES_INSTRUCTIONS : ''),
+    // VOICE-2 PR-3: a reply that may load a voice Skill keeps room for one rewrite call of its copied sentences.
+    ...(skillOffered && voice?.examples ? { voiceRewrite: true as const } : {}),
     userInstructions: (voice?.text ?? '') + workspaceText + (plan.sourceRoom?.strategy ? WORKSPACE_STRATEGY_INSTRUCTIONS : '')
       + (plan.sourceRoom?.posts ? postsText : ''), ...(voice?.versionId ? { voiceVersionId: voice.versionId } : {}),
     selection(chosen) {
@@ -196,6 +200,7 @@ export async function prepareChatTools(input: { admin: SupabaseClient; read: Tur
       ...(sourceOffered && library ? { libraryRetrieval: true } : {}), ...(workspaceRead ? { workspaceContext: true } : {}),
       ...(imagesOffered ? { imageGeneration: true } : {}), ...(minutesOffered ? { minutesSignal: true } : {}) },
     async build(calls, extra) {
+      const shown: string[] = [];
       const chatReader = () => {
         const shelf = !library ? undefined : typeof input.tools.library === 'function' ? input.tools.library(input.actorId, input.sessionId)
           : libraryTurnReader(input.read, input.actorId, input.sessionId, input.chosen?.references);
@@ -212,7 +217,7 @@ export async function prepareChatTools(input: { admin: SupabaseClient; read: Tur
           return prepared === undefined ? [] : [[entry.name, prepared] as const];
         })) } : {}),
         // VOICE-2 PR-2: a load of a Skill flagged "使用用户文风" adds the user's past pieces of another topic to its result.
-        ...(skillOffered && voice?.examples ? { skillExtras: voiceExamplesExtra(catalog, voice.examples, extra.currentMessage) } : {}),
+        ...(skillOffered && voice?.examples ? { skillExtras: voiceExamplesExtra(catalog, voice.examples, extra.currentMessage, shown) } : {}),
         ...(sourceOffered ? { sourceDescription: description, readSource: chatReader() } : {}),
         ...(imagesOffered && input.tools.images ? { images: input.tools.images.calls(input.actorId, input.sessionId,
           { turnId: calls.turnId, kept: extra.photos ?? null }) } : {}) });
@@ -221,7 +226,8 @@ export async function prepareChatTools(input: { admin: SupabaseClient; read: Tur
       const skillTitles: ReadonlyMap<string, string> = new Map(allowedSkills(catalog, extra.gated)
         .flatMap(entry => entry.title ? [[entry.name, entry.title] as const] : []));
       const tools = withStepEvents(built.tools, extra.announce, skillTitles, extra.onStop);
-      return { ...built, tools };
+      // VOICE-2 PR-3: the past passages this reply was shown (by loads of a voice Skill), which its draft is checked against.
+      return { ...built, tools, voiceShown: () => [...shown] };
     },
   };
 }
@@ -229,9 +235,12 @@ export async function prepareChatTools(input: { admin: SupabaseClient; read: Tur
 /** The extra a load adds: for a Skill of `examples.modules`, the passages read now, within what admission reserved for one load.
  * Any failure leaves the load as it was. */
 function voiceExamplesExtra(catalog: readonly SkillCatalogEntry[], examples: { modules: string[]; read: (message: string) =>
-  Promise<Array<{ text: string }>> }, message: string) {
+  Promise<Array<{ text: string }>> }, message: string, shown: string[]) {
   const flagged = new Set(catalog.filter(entry => examples.modules.includes(entry.moduleId)).map(entry => entry.name));
-  return async (name: string, result: string) => flagged.has(name)
-    ? withVoiceExamples(result, await swallow('turn_voice_examples_unavailable', examples.read(message), []), FREE_RESULT_RESERVE_BYTES)
-    : result;
+  return async (name: string, result: string) => {
+    if (!flagged.has(name)) return result;
+    const fit = fitVoiceExamples(result, await swallow('turn_voice_examples_unavailable', examples.read(message), []), FREE_RESULT_RESERVE_BYTES);
+    shown.push(...fit.shown.filter(text => !shown.includes(text)));
+    return fit.result;
+  };
 }

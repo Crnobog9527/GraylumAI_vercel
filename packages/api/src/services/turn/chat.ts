@@ -39,7 +39,7 @@ import { resumeLimits, TurnReplay, type ResumeRead } from './resume';
 import { prepareChatTools, type ChatSelection, type ChatToolDeps, type ChatToolsSetup } from './tools/chatTools';
 import { savedSteps } from './tools/toolStage';
 import { createRuntimeBudget } from './settings/budget';
-import { REPLY_CUT, REPLY_CUT_FAILURE, shownSoFar } from './shownReply';
+import { REPLY_CUT, REPLY_CUT_FAILURE, shownSoFar } from './shownReply'; import { reviseVoiceDraft, voiceRewriteCalls } from './voiceRevise';
 import { RESEARCH_INPUT_BYTES } from './tools/plan';
 import { fitToolTurn } from './tools/capacity';
 import { chatImages, imageMark, withImages } from './chatImage';
@@ -266,14 +266,14 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
   if (startCredits === undefined) return emit({ type: 'error', code: 'TURN_START_THRESHOLD_UNCONFIGURED' });
   // A resume keeps to what the paused turn has left and replays its receipts.
   const resume = input.resume?.read;
-  const limits = { model: 1 + toolLimits.paidTools + toolLimits.freeTools, ...toolLimits, decisions: 1 };
+  const limits = { model: 1 + toolLimits.paidTools + toolLimits.freeTools + (tools?.voiceRewrite ? 1 : 0), ...toolLimits, decisions: 1 };
   const replay = resume ? new TurnReplay(resume.calls) : undefined;
-  const frozenLimits = resume ? resumeLimits(limits, resume.limits, 0, replay?.replayedModels) : limits;
+  const frozenLimits = resume ? resumeLimits(limits, resume.limits, tools?.voiceRewrite ? 1 : 0, replay?.replayedModels) : limits;
   const policy = turnPolicy({ topUp: true, q: quote.q, multiplier: quote.multiplier, modelUpperUsd: quote.upperUsd,
     ...(frozenLimits.decisions ? { decisionUpperUsd } : {}),
     startThresholdCredits: startCredits,
     limits: frozenLimits, paidToolUpperUsd: (tools?.plan.paidToolUpperUsd ?? []).slice(0, frozenLimits.paidTools), stopLoss: config.stopLoss,
-    historyItems: HISTORY_ITEMS, inputBytes: inputLimit, pricing: quote.pricing,
+    historyItems: HISTORY_ITEMS, inputBytes: inputLimit, pricing: quote.pricing, otherModelCalls: voiceRewriteCalls(Boolean(tools?.voiceRewrite), quote),
     frozen: { modelId: quote.modelId, model: quote.model, ...(tools?.voiceVersionId ? { voiceVersionId: tools.voiceVersionId } : {}) } });
   // A Skill result of a work item names the revision that wrote it (opc_work_result_turn).
   const workSkill = work && 'skill' in chosen ? chosen.skill : undefined;
@@ -434,13 +434,14 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
     const full = output || reply;
     // The numbers the coach read from screenshots: the block is cut from what is saved and shown, its checked items go to the close.
     const captured = tools?.coachCapture ? extractScreenshots(full) : null;
-    const answer = captured ? captured.body : full;
+    const drafted = captured ? captured.body : full;
     // The fallback refusal: never shown or saved; Graylum bears the model cost (the stop-loss still counts it).
-    if (fallback && isPositioningRefusal(answer)) {
+    if (fallback && isPositioningRefusal(drafted)) {
       await close('failed', { refundAll: true, failureCode: 'positioning_required' });
       return emit({ type: 'error', code: 'POSITIONING_REQUIRED', turnId: opened.turnId });
     }
-    // 6. Close: settle once, save both messages. A tombstone found here closes as erased and saves nothing.
+    const { text: answer, event: revisedEvent } = await reviseVoiceDraft(drafted, built, { quote, callDeps, callPolicy, callGate });
+    // 6. Close (VOICE-2 PR-3 rewrote copied sentences just above): settle once, save both messages. A tombstone here saves nothing.
     answered = true;
     const closed = await close('completed', { delivered: true,
       messages: [{ role: 'user', content: text }, { role: 'assistant', content: answer }],
@@ -458,7 +459,7 @@ export async function runChatTurn(deps: ChatDeps, input: ChatInput, emit: (event
     if (photos) await photos;
     // The held-back tail of a reply that has a hidden block (a lone backtick the stream could not yet tell from its start) goes out now.
     if (captured && answer.length > sentChars && answer.startsWith(reply.slice(0, sentChars))) emit({ type: 'text', delta: answer.slice(sentChars) });
-    emit({ type: 'result', turnId: opened.turnId, body: answer, chargedCredits: closed.chargedCredits, settlement: closed.settlement });
+    emit({ type: 'result', turnId: opened.turnId, body: answer, chargedCredits: closed.chargedCredits, settlement: closed.settlement, ...revisedEvent });
   } catch (error) {
     const thrown = stopped ? stopped.code : error instanceof TurnStop ? error.code : error instanceof TurnDatabaseError ? error.code : 'TURN_FAILED';
     // A turn with images never pauses: a resume could not send them to the model again, so it ends now, refunded in full,
