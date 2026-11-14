@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { tikhubRouteId } from '../research/vendors/tikhub';
 import { SOCIAL_PLATFORMS } from '../research/vendors/types';
+import { listConnections } from '../publishMonitor/foundation';
 import { voiceRpc } from './state';
 
 /*
@@ -24,20 +25,24 @@ export const importPostsInput = z.object({ connectionId: uuid, postIds: z.array(
 
 export type ImportSource = { connectionId: string; platform: string; displayHint: string | null; supported: boolean;
   fetchedAt: string | null; posts: number };
-type ConnectionRow = { id: string; source: string };
 
 /**
  * Only a TikHub connection is read into a stored posts list (daily, or by the panel's "读取最新帖子"); a Post for Me one (YouTube,
  * Instagram...) never is, so it is "not supported" even where TikHub has a route for its platform. A connection the database
- * lists but this read misses is treated the same way (nothing to import).
+ * lists but this read misses is treated the same way (nothing to import). The connections are read through 数据复盘's own
+ * function: the table itself is closed to the service role (a direct read is refused).
  */
+/** A failed connections read is "unavailable" (the reason stays in the database log), never a list that looks importable. */
+async function ownConnections(admin: SupabaseClient, actorId: string) {
+  try { return await listConnections(admin, actorId); } catch { throw new Error('VOICE_UNAVAILABLE'); }
+}
+
 async function sourcesOf(admin: SupabaseClient, actorId: string, routes: Record<string, string>): Promise<ImportSource[]> {
   const [listed, rows] = await Promise.all([
     voiceRpc<ImportSource[]>(admin, 'voice_import_sources', { a: actorId, routes }),
-    admin.from('social_connections').select('id, source').eq('actor_id', actorId).eq('role', 'own'),
+    ownConnections(admin, actorId),
   ]);
-  if (rows.error) throw new Error('VOICE_UNAVAILABLE');
-  const tikhub = new Set((rows.data as ConnectionRow[] | null ?? []).filter(row => row.source === 'tikhub').map(row => row.id));
+  const tikhub = new Set(rows.filter(row => row.role === 'own' && row.source === 'tikhub').map(row => row.id));
   return listed.map(source => ({ ...source, supported: source.supported && tikhub.has(source.connectionId) }));
 }
 export type ImportCandidate = { postId: string; text: string; url: string | null; postedAt: string | null; imported: boolean };
