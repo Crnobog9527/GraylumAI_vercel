@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// Local-only VOICE-2 verification (0547): 「从我的账号导入」's "读取最新帖子" claims an own TikHub connection for one manual run of
+// Local-only VOICE-2 verification (0549): 「从我的账号导入」's "读取最新帖子" claims an own TikHub connection for one manual run of
 // 数据复盘's billed read. Checks grants, who and what may be claimed, the hourly limit and a running read, that the claim is the
 // one the billed-read ledger and settle functions accept, the hour given back (undo) only for the current claim, and that the
 // migration applies again unchanged.
