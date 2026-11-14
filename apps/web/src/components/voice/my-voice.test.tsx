@@ -115,3 +115,15 @@ describe('MyVoiceView: 文风 2.0 data', () => {
     expect(topicsFromText('话'.repeat(30))).toEqual(['话'.repeat(20)]);
   });
 });
+
+// Staging 11-14 (#2002 check at 390px): 修改 was squeezed into a one-character-wide column and the file name cut to "qa-v…".
+describe('the labels on a narrow screen', () => {
+  it('give the file name its own line and never wrap a button\'s word', async () => {
+    const { readFileSync } = await import('node:fs');
+    const css = readFileSync(new URL('./my-voice.module.css', import.meta.url), 'utf8');
+    const narrow = css.slice(css.indexOf('@media (max-width: 640px)'), css.indexOf('}', css.indexOf('.labels li.labelEdit input { grid-column')) + 1);
+    expect(narrow).toContain('.labels li .labelName { grid-column: 1 / -1; }');
+    expect(narrow).toContain('.labels li button { white-space: nowrap; }');
+  });
+});
+
