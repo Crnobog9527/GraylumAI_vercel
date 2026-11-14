@@ -96,14 +96,21 @@ it('the pointer resting on a link switches that link on, and only that one; leav
 it('the pointer crossing the three links on its way elsewhere switches none of them on', async () => {
   const { tab, close } = await open();
   try {
-    // Down the column and out, one step every few milliseconds: each link is under the pointer for less than the dwell.
-    await tab.mouse.move(100, 2);
+    // Down the column and out: one step onto each link (they are 40px high, at y 0-40, 40-80, 80-120), then away. The browser
+    // takes one pointer move per frame (~17ms), so the crossing lasts about four frames and each link is under the pointer for one,
+    // well below the dwell. (It used to take thirteen 10px steps: about fourteen frames, ~240ms, whose third sat right on the
+    // 80ms dwell and failed the check below on CI with 80.67ms.) The pointer starts beside the column, on no link.
+    await tab.mouse.move(300, 20);
+    await tab.evaluate(() => { const w = window as unknown as { __entered: string[] }; w.__entered = [];
+      document.addEventListener('pointerover', event => { const id = (event.target as Element).closest('a')?.id; if (id) w.__entered.push(id); }); });
     const started = Date.now();
-    for (let y = 10; y <= 130; y += 10) await tab.mouse.move(100, y);
+    for (const y of [20, 60, 100]) await tab.mouse.move(100, y);
     await tab.mouse.move(400, 400);
     const crossing = Date.now() - started;
     await tab.waitForTimeout(SETTLED_MS);
     expect(await seen(tab)).toEqual({ a: ['false'], b: ['false'], c: ['false'] });
+    // The pointer really went over each link, in order (else "switched none on" would prove nothing).
+    expect(await tab.evaluate(() => (window as unknown as { __entered: string[] }).__entered)).toEqual(['a', 'b', 'c']);
     // The crossing itself must have been a crossing: if the machine was so slow that the pointer sat on a link for the
     // dwell, the line above would have failed for the wrong reason. Each link got about a third of the time.
     expect(crossing / 3).toBeLessThan(HOVER_PREFETCH_DWELL_MS);
