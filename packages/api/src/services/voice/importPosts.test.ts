@@ -25,22 +25,22 @@ describe('importing the user\'s own posts (VOICE-2 PR-5)', () => {
     await service.candidates({ connectionId: uuid(1) });
     expect(rpc).toHaveBeenLastCalledWith('voice_import_candidates', { a: uuid(9), cid: uuid(1), routes: importRoutes() });
   });
+  // Only RPCs: social_connections is closed to the service role on the real database, so a client without `from` must do.
+  const connection = (n: number, source: string, consentAutoTrack: boolean) => ({ id: uuid(n), businessId: uuid(20), accountProjectId: uuid(21),
+    role: 'own', source, platform: 'douyin', displayHint: null, status: 'connected', consentRead: true, consentAutoTrack,
+    consentPublish: false, lastSuccessAt: null, postCount: 0 });
+  const listed = [uuid(1), uuid(2), uuid(3)].map((connectionId, i) => ({ connectionId, platform: ['douyin', 'youtube', 'x'][i],
+    displayHint: null, supported: true, fetchedAt: null, posts: 0 }));
   it('a Post for Me connection is not supported even on a platform TikHub reads; a TikHub one keeps its daily-update switch', async () => {
-    const listed = [uuid(1), uuid(2), uuid(3)].map((connectionId, i) => ({ connectionId, platform: ['douyin', 'youtube', 'x'][i],
-      displayHint: null, supported: true, fetchedAt: null, posts: 0 }));
-    const rpc = vi.fn(async () => ({ data: listed, error: null }));
-    const eqRole = vi.fn(async () => ({ data: [{ id: uuid(1), source: 'tikhub', consent_auto_track: false },
-      { id: uuid(2), source: 'postforme', consent_auto_track: true }], error: null }));
-    const eqActor = vi.fn(() => ({ eq: eqRole }));
-    const from = vi.fn(() => ({ select: () => ({ eq: eqActor }) }));
-    const sources = await voiceImportService({ rpc, from } as unknown as SupabaseClient, uuid(9)).sources();
-    expect(eqActor).toHaveBeenCalledWith('actor_id', uuid(9));
-    expect(eqRole).toHaveBeenCalledWith('role', 'own');
+    const rpc = vi.fn(async (name: string) => name === 'voice_import_sources' ? { data: listed, error: null }
+      : { data: [connection(1, 'tikhub', false), connection(2, 'postforme', true)], error: null });
+    const sources = await voiceImportService({ rpc } as unknown as SupabaseClient, uuid(9)).sources();
+    expect(rpc).toHaveBeenCalledWith('publish_monitor_connections', { a: uuid(9) });
     expect(sources.map(s => [s.supported, s.autoTrack])).toEqual([[true, false], [false, true], [false, false]]);
   });
   it('a failed connections read is "unavailable", not a list that looks importable', async () => {
-    const rpc = vi.fn(async () => ({ data: [], error: null }));
-    const from = () => ({ select: () => ({ eq: () => ({ eq: async () => ({ data: null, error: { message: 'boom' } }) }) }) });
-    await expect(voiceImportService({ rpc, from } as unknown as SupabaseClient, uuid(9)).sources()).rejects.toThrow('VOICE_UNAVAILABLE');
+    const rpc = vi.fn(async (name: string) => name === 'voice_import_sources' ? { data: listed, error: null }
+      : { data: null, error: { message: 'permission denied' } });
+    await expect(voiceImportService({ rpc } as unknown as SupabaseClient, uuid(9)).sources()).rejects.toThrow('VOICE_UNAVAILABLE');
   });
 });
