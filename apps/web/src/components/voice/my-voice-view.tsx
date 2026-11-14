@@ -1,5 +1,6 @@
 'use client';
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import type { ReactNode } from 'react';
 import { DisplayHeading } from '@/components/chat-display/display-heading';
 import { formatBytes } from '@/lib/library-documents/format';
 import { MAX_PREFERRED, voiceErrorMessage, type VoiceLabelType, type VoiceProfile, type VoiceState } from '@/lib/voice/format';
@@ -11,7 +12,9 @@ export type MyVoiceViewProps = { state: VoiceState; preferred: string[]; busy: b
   onConfirm: (versionId: string, profile: VoiceProfile) => void; onDelete: (versionId: string) => void;
   onOpenDocuments: () => void;
   /** VOICE-2 PR-4: correct one document's type or topics on a version; resolves true when saved. */
-  onSetLabel?: (versionId: string, documentId: string, type: VoiceLabelType, topics: string[]) => Promise<boolean> };
+  onSetLabel?: (versionId: string, documentId: string, type: VoiceLabelType, topics: string[]) => Promise<boolean>;
+  /** VOICE-2 PR-6: 「从我的账号导入」, shown above 学习我的文风. */
+  importPanel?: ReactNode };
 
 /** 资料库「我的文风」(VOICE, Master Plan 5.3). No estimated charge is shown (Owner rule): only that it is billed by use. */
 export function MyVoiceView(props: MyVoiceViewProps) {
@@ -58,6 +61,7 @@ export function MyVoiceView(props: MyVoiceViewProps) {
     {state.confirmed && editLocked && <p className={styles.hint}>
       有一份新的文风画像{running ? '正在生成' : '等你确认'}，先处理它，再修改当前这份。</p>}
 
+    {props.importPanel}
     <section className={styles.panel} aria-label="学习我的文风">
       <DisplayHeading as="h2">{state.confirmed ? '重新学习我的文风' : '学习我的文风'}</DisplayHeading>
       {hasCorpus ? <>

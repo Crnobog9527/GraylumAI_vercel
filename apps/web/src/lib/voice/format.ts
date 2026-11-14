@@ -30,6 +30,15 @@ export const TEXT_FIELDS = [
 ] as const;
 export const LIST_FIELDS = [['phrases', '常用表达'], ['avoid', '不会用的表达']] as const;
 export const MAX_PREFERRED = 20;
+/** VOICE-2 PR-6: what 「从我的账号导入」 lists (voice.importSources / importCandidates). */
+export type ImportSource = { connectionId: string; platform: string; displayHint: string | null; supported: boolean;
+  fetchedAt: string | null; posts: number };
+export type ImportCandidate = { postId: string; text: string; url: string | null; postedAt: string | null; imported: boolean };
+export const IMPORT_NOTE = '把你自己账号最近发的帖子导入成「我本人写的」文章，再学习文风。只导入帖子文案（视频只有标题或描述，小红书只有标题），'
+  + '用的是数据复盘最近一次刷新读到的最新一页，导入本身不扣积分。';
+const PLATFORM_NAMES: Record<string, string> = { douyin: '抖音', xiaohongshu: '小红书', bilibili: 'B站', weibo: '微博', tiktok: 'TikTok',
+  youtube: 'YouTube', x: 'X', instagram: 'Instagram' };
+export const importPlatformName = (platform: string) => PLATFORM_NAMES[platform] ?? platform;
 
 /** The editable form: list fields are one item per line. */
 export type VoiceForm = Record<(typeof TEXT_FIELDS)[number][0], string> & Record<(typeof LIST_FIELDS)[number][0], string>
@@ -65,6 +74,9 @@ const MESSAGES: Record<string, string> = {
   VOICE_REVISION_CONFLICT: '页面内容已经更新，请刷新后再操作。',
   VOICE_STALE: '生成期间你的文档有变化，这一版不能使用，请重新学习。',
   VOICE_VERSION_GONE: '这一版已经删除（用到的文档被删除了）。',
+  VOICE_IMPORT_NOTHING: '这个账号最近没有可用的帖子，先到数据复盘刷新一次。',
+  LIBRARY_SPACE: '资料库空间不够，先删掉一些文件再导入。',
+  LIBRARY_DISABLED: '资料库上传暂时关闭，稍后再试。',
   LIBRARY_ACCOUNT_CLOSED: '账号已注销，不能再操作。',
 };
 const FALLBACK = '暂时无法完成，请稍后再试。';
