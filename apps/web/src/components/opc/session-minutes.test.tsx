@@ -10,7 +10,7 @@ const item = (n: number, over: Partial<MinutesItem> = {}): MinutesItem => ({ tur
   openedAt: '2026-11-14T01:00:00Z', closedAt: '2026-11-14T01:01:00Z',
   body: '## 讨论了什么\n- 第' + n + '份', available: true, ...over });
 const minutes = (over: Partial<SessionMinutes> = {}): SessionMinutes => ({ items: [], running: false, live: '', notice: '', held: false,
-  start: async () => undefined, error: null, retry: async () => undefined, ...over } as unknown as SessionMinutes);
+  fromChat: false, startFromChat: () => false, start: async () => undefined, error: null, retry: async () => undefined, ...over } as unknown as SessionMinutes);
 
 // CONTENT-CONVERSATION-2: the newest minutes in full with copy and export, older ones folded, nothing at all before the first.
 it('shows the newest minutes, folds the older ones, and nothing before the first minutes', () => {
@@ -36,3 +36,10 @@ it('names the button by its page and by what it is doing', () => {
   expect(renderToStaticMarkup(<MinutesButton minutes={minutes({ running: true })} label="整理纪要" />)).toContain('正在整理…');
   expect(renderToStaticMarkup(<MinutesButton minutes={minutes({ held: true })} label="整理纪要" />)).toContain('继续上次的整理');
 });
+
+it('says that minutes asked for in the chat have started and are charged on their own', () => {
+  const html = renderToStaticMarkup(<SessionMinutesPanel minutes={minutes({ running: true, fromChat: true })} title="纪要" />);
+  expect(html).toContain('已按你在聊天里的要求开始整理纪要');
+  expect(html).toContain('单独按实际用量扣积分');
+});
+

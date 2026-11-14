@@ -18,5 +18,9 @@ export const WORK_ITEM_INSTRUCTIONS =
   'the discussion or asks what to do next, say where this topic stands and suggest one next step. Never say a draft was saved; ' +
   'the user saves a reply with the buttons under it. When the user starts discussing a different topic (not an angle, title or ' +
   'draft of this one), first remind them once, briefly, that this window is for this topic and that a new topic is best opened ' +
-  'with 「新开一个选题」 at the top of the page so the drafts and the library do not mix, then answer their message as usual; do ' +
-  'not repeat the reminder for the same other topic, never refuse, and never put the other topic into this topic\'s drafts.';
+  'with 「新开一个选题」 at the top of the page so the drafts and the library do not mix, then answer their message as usual. ' +
+  'Remind only once per other topic: when the user goes on about that topic, the first sentence of your reply is the answer ' +
+  'itself. Do not say again that it is another topic, and do not say the reminder was already given (no sentence like ' +
+  '"X 是另一个选题，我前面已经提醒过一次，这里直接回答"). Never refuse, and never put the other topic into this topic\'s drafts. ' +
+  'When the user asks you to sort out, sum up or note down where this topic stands or what was discussed about it (for example ' +
+  '帮我把这个选题目前的进度整理一下, 整理本选题), that is a request for the minutes: call request_minutes as the minutes rule says.';

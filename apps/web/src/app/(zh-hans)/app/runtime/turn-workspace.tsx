@@ -40,6 +40,7 @@ import workStyles from './runtime-work.module.css';
 import { READ_RETRY } from '@/trpc/read-retry';
 import { QueryNotice } from '@/components/opc/query-notice';
 import { MinutesButton, SessionMinutesPanel, useSessionMinutes } from '@/components/opc/session-minutes';
+import { asksForMinutes } from '@/lib/session-minutes';
 
 /*
  * CORE-PATH-V2 V2-10: the free conversation on the turn path (core_path_v2.enabled). Each user message and the reply saved with it
@@ -125,6 +126,15 @@ export function TurnWorkspace({ sessionId }: { sessionId: string }) {
     skill: chosenSkill ? { kind: 'skill' as const, moduleId: chosenSkill.moduleId, revisionId: chosenSkill.revisionId } : undefined };
   const messages = chat.view?.messages ?? [];
   const turns = messages.filter(m => m.role === 'assistant');
+  // CONTENT-CONVERSATION-2 PR3b: the newest reply asked for the minutes (the user said so in the chat): start them once that reply
+  // has closed, as the button would, with the request id of that turn (a reload or another tab finds it started).
+  const lastAsked = turns.at(-1);
+  const lastAskedSteps = lastAsked?.turnId != null ? chat.stepsByTurn.get(lastAsked.turnId) ?? lastAsked.steps ?? [] : [];
+  const askedMinutes = lastAsked?.turnId != null && asksForMinutes(lastAskedSteps) ? lastAsked.turnId : null;
+  useEffect(() => {
+    if (askedMinutes !== null && !chat.busy && minutes.startFromChat(askedMinutes)) { setPanelOpen(true); setReveal(n => n + 1); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [askedMinutes, chat.busy, minutes.startFromChat]);
   // FUSION-COMPARE: each compare card sits where it was asked (before its own turn's replies), the same before and after a refresh.
   const placedCards = placeCompareCards(compare.cards, turns);
   const asked = (turnId: number | null) => messages.find(m => m.role === 'user' && m.turnId === turnId)?.content ?? null;

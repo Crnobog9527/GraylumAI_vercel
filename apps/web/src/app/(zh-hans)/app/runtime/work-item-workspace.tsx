@@ -21,6 +21,7 @@ import composerStyles from '@/components/opc/work-composer.module.css';
 import { WorkspaceFrame } from '@/components/opc/workspace-frame';
 import { QueryNotice } from '@/components/opc/query-notice';
 import { MinutesButton, SessionMinutesPanel, useSessionMinutes } from '@/components/opc/session-minutes';
+import { asksForMinutes } from '@/lib/session-minutes';
 import { RUNTIME_CHOICES_STALE_MS } from '@/lib/runtime-choices';
 import { trpc } from '@/trpc/client';
 import { clearForSend, forgetPending, markPendingRestored, openingDraftWithReferences, readPending, rememberPending, requestIdFor } from './send-input';
@@ -175,6 +176,15 @@ export function WorkItemWorkspace({ sessionId, workItemId }: { sessionId: string
 
   const messages = chat.view?.messages ?? [];
   const replies = messages.filter(m => m.role === 'assistant');
+  // CONTENT-CONVERSATION-2 PR3b: the newest reply asked for the minutes (the user said so in the chat): start them once that reply
+  // has closed, as the button would, with the request id of that turn (a reload or another tab finds it started).
+  const lastAsked = replies.at(-1);
+  const lastAskedSteps = lastAsked?.turnId != null ? chat.stepsByTurn.get(lastAsked.turnId) ?? lastAsked.steps ?? [] : [];
+  const askedMinutes = lastAsked?.turnId != null && asksForMinutes(lastAskedSteps) ? lastAsked.turnId : null;
+  useEffect(() => {
+    if (askedMinutes !== null && !chat.busy && minutes.startFromChat(askedMinutes)) setPanelOpen(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [askedMinutes, chat.busy, minutes.startFromChat]);
   const asked = (turnId: number | null) => messages.find(m => m.role === 'user' && m.turnId === turnId)?.content ?? null;
   // VOICE-ABORT-FIX: a question whose round was voided (no saved reply) still shows where it was asked, as in the free chat.
   const unanswered = unansweredByPlace(messages);

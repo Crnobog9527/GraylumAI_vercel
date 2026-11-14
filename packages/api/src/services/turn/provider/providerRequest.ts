@@ -47,6 +47,8 @@ export type RequestContext={providerRequestFormat?:ProviderRequestFormat;textStr
  hostTurnContext?:{opening:boolean};
  libraryReferences?:readonly unknown[];libraryRetrieval?:boolean;research?:{freeChat?:string};skillCatalog?:readonly unknown[];
  imageGeneration?:boolean;
+ /** CONTENT-CONVERSATION-2 PR3b: the free chat may carry request_minutes. */
+ minutesSignal?:boolean;
  promptCache?:PromptCachePolicy;network?:string;reasoning?:ReasoningPolicy;attachedOrganizer?:{reasoning?:ReasoningPolicy}};
 
 /** Fail closed for reasoning attached to an older, unmarked request format. */
@@ -81,6 +83,7 @@ export function openRouterRequestBody(request:string,options:{context:RequestCon
  // INTEGRATION-SHOTVIVA: the image tools only in a v6 free chat whose admission froze imageGeneration.
  const olderToolAllowed=(name:string)=>name==='read_source'?ownedRead:name==='load_skill'?Boolean(context.skillCatalog?.length):
   FREE_CHAT_IMAGE_TOOL_NAMES.has(name)?format===FREE_CHAT_REQUEST_FORMAT&&context.imageGeneration===true:
+  name==='request_minutes'?format===FREE_CHAT_REQUEST_FORMAT&&context.minutesSignal===true:
   freeChatResearch&&FREE_CHAT_TOOL_NAMES.has(name);
  const toolsDenied=format===AGENT_TURN_REQUEST_FORMAT
   ?context.tools.some(name=>!AGENT_TOOL_NAMES.has(name))||Boolean(context.workspaceContext)||

@@ -21,11 +21,16 @@ BEGIN
  -- validation batch 6 saw "绑定 v10" here against "当前 v9" in the rail. The first account of this user whose history holds the bound
  -- version gives it; an account that cannot be read is skipped. With none, the count of allowed versions of the bound version's
  -- project up to it (the shared part of every account's history).
- FOR acct IN SELECT a.project_id FROM opc_accounts a WHERE a.actor_id=p_actor_id ORDER BY a.project_id LOOP
+ -- 0545 (review of #1993): only the accounts of this draft's business are read (the bound version is theirs), and only the two
+ -- refusals of an account that cannot be read (CONTENT_ERASED, OPC_DENIED) are skipped; any other error is raised as before.
+ FOR acct IN SELECT a.project_id FROM opc_accounts a JOIN opc_draft_businesses db ON db.business_id=a.business_id
+   WHERE db.draft_id=p_draft_id AND a.actor_id=p_actor_id ORDER BY a.project_id LOOP
   BEGIN
    SELECT (h->>'version')::integer INTO ordinal FROM jsonb_array_elements(opc_account_strategy_history(p_actor_id,acct)) h
     WHERE h->>'id'=w.source_version_id::text;
-  EXCEPTION WHEN OTHERS THEN ordinal:=NULL;
+  EXCEPTION WHEN OTHERS THEN
+   IF SQLERRM NOT IN ('CONTENT_ERASED','OPC_DENIED') THEN RAISE; END IF;
+   ordinal:=NULL;
   END;
   EXIT WHEN ordinal IS NOT NULL;
  END LOOP;

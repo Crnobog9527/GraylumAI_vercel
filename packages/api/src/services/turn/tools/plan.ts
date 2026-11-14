@@ -15,6 +15,7 @@ import type { ResearchToolsConfig } from '../../research/vendors/config';
 import type { ResearchVendor } from '../../research/vendors/types';
 import { GENERATE_IMAGE_CALLS, IMAGE_RESULT_RESERVE_BYTES, IMAGE_TOOL_NAMES, LIST_IMAGE_TEMPLATES_CALLS, imageTrimNote } from './imageTools';
 import type { GeneralResearchToolName, ToolPlan, TrimReason, TurnToolName } from './types';
+import { REQUEST_MINUTES_CALLS, REQUEST_MINUTES_TOOL } from './requestMinutes';
 
 /*
  * CORE-PATH-V2 V2-6, 2.5.3 / 2.7 / 2.9 rule 2: what a turn's tools may do, decided before turn_open from the catalog cache.
@@ -117,6 +118,8 @@ export async function planTurnTools(input: PlanInput): Promise<{ plan: ToolPlan;
   }
   const sourceRoom = { strategy: false, posts: false };
   if (postsFit && available.includes('read_source')) { used += input.source!.posts!.bytes; sourceRoom.posts = true; }
+  // CONTENT-CONVERSATION-2 PR3b: the minutes signal returns a line at once, so it needs no result reserve; one call per reply.
+  if (offered.includes(REQUEST_MINUTES_TOOL)) { available.push(REQUEST_MINUTES_TOOL); freeTools += REQUEST_MINUTES_CALLS; }
   // read_skill_file reads the turn's frozen Skill package from the process cache: no row, no model call of its own (2.5.3).
   if (offered.includes('read_skill_file')) available.push('read_skill_file');
 

@@ -16,6 +16,8 @@ export type EditableItem={workItemId:string;sessionId:string;title:string;brief:
 type Draft={baseVersion:number;sourceContentId:string|null;title:string;body:string};
 type Frozen=Draft&{workItemId:string;requestId:string;expectedVersion:number;kind:'brief'|'script';status:'draft'|'final'};
 export type ContentEditorHandle={finalize:()=>void};
+/** A script typed here before any script was saved: the rule is the database's (a manual script descends from a saved one). */
+export const SCRIPT_NEEDS_SOURCE='手动修改口播稿，要先有一版已保存的口播稿：在对话里让 AI 写一版，点回复下的「存为口播稿」，再回到这里修改。你的编辑仍保留。';
 const rejected=new Set(['OPC_VERSION_CONFLICT','OPC_REQUEST_CONFLICT','OPC_CONTENT_DENIED','OPC_CONTENT_INVALID','OPC_CONTENT_SOURCE','OPC_CONTENT_BINDING']);
 
 export const ContentEditor=forwardRef<ContentEditorHandle,{item:EditableItem;onSaved:()=>Promise<unknown>;onFinalized?:()=>void;children?:ReactNode}>(function ContentEditor({item,onSaved,onFinalized,children},ref){
@@ -123,7 +125,10 @@ export const ContentEditor=forwardRef<ContentEditorHandle,{item:EditableItem;onS
    if(rejected.has(code)){
     localStorage.removeItem(pendingKey);setPending(false);
     await onSaved();
-    setError(code==='OPC_VERSION_CONFLICT'?'已有更新版本。你的编辑已保留，请比较历史后再明确重试。':'保存被服务端拒绝（'+code+'）。编辑仍保留。');
+    setError(code==='OPC_VERSION_CONFLICT'?'已有更新版本。你的编辑已保留，请比较历史后再明确重试。'
+     // CONTENT-CONVERSATION-2 (validation of #1996): a script edited by hand must start from a saved one (opc_content_manual_save).
+     :code==='OPC_CONTENT_SOURCE'&&kind==='script'?SCRIPT_NEEDS_SOURCE
+     :'保存被服务端拒绝（'+code+'）。编辑仍保留。');
    }else setError('保存结果待核实。原请求已保留；请用“恢复原保存”核对，不要重复创建版本。');
   }
  }
