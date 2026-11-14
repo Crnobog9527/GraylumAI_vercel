@@ -61,6 +61,21 @@ describe('parseVoiceDocuments (VOICE-2 PR-1)', () => {
     expect(parseVoiceDocuments(answer({ documents: [{ file: 'one', type: 'post', topics: ['x'] }, { file: 1.5, type: 'post' }] }), material))
       .toEqual([{ documentId: 'd1', type: 'other', topics: [] }]);
   });
+  // Staging 11-14 again (#2015 recheck): the model named the files by their file name instead; every label read as 其他.
+  it('takes an entry named by its file name, or "文件 N", and falls back to their order only when none could be placed', () => {
+    const two = [...material, { documentId: 'd2', filename: 'run.md', text: '第二篇' }];
+    expect(parseVoiceDocuments(answer({ documents: [{ file: 'run.md', type: 'post', topics: ['跑步'] },
+      { file: '旧笔记.md', type: 'script', topics: ['做饭'] }] }), two)).toEqual([{ documentId: 'd1', type: 'script', topics: ['做饭'] },
+      { documentId: 'd2', type: 'post', topics: ['跑步'] }]);
+    expect(parseVoiceDocuments(answer({ documents: [{ file: '文件 2', type: 'post', topics: [] }] }), two)[1]!.type).toBe('post');
+    // Nothing placeable, one entry per document: their order.
+    expect(parseVoiceDocuments(answer({ documents: [{ type: 'article', topics: ['a'] }, { file: 'x', type: 'post', topics: ['b'] }] }), two)
+      .map(l => l.type)).toEqual(['article', 'post']);
+    // Nothing placeable and a different count: nothing guessed.
+    expect(parseVoiceDocuments(answer({ documents: [{ type: 'article', topics: ['a'] }] }), two).map(l => l.type)).toEqual(['other', 'other']);
+    // An out-of-range number is no document.
+    expect(parseVoiceDocuments(answer({ documents: [{ file: 3, type: 'post' }] }), two).map(l => l.type)).toEqual(['other', 'other']);
+  });
   it('bounds topics (five, twenty characters) and survives an answer that is not JSON', () => {
     const many = Array.from({ length: 8 }, (_, i) => '话'.repeat(25) + i);
     expect(parseVoiceDocuments(answer({ documents: [{ file: 1, type: 'post', topics: many }] }), material)[0]!.topics)
