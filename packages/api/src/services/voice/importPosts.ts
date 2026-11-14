@@ -33,10 +33,15 @@ export type ImportSource = { connectionId: string; platform: string; displayHint
  * treated the same way (nothing to import). The connections are read through 数据复盘's own function: the table itself is closed
  * to the service role (a direct read is refused).
  */
+/** A failed connections read is "unavailable" (the reason stays in the database log), never a list that looks importable. */
+async function ownConnections(admin: SupabaseClient, actorId: string) {
+  try { return await listConnections(admin, actorId); } catch { throw new Error('VOICE_UNAVAILABLE'); }
+}
+
 async function sourcesOf(admin: SupabaseClient, actorId: string, routes: Record<string, string>): Promise<ImportSource[]> {
   const [listed, rows] = await Promise.all([
     voiceRpc<Omit<ImportSource, 'autoTrack'>[]>(admin, 'voice_import_sources', { a: actorId, routes }),
-    listConnections(admin, actorId).catch(() => { throw new Error('VOICE_UNAVAILABLE'); }),
+    ownConnections(admin, actorId),
   ]);
   const byId = new Map(rows.filter(row => row.role === 'own').map(row => [row.id, row]));
   return listed.map(source => {
