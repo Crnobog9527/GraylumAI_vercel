@@ -2,7 +2,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { listConnections } from './foundation';
-import { PublishError } from './publish';
+import { PublishError, rpc } from './publish';
 
 /**
  * PUBLISH-MONITOR PR-5 front end (plan §9 item 8): one-click publishing opens platform by platform, only after that
@@ -73,18 +73,17 @@ export async function readPublishOptions(db: Pick<SupabaseClient, 'from'>) {
   return { platforms: open, holdCreditsByTargets: holdCreditsByTargets(rawPrice) };
 }
 
+const keyJob = z.object({ targets: z.array(z.string()), state: z.string() }).nullable();
+
 /**
  * The connection ids and state of this user's job under this idempotency key, or null when there is none. A job under
  * the key is a replay, which is answered from the database and is never gated again.
+ * Read through publish_monitor_publish_key_job (0548): social_publish_jobs grants nothing to the server's role (0240), like
+ * every publish table; a direct table read failed every upload and submit with PUBLISH_MONITOR_UNAVAILABLE (since #1263).
  */
-export async function publishKeyJob(db: Pick<SupabaseClient, 'from'>, profileId: string,
+export async function publishKeyJob(db: Pick<SupabaseClient, 'rpc'>, profileId: string,
   key: string): Promise<{ targets: string[]; state: string } | null> {
-  const { data, error } = await db.from('social_publish_jobs').select('targets,state').eq('actor_id', profileId)
-    .eq('idempotency_key', key).maybeSingle();
-  if (error) throw new PublishError('PUBLISH_MONITOR_UNAVAILABLE');
-  if (!data) return null;
-  const targets = z.array(z.object({ connectionId: z.string() }).passthrough()).safeParse(data.targets);
-  return { targets: targets.success ? targets.data.map(t => t.connectionId) : [], state: String(data.state) };
+  return rpc(db, 'publish_monitor_publish_key_job', { a: profileId, p_key: key }, keyJob);
 }
 
 /**
