@@ -50,6 +50,15 @@
 .labels li.labelEdit { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1.4fr) auto auto; }
 .labelName { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #333; }
 .labels select, .labels input { min-height: 32px; padding: 4px 8px; border: 1px solid #e5e5e5; border-radius: 6px; font: inherit; font-size: 12px; }
+/* VOICE-2 PR-6: 从我的账号导入. */
+.importSources { display: grid; gap: 8px; margin: 12px 0 0; padding: 0; list-style: none; }
+.importSources > li { padding: 8px 10px; border: 1px solid #eee; border-radius: 8px; font-size: 12px; }
+.importHead { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 32px; }
+.importHead small { color: #6b6b6b; font-size: 12px; }
+.importList ul { display: grid; gap: 6px; margin: 10px 0; padding: 0; list-style: none; max-height: 360px; overflow: auto; }
+.importList label { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: start; padding: 6px 8px;
+  border-radius: 6px; background: #fafafa; font-size: 12px; line-height: 1.6; cursor: pointer; }
+.importList label small { color: #999; white-space: nowrap; }
 @media (max-width: 640px) {
   .root { margin: 0 16px; }
   .fields div { grid-template-columns: 1fr; gap: 2px; }
@@ -82,4 +91,8 @@
   .labels li { min-height: 48px; padding: 8px 12px; border-radius: 14px; font-size: 14px; }
   .labels button { min-height: 44px; padding: 0 14px; border-radius: 99px; font-size: 14px; }
   .labels select, .labels input { min-height: 44px; padding: 8px 12px; border-radius: 12px; font-size: 16px; }
+  .importSources > li { padding: 12px; border-radius: 14px; font-size: 14px; }
+  .importHead { flex-wrap: wrap; }
+  .importHead button { min-height: 44px; padding: 0 16px; border-radius: 99px; font-size: 14px; white-space: nowrap; }
+  .importList label { min-height: 48px; padding: 10px 12px; border-radius: 12px; font-size: 14px; }
 }

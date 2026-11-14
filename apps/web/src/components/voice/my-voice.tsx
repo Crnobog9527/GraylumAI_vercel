@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { trpc } from '@/trpc/client';
 import { canClearRequestId, generationJustEnded, voiceErrorCode, voiceErrorMessage, type VoiceProfile, type VoiceState } from '@/lib/voice/format';
 import { MyVoiceView } from './my-voice-view';
+import { ImportPosts } from './import-posts';
 import styles from './my-voice.module.css';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 
@@ -84,5 +85,6 @@ export function MyVoice({ onOpenDocuments }: { onOpenDocuments: () => void }) {
       let saved = false;
       await run(async () => { await setLabel.mutateAsync({ versionId, documentId, type, topics }); await query.refetch(); saved = true; });
       return saved; }}
+    importPanel={<ImportPosts onImported={() => { setPreferred(null); void query.refetch(); }} />}
     onOpenDocuments={onOpenDocuments} />;
 }
