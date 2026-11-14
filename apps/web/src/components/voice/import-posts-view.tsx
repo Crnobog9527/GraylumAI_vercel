@@ -2,7 +2,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import Link from 'next/link';
 import { DisplayHeading } from '@/components/chat-display/display-heading';
-import { IMPORT_NOTE, importPlatformName, type ImportCandidate, type ImportSource } from '@/lib/voice/format';
+import { IMPORT_NOTE, importPlatformName, importWaitText, type ImportCandidate, type ImportSource } from '@/lib/voice/format';
 import styles from './my-voice.module.css';
 
 export type ImportPostsViewProps = { sources: ImportSource[] | null; busy: boolean; open: string | null;
@@ -23,8 +23,8 @@ export function ImportPostsView(props: ImportPostsViewProps) {
         return <li key={source.connectionId}>
           <div className={styles.importHead}>
             <span className={styles.labelName}>{name}</span>
-            {!source.supported ? <small>这个平台暂不支持导入</small>
-              : !source.posts ? <small>还没有可用的帖子。<Link prefetch={false} href="/app/publish-monitor">先到数据复盘刷新一次</Link>（按实际用量扣积分）</small>
+            {!source.supported ? <small>这个账号暂不支持导入</small>
+              : !source.posts ? <small>{importWaitText(source.autoTrack)}<Link prefetch={false} href="/app/publish-monitor">去数据复盘</Link></small>
               : <button type="button" disabled={busy} onClick={() => props.onOpen(opened ? null : source.connectionId)}>
                 {opened ? '收起' : `选择帖子（${source.posts}）`}</button>}
           </div>
