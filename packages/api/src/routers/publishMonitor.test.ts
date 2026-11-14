@@ -16,12 +16,18 @@ function caller(rpc: ReturnType<typeof vi.fn>, switchOn: boolean, settings: Reco
     let key = '';
     return { select() { return this; }, eq(_column: string, value: string) { key = value; return this; },
       single: async () => ({ data: profile, error: null }),
-      maybeSingle: async () => ({ data: table === 'social_publish_jobs' ? (existingJob === true ? { id: 'job' } : existingJob || null)
-        : table !== 'system_settings' ? profile
-        : key === 'publish_monitor_enabled' ? { value: switchOn } : key in settings ? { value: settings[key] } : null,
-      error: null }) };
+      // As on the real database (0240): the server's role has no privilege on the job table, so a direct read fails.
+      maybeSingle: async () => table === 'social_publish_jobs'
+        ? { data: null, error: { message: 'permission denied for table social_publish_jobs' } }
+        : { data: table !== 'system_settings' ? profile
+          : key === 'publish_monitor_enabled' ? { value: switchOn } : key in settings ? { value: settings[key] } : null,
+        error: null } };
   };
-  const db = { from, rpc };
+  // The job under a key is read only through publish_monitor_publish_key_job (0548); every other call goes to the test's rpc.
+  const job = existingJob === true ? { targets: [], state: 'unknown' } : existingJob ? { state: existingJob.state ?? 'unknown',
+    targets: (existingJob.targets as Array<{ connectionId: string }>).map(target => target.connectionId) } : null;
+  const db = { from, rpc: (name: string, args: unknown) => name === 'publish_monitor_publish_key_job'
+    ? Promise.resolve({ data: job, error: null }) : (rpc as unknown as (n: string, a: unknown) => unknown)(name, args) };
   return publishMonitorRouter.createCaller({
     headers: new Headers(), user: { id: actor, email: 'u@example.com', app_metadata: {}, user_metadata: {} },
     isEmailVerified: true, authProvider: 'email',
@@ -99,6 +105,21 @@ describe('publish-monitor one-click publishing', () => {
     }
     expect(mocks.limit).not.toHaveBeenCalled();
     expect(mocks.uploads).not.toHaveBeenCalled();
+  });
+
+  it('PUBLISH-MONITOR: a new key is looked up through publish_monitor_publish_key_job, never by reading the job table', async () => {
+    // Since #1263 (2026-10-23) the lookup read social_publish_jobs directly; the server's role has no privilege on it (0240), so
+    // every upload with a key and every submit failed with PUBLISH_MONITOR_UNAVAILABLE. The fake refuses that read like staging.
+    mocks.entitlements.mockResolvedValue({ allowPublish: true });
+    mocks.limit.mockResolvedValue({ success: true });
+    mocks.uploads.mockResolvedValue({ ok: true });
+    // Past the lookup, the next step (listing the user's connections) answers "not found": that refusal, and not
+    // PUBLISH_MONITOR_UNAVAILABLE, is what comes back, for both the submit and the upload.
+    const rpc = vi.fn().mockResolvedValue({ data: null, error: { message: 'PUBLISH_MONITOR_CONNECTION_NOT_FOUND' } });
+    await expect(caller(rpc, true, open).publish.submit(submit))
+      .rejects.toMatchObject({ message: 'PUBLISH_MONITOR_CONNECTION_NOT_FOUND' });
+    await expect(caller(rpc, true, open).publish.uploadUrl({ disclosureAccepted: true, count: 1, connectionIds: [conn],
+      idempotencyKey: 'key-00000001' })).rejects.toMatchObject({ message: 'PUBLISH_MONITOR_CONNECTION_NOT_FOUND' });
   });
 
   it('a key that already has a job is a replay: answered from the database even if the platform has closed since', async () => {
