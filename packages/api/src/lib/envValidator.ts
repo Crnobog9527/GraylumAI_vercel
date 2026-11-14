@@ -165,6 +165,10 @@ const envSchema = z.object({
   NEXT_PUBLIC_LIBRARY_DOCX_EXTRACTION: optionalString,
   NEXT_PUBLIC_LIBRARY_PDF_EXTRACTION: optionalString,
   NEXT_PUBLIC_LIBRARY_SCAN_RECOGNITION: optionalString,
+  // VOICE-2 PR-7 「从 Google 云端硬盘选择」: public identifiers, all optional; without all three the button is hidden.
+  NEXT_PUBLIC_GOOGLE_PICKER_API_KEY: optionalString,
+  NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID: optionalString,
+  NEXT_PUBLIC_GOOGLE_APP_ID: optionalString,
   NEXT_PUBLIC_GA4_MEASUREMENT_ID: optionalString,
   NEXT_PUBLIC_VERCEL_ANALYTICS_CATEGORY: optionalString,
 

@@ -42,7 +42,11 @@ describe('security response headers', () => {
     expect(csp).toContain('https://*.supabase.co');
     expect(csp).toContain('wss://*.supabase.co');
     expect(csp).not.toContain('hcaptcha'); // BOT-GUARD: no captcha script, frame or call
-    expect(csp).not.toContain('frame-src');
+    // VOICE-2 PR-7 (Owner 2026-11-14 "同意放开"): only the Google picker's named hosts, never a wildcard; still report-only.
+    expect(csp).toContain("frame-src 'self' https://docs.google.com https://accounts.google.com;");
+    expect(csp).toContain("script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://apis.google.com https://accounts.google.com;");
+    expect(csp).toContain('https://www.googleapis.com https://content.googleapis.com');
+    expect(csp).not.toMatch(/https:\/\/\*\.google(apis)?\.com/);
     expect(csp).toContain('https://*.ingest.sentry.io');
     expect(csp).toContain("font-src 'self'");
     expect(csp).toContain("worker-src 'self' blob:");

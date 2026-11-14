@@ -25,3 +25,14 @@ export function isLibraryPdfExtractionEnabled(): boolean {
 export function isLibraryScanRecognitionEnabled(): boolean {
   return process.env.NEXT_PUBLIC_LIBRARY_SCAN_RECOGNITION === 'true';
 }
+
+/**
+ * VOICE-2 PR-7 (文风 2.0 phase 2): 「从 Google 云端硬盘选择」 needs the Google Picker API key, the OAuth web client id and the Cloud
+ * project number (App ID). They are public identifiers, set by the Owner in Vercel; without all three the button is not shown.
+ */
+export type GoogleDriveConfig = { apiKey: string; clientId: string; appId: string };
+export function libraryGoogleDriveConfig(): GoogleDriveConfig | null {
+  const apiKey = process.env.NEXT_PUBLIC_GOOGLE_PICKER_API_KEY?.trim(), clientId = process.env.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID?.trim();
+  const appId = process.env.NEXT_PUBLIC_GOOGLE_APP_ID?.trim();
+  return apiKey && clientId && appId ? { apiKey, clientId, appId } : null;
+}

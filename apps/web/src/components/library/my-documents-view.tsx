@@ -1,5 +1,6 @@
 'use client';
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { DrivePickButton } from './drive-pick-button';
 import { useState } from 'react';
 import { FileText, Image as ImageIcon, Upload } from 'lucide-react';
 import type { LibraryDocument } from '@/hooks/use-library-documents';
@@ -91,6 +92,7 @@ export function UploadPanel(props: UploadPanelProps) {
             if (purpose && files.length) props.onAdd(files, purpose);
           }}/>
       </label>
+      <DrivePickButton disabled={!purpose} onFiles={files => { if (purpose) props.onAdd(files, purpose); }}/>
       <p className={styles.hint}>「我本人写的」是你自己写的作品（语料库）；「参考资料」是收集来参考的内容。用途以后可以修改。</p>
     </>}
     {!!props.uploads.length && <ul className={styles.queue} aria-label="上传进度">
