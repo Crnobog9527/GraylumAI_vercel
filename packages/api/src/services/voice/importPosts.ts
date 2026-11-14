@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { tikhubRouteId } from '../research/vendors/tikhub';
 import { SOCIAL_PLATFORMS } from '../research/vendors/types';
+import { listConnections } from '../publishMonitor/foundation';
 import { voiceRpc } from './state';
 
 /*
@@ -25,23 +26,27 @@ export const importPostsInput = z.object({ connectionId: uuid, postIds: z.array(
 /** autoTrack: the connection reads itself once a day (数据复盘 has no manual refresh for a TikHub account). */
 export type ImportSource = { connectionId: string; platform: string; displayHint: string | null; supported: boolean;
   fetchedAt: string | null; posts: number; autoTrack: boolean };
-type ConnectionRow = { id: string; source: string; consent_auto_track: boolean };
 
 /**
  * Only a TikHub connection is read into a stored posts list; a Post for Me one (YouTube, Instagram...) never is, so it is
  * "not supported" even where TikHub has a route for its platform. A connection the database lists but this read misses is
- * treated the same way (nothing to import).
+ * treated the same way (nothing to import). The connections are read through 数据复盘's own function: the table itself is closed
+ * to the service role (a direct read is refused).
  */
+/** A failed connections read is "unavailable" (the reason stays in the database log), never a list that looks importable. */
+async function ownConnections(admin: SupabaseClient, actorId: string) {
+  try { return await listConnections(admin, actorId); } catch { throw new Error('VOICE_UNAVAILABLE'); }
+}
+
 async function sourcesOf(admin: SupabaseClient, actorId: string, routes: Record<string, string>): Promise<ImportSource[]> {
   const [listed, rows] = await Promise.all([
     voiceRpc<Omit<ImportSource, 'autoTrack'>[]>(admin, 'voice_import_sources', { a: actorId, routes }),
-    admin.from('social_connections').select('id, source, consent_auto_track').eq('actor_id', actorId).eq('role', 'own'),
+    ownConnections(admin, actorId),
   ]);
-  if (rows.error) throw new Error('VOICE_UNAVAILABLE');
-  const byId = new Map((rows.data as ConnectionRow[] | null ?? []).map(row => [row.id, row]));
+  const byId = new Map(rows.filter(row => row.role === 'own').map(row => [row.id, row]));
   return listed.map(source => {
     const row = byId.get(source.connectionId);
-    return { ...source, supported: source.supported && row?.source === 'tikhub', autoTrack: row?.consent_auto_track === true };
+    return { ...source, supported: source.supported && row?.source === 'tikhub', autoTrack: row?.consentAutoTrack === true };
   });
 }
 export type ImportCandidate = { postId: string; text: string; url: string | null; postedAt: string | null; imported: boolean };
