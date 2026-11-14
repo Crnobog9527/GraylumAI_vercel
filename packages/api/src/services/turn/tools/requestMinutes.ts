@@ -20,7 +20,8 @@ const DESCRIPTION = 'Start the minutes of this conversation, the same as the use
   + 'Takes no arguments, reads nothing and returns at once; the minutes are written after your reply, by the host, and charged on '
   + 'their own.';
 export const REQUEST_MINUTES_INSTRUCTIONS = '\n\nMinutes: when the user clearly asks you to summarize or take the minutes of this '
-  + 'conversation (for example 帮我整理一下聊天纪要, 总结一下我们聊的), call request_minutes once, then say in one short sentence that the '
+  + 'conversation (for example 帮我整理一下聊天纪要, 总结一下我们聊的; in a topic window also 帮我把这个选题目前的进度整理一下 or 整理本选题), '
+  + 'call request_minutes once, then say in one short sentence that the '
   + 'minutes are being written in the panel on the right; never write the minutes in your reply. A request to tidy up, rewrite or '
   + 'summarize one piece of text is not a minutes request: answer it as usual. When the conversation has reached clear conclusions '
   + 'and the user has not asked, you may end your reply with one sentence saying they can press 整理纪要 on the right; at most once '

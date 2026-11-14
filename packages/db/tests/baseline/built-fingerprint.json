@@ -3639,7 +3639,7 @@
   "fn:opc_topic_draft_save(uuid,uuid,uuid,bigint,uuid,jsonb)": "77c5c2ced9ae",
   "fn:opc_topic_material(uuid,uuid,uuid,text)": "65099bca79c7",
   "fn:opc_topic_original(uuid,uuid,uuid,uuid)": "7bb9ab279ca5",
-  "fn:opc_topic_read(uuid,uuid)": "8d0c96064bbf",
+  "fn:opc_topic_read(uuid,uuid)": "4ab1db72ed00",
   "fn:opc_topic_read_before_opening(uuid,uuid)": "7e712bf3514d",
   "fn:opc_turn_latest(uuid,uuid)": "fa7dac7b7fc1",
   "fn:opc_turn_root_request(uuid,bigint)": "8c87dc9908cd",
