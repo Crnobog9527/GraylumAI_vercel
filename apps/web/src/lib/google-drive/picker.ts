@@ -8,8 +8,12 @@ import { DRIVE_PICKER_MIME_TYPES, type PickedFile } from './download';
  * pressed. The site's CSP must allow apis.google.com, accounts.google.com and docs.google.com before this works (Owner's call).
  */
 export const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
-type Google = { accounts: { oauth2: { initTokenClient(config: Record<string, unknown>): { requestAccessToken(options?: Record<string, unknown>): void } } };
-  picker: Record<string, unknown> & { PickerBuilder: new () => Record<string, (...args: unknown[]) => unknown>; DocsView: new (view?: unknown) => Record<string, (...args: unknown[]) => unknown>; ViewId: Record<string, unknown>; Feature: Record<string, unknown>; Action: Record<string, string>; Response: Record<string, string>; Document: Record<string, string> } };
+type Methods = Record<string, (...args: unknown[]) => unknown>;
+type TokenClient = { requestAccessToken(options?: Record<string, unknown>): void };
+type Google = { accounts: { oauth2: { initTokenClient(config: Record<string, unknown>): TokenClient } };
+  picker: Record<string, unknown> & { PickerBuilder: new () => Methods; DocsView: new (view?: unknown) => Methods;
+    ViewId: Record<string, unknown>; Feature: Record<string, unknown>; Action: Record<string, string>; Response: Record<string, string>;
+    Document: Record<string, string> } };
 type Gapi = { load(name: string, callback: () => void): void };
 const win = () => window as unknown as { google?: Google; gapi?: Gapi };
 
