@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { readMembershipEntitlements } from '../membershipEntitlements';
 import type { SocialPlatform } from '../research/vendors/types';
 import { billedTikhubRead, settleLeftOpenRun, type BilledReadDeps } from './billedRead';
-import { applyTikhubPartial, applyTikhubRead, tikhubClaimSchema, type TikhubClaim } from './tikhub';
+import { applyTikhubPartial, applyTikhubRead, tikhubClaimSchema, tikhubOutcome, type TikhubClaim } from './tikhub';
 import { swallow } from '../../lib/swallow';
 
 /**
@@ -55,6 +55,38 @@ export async function closeOrphanRuns(db: Db): Promise<number> {
   return rows.length;
 }
 
+export type ClaimOutcome = 'read' | 'stale' | 'insufficient_credits' | 'unavailable' | 'failed';
+
+/**
+ * One claimed connection through the billed read and its settle (the daily job, and VOICE-2's "读取最新帖子" button). `fetched`:
+ * a posts list came back and was written. `onNothingNew` runs before a read that could not start, or ran out of balance, is
+ * settled (the button gives its hour back there).
+ */
+export async function readTikhubClaim(db: Db, deps: Omit<BilledReadDeps, 'admin'>, claim: TikhubClaim,
+  onNothingNew?: () => Promise<unknown>): Promise<{ outcome: ClaimOutcome; fetched: boolean }> {
+  const keys = { connectionId: claim.connectionId, actorId: claim.actorId, lease: claim.lease, refreshId: claim.refreshId };
+  const read = await billedTikhubRead({ ...deps, admin: db }, keys, claim.platform as SocialPlatform, claim.account);
+  if (read.kind === 'stale') return { outcome: 'stale', fetched: false };
+  if (read.kind === 'insufficient_credits') {
+    await onNothingNew?.();
+    // What was already read (and charged) in this refresh is kept; only the rest waits for the balance.
+    await applyTikhubPartial(db, claim, read.results.account_profile ?? null, `tikhub:${claim.refreshId}`);
+    const done = await db.rpc('publish_monitor_refresh_insufficient', { p_connection_id: claim.connectionId, p_lease: claim.lease,
+      p_refresh_id: claim.refreshId });
+    if (done.error) throw new Error('PUBLISH_MONITOR_TIKHUB_UNAVAILABLE');
+    return { outcome: 'insufficient_credits', fetched: false };
+  }
+  if (read.kind === 'unavailable') {
+    await onNothingNew?.();
+    await settle(db, claim, 'release');
+    return { outcome: 'unavailable', fetched: false };
+  }
+  const posts = read.results.account_posts;
+  if (!posts) { await settle(db, claim, 'failed', 'TIKHUB_NO_POST_READ'); return { outcome: 'failed', fetched: false }; }
+  const applied = await applyTikhubRead(db, claim, read.results.account_profile ?? null, posts, `tikhub:${claim.refreshId}`);
+  return { outcome: applied ? 'read' : 'stale', fetched: applied && tikhubOutcome(posts).outcome === 'done' };
+}
+
 export async function runTikhubRefresh(db: Db, deps: Omit<BilledReadDeps, 'admin'>, entitlementFor: TikhubEntitlementLookup,
   until: number, now: () => number = Date.now): Promise<TikhubReport> {
   // Runs left open by a killed process are closed by the daily job before this step, whatever the feature switch.
@@ -75,27 +107,10 @@ export async function runTikhubRefresh(db: Db, deps: Omit<BilledReadDeps, 'admin
       // Unreadable entitlement: leave it for the next run rather than guess (and stop: the next claim is the same row).
       if (!right) { await settle(db, claim, 'release'); count('release'); stop = true; continue; }
       if (claim.role === 'own' ? right.windowDays <= 0 : !right.benchmark) { await settle(db, claim, 'entitlement'); count('entitlement'); continue; }
-      const keys = { connectionId: claim.connectionId, actorId: claim.actorId, lease: claim.lease, refreshId: claim.refreshId };
-      const read = await billedTikhubRead({ ...deps, admin: db }, keys, claim.platform as SocialPlatform, claim.account);
-      if (read.kind === 'stale') { count('stale'); continue; }
-      if (read.kind === 'insufficient_credits') {
-        // What was already read (and charged) in this refresh is kept; only the rest waits for the balance.
-        await applyTikhubPartial(db, claim, read.results.account_profile ?? null, `tikhub:${claim.refreshId}`);
-        const done = await db.rpc('publish_monitor_refresh_insufficient', { p_connection_id: claim.connectionId, p_lease: claim.lease,
-          p_refresh_id: claim.refreshId });
-        if (done.error) throw new Error('PUBLISH_MONITOR_TIKHUB_UNAVAILABLE');
-        count('insufficient_credits');
-        continue;
-      }
-      if (read.kind === 'unavailable') {
-        // Switched off, unpriced, not approved or rate-limited: the same holds for every later claim of this run.
-        await settle(db, claim, 'release'); count('release'); stop = true; continue;
-      }
-      const posts = read.results.account_posts;
-      if (!posts) { await settle(db, claim, 'failed', 'TIKHUB_NO_POST_READ'); count('failed'); continue; }
-      const applied = await applyTikhubRead(db, claim, read.results.account_profile ?? null, posts,
-        `tikhub:${claim.refreshId}`);
-      count(applied ? 'read' : 'stale');
+      const read = await readTikhubClaim(db, deps, claim);
+      count(read.outcome === 'unavailable' ? 'release' : read.outcome);
+      // Switched off, unpriced, not approved or rate-limited: the same holds for every later claim of this run.
+      if (read.outcome === 'unavailable') stop = true;
     }
   }
   return report;

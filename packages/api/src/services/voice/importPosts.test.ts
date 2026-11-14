@@ -26,17 +26,17 @@ describe('importing the user\'s own posts (VOICE-2 PR-5)', () => {
     expect(rpc).toHaveBeenLastCalledWith('voice_import_candidates', { a: uuid(9), cid: uuid(1), routes: importRoutes() });
   });
   // Only RPCs: social_connections is closed to the service role on the real database, so a client without `from` must do.
-  const connection = (n: number, source: string, consentAutoTrack: boolean) => ({ id: uuid(n), businessId: uuid(20), accountProjectId: uuid(21),
-    role: 'own', source, platform: 'douyin', displayHint: null, status: 'connected', consentRead: true, consentAutoTrack,
+  const connection = (n: number, source: string) => ({ id: uuid(n), businessId: uuid(20), accountProjectId: uuid(21), role: 'own',
+    source, platform: 'douyin', displayHint: null, status: 'connected', consentRead: true, consentAutoTrack: false,
     consentPublish: false, lastSuccessAt: null, postCount: 0 });
   const listed = [uuid(1), uuid(2), uuid(3)].map((connectionId, i) => ({ connectionId, platform: ['douyin', 'youtube', 'x'][i],
     displayHint: null, supported: true, fetchedAt: null, posts: 0 }));
-  it('a Post for Me connection is not supported even on a platform TikHub reads; a TikHub one keeps its daily-update switch', async () => {
+  it('a Post for Me connection is not supported even on a platform TikHub reads', async () => {
     const rpc = vi.fn(async (name: string) => name === 'voice_import_sources' ? { data: listed, error: null }
-      : { data: [connection(1, 'tikhub', false), connection(2, 'postforme', true)], error: null });
+      : { data: [connection(1, 'tikhub'), connection(2, 'postforme')], error: null });
     const sources = await voiceImportService({ rpc } as unknown as SupabaseClient, uuid(9)).sources();
     expect(rpc).toHaveBeenCalledWith('publish_monitor_connections', { a: uuid(9) });
-    expect(sources.map(s => [s.supported, s.autoTrack])).toEqual([[true, false], [false, true], [false, false]]);
+    expect(sources.map(s => s.supported)).toEqual([true, false, false]);
   });
   it('a failed connections read is "unavailable", not a list that looks importable', async () => {
     const rpc = vi.fn(async (name: string) => name === 'voice_import_sources' ? { data: listed, error: null }

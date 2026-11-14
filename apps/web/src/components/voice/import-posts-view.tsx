@@ -2,12 +2,15 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import Link from 'next/link';
 import { DisplayHeading } from '@/components/chat-display/display-heading';
-import { IMPORT_NOTE, importPlatformName, importWaitText, type ImportCandidate, type ImportSource } from '@/lib/voice/format';
+import { IMPORT_READ_HINT, type ImportReadNotice } from '@/lib/voice/import-read';
+import { IMPORT_NOTE, importPlatformName, type ImportCandidate, type ImportSource } from '@/lib/voice/format';
 import styles from './my-voice.module.css';
 
 export type ImportPostsViewProps = { sources: ImportSource[] | null; busy: boolean; open: string | null;
   candidates: ImportCandidate[] | null; picked: string[]; onOpen: (connectionId: string | null) => void;
-  onPick: (postId: string) => void; onImport: () => void };
+  onPick: (postId: string) => void; onImport: () => void;
+  /** "读取最新帖子": the connection being read, the last read's notice, and the button's action. */
+  reading?: string | null; notice?: ({ connectionId: string } & ImportReadNotice) | null; onRead?: (connectionId: string) => void };
 
 /** VOICE-2 PR-6: 「从我的账号导入」— the user's own posts from the latest paid read of a connected account (数据复盘). */
 export function ImportPostsView(props: ImportPostsViewProps) {
@@ -23,11 +26,17 @@ export function ImportPostsView(props: ImportPostsViewProps) {
         return <li key={source.connectionId}>
           <div className={styles.importHead}>
             <span className={styles.labelName}>{name}</span>
-            {!source.supported ? <small>这个账号暂不支持导入</small>
-              : !source.posts ? <small>{importWaitText(source.autoTrack)}<Link prefetch={false} href="/app/publish-monitor">去数据复盘</Link></small>
-              : <button type="button" disabled={busy} onClick={() => props.onOpen(opened ? null : source.connectionId)}>
+            {!source.supported ? <small>这个账号暂不支持导入</small> : <span className={styles.importButtons}>
+              <button type="button" disabled={busy} onClick={() => props.onRead?.(source.connectionId)}>
+                {props.reading === source.connectionId ? '正在读取…' : '读取最新帖子'}</button>
+              {source.posts > 0 && <button type="button" disabled={busy} onClick={() => props.onOpen(opened ? null : source.connectionId)}>
                 {opened ? '收起' : `选择帖子（${source.posts}）`}</button>}
+            </span>}
           </div>
+          {source.supported && <small className={styles.importState}>{source.posts > 0 && source.fetchedAt
+            ? `最近一次读到 ${source.posts} 条（${source.fetchedAt.slice(0, 10)}）。` : '还没有读到帖子。'}{IMPORT_READ_HINT}</small>}
+          {props.notice?.connectionId === source.connectionId && <p role={props.notice.tone === 'error' ? 'alert' : 'status'}
+            className={props.notice.tone === 'error' ? styles.importError : styles.hint}>{props.notice.text}</p>}
           {opened && <ImportList {...props} />}
         </li>;
       })}</ul>}
