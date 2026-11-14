@@ -12,4 +12,5 @@ AS $function$
   +(SELECT count(*) FROM library_document_segments WHERE actor_id=a)
   +(SELECT count(*) FROM library_recognition_units WHERE actor_id=a)
   +(SELECT count(*) FROM library_upload_reservations WHERE actor_id=a)
+  +(SELECT count(*) FROM library_document_imports WHERE actor_id=a)
 $function$;
