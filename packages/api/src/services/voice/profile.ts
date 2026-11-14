@@ -36,7 +36,8 @@ export const VOICE_INSTRUCTIONS = [
   `- platforms：如果能看出在不同平台写法不同（例如在某平台更短、更口语），写在这里；样文只有一种平台或看不出来，就原样写“${NO_PLATFORM_DIFFERENCE}”`,
   '- samples：2 到 3 段最能代表这个人说话方式的原文，必须从下面的文字里一字不改地摘出来，每段不超过 400 字',
   // VOICE-2 PR-1: the same call labels each document, so writing can later pick past pieces of the same type, other topics.
-  '- documents：下面每个文件一项，按文件编号：{"file": 编号, "type": 类型, "topics": 话题}。type 只能是 post（社媒短帖）、article（长文）、'
+  '- documents：下面每个文件一项，按文件编号：{"file": 编号, "type": 类型, "topics": 话题}，编号是"### 文件 N"里的数字 N（写成数字，例如 1）。'
+    + 'type 只能是 post（社媒短帖）、article（长文）、'
     + 'script（视频口播稿）、other（其他）之一；topics 是这篇讲的 1 到 5 个话题词，每个不超过 20 字',
 ].join('\n');
 
@@ -52,13 +53,21 @@ export function parseVoiceDocuments(answer: string, material: VoiceMaterial[]): 
     const raw = JSON.parse(trimmed.slice(trimmed.indexOf('{'), trimmed.lastIndexOf('}') + 1)) as { documents?: unknown };
     if (Array.isArray(raw?.documents)) items = raw.documents;
   } catch { items = []; }
-  const byFile = new Map<number, { type?: unknown; topics?: unknown }>();
+  type Item = { type?: unknown; topics?: unknown };
+  // Which document an entry is, as the model named it (staging 11-14 saw all three): its number (1), the number as text ("1",
+  // "文件 1"), or its file name ("notes.md"). When no entry could be placed that way and there is one per document, their order.
+  const byFile = new Map<number, Item>();
+  const names = material.map(doc => doc.filename?.trim() ?? null);
   for (const item of items) {
     if (!item || typeof item !== 'object') continue;
-    // The file number as the model wrote it: a number, or (seen on staging 11-14) the same number as a string ("1").
     const file = (item as { file?: unknown }).file;
-    const number = typeof file === 'number' ? file : typeof file === 'string' && /^\s*\d{1,4}\s*$/.test(file) ? Number(file) : NaN;
-    if (Number.isInteger(number)) byFile.set(number, item as { type?: unknown; topics?: unknown });
+    const text = typeof file === 'string' ? file.trim() : '';
+    const number = typeof file === 'number' ? file : /^(?:文件\s*)?\d{1,4}$/.test(text) ? Number(text.replace(/\D/g, ''))
+      : text && names.includes(text) ? names.indexOf(text) + 1 : NaN;
+    if (Number.isInteger(number) && number >= 1 && number <= material.length && !byFile.has(number)) byFile.set(number, item as Item);
+  }
+  if (!byFile.size && items.length === material.length && items.every(item => item && typeof item === 'object')) {
+    items.forEach((item, index) => byFile.set(index + 1, item as Item));
   }
   return capVoiceDocuments(material.map((doc, index) => {
     const item = byFile.get(index + 1);
