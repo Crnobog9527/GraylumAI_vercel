@@ -18,7 +18,7 @@ const entry = ['publish_monitor_publish_claim(uuid,text,text,uuid,uuid,uuid[])',
   'publish_monitor_publish_reconcile_claim(integer,integer,boolean)', 'publish_monitor_publish_check_later(uuid,uuid,text)',
   'publish_monitor_publish_unlease(uuid,uuid)', 'publish_monitor_publish_manual_resolve(uuid,uuid,boolean,jsonb)',
   'publish_monitor_publish_job(uuid,uuid)', 'publish_monitor_publish_targets(uuid,uuid)',
-  'publish_monitor_publish_check_info(uuid,uuid)'];
+  'publish_monitor_publish_check_info(uuid,uuid)', 'publish_monitor_publish_key_job(uuid,text)'];
 const internal = ['publish_monitor_publish_price()', 'publish_monitor_publish_credits(jsonb,integer)',
   'publish_monitor_quota_period()', 'publish_monitor_publish_view(social_publish_jobs)',
   'publish_monitor_publish_close(social_publish_jobs,integer,text,text)', 'publish_monitor_publish_lock(uuid)'];
@@ -149,6 +149,15 @@ try {
   const theirs = await claim(other, 'key-first-01', fp('a'), other.connections.map(x => x.id));
   assert.notEqual(theirs.id, first.id);
   await code(svc('SELECT publish_monitor_publish_job($1,$2) v', [other.a, first.id]), 'PUBLISH_MONITOR_JOB_NOT_FOUND');
+  // 0548: the server looks a key up through publish_monitor_publish_key_job (the caller's own job only); the table stays closed.
+  const keyJob = (a, key) => svc('SELECT publish_monitor_publish_key_job($1,$2) v', [a, key]);
+  const asKeyJob = row => ({ targets: row.targets.map(t => t.connectionId), state: row.state });
+  assert.deepEqual(await keyJob(u.a, 'key-first-01'), asKeyJob(await job(first.id)));
+  assert.deepEqual(await keyJob(other.a, 'key-first-01'), asKeyJob(await job(theirs.id)));
+  assert.equal(await keyJob(u.a, 'key-unknown-1'), null);
+  await assert.rejects(svc('SELECT count(*) v FROM social_publish_jobs'), /permission denied/);
+  report.checks.push('0548 key lookup answers the caller\'s own job (targets and state), null for an unknown key, and the job '
+    + 'table stays unreadable to the server role');
   report.checks.push('claim holds 6 credits per target and reserves slots; same key and content replays the caller\'s own '
     + 'job; other content is refused; another user with the same key gets their own job and cannot read the first');
 
