@@ -1,0 +1,33 @@
+{
+  "_about": "Owner 2026-11-16 approved exactly these 25 column SELECT grants and 3 SELECT policies for staging comparison only. Never create them in a migration or use them in the ordinary build/release comparison. Any missing, extra or changed object fails.",
+  "objects": {
+    "colacl:ai_models.config": "core_e2e_reader=r/postgres",
+    "colacl:ai_models.id": "core_e2e_reader=r/postgres",
+    "colacl:ai_models.is_active": "core_e2e_reader=r/postgres",
+    "colacl:ai_models.model_id": "core_e2e_reader=r/postgres",
+    "colacl:ai_models.name": "core_e2e_reader=r/postgres",
+    "colacl:turn_calls.actor_id": "core_e2e_reader=r/postgres",
+    "colacl:turn_calls.actual_usd": "core_e2e_reader=r/postgres",
+    "colacl:turn_calls.call_kind": "core_e2e_reader=r/postgres",
+    "colacl:turn_calls.dispatched_at": "core_e2e_reader=r/postgres",
+    "colacl:turn_calls.model_id": "core_e2e_reader=r/postgres",
+    "colacl:turn_calls.nominal_usd": "core_e2e_reader=r/postgres",
+    "colacl:turn_calls.provider_id": "core_e2e_reader=r/postgres",
+    "colacl:turn_calls.tool_name": "core_e2e_reader=r/postgres",
+    "colacl:turn_calls.turn_id": "core_e2e_reader=r/postgres",
+    "colacl:turns.actor_id": "core_e2e_reader=r/postgres",
+    "colacl:turns.charged_credits": "core_e2e_reader=r/postgres",
+    "colacl:turns.close_kind": "core_e2e_reader=r/postgres",
+    "colacl:turns.closed_at": "core_e2e_reader=r/postgres",
+    "colacl:turns.id": "core_e2e_reader=r/postgres",
+    "colacl:turns.kind": "core_e2e_reader=r/postgres",
+    "colacl:turns.reserved_credits": "core_e2e_reader=r/postgres",
+    "colacl:turns.session_id": "core_e2e_reader=r/postgres",
+    "colacl:turns.settlement": "core_e2e_reader=r/postgres",
+    "colacl:turns.state": "core_e2e_reader=r/postgres",
+    "colacl:turns.stopped_by_user": "core_e2e_reader=r/postgres",
+    "pol:ai_models.core_e2e_read": "PERMISSIVE | SELECT | {core_e2e_reader} | true",
+    "pol:turn_calls.core_e2e_read": "PERMISSIVE | SELECT | {core_e2e_reader} | true",
+    "pol:turns.core_e2e_read": "PERMISSIVE | SELECT | {core_e2e_reader} | true"
+  }
+}

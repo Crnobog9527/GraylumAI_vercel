@@ -4,8 +4,11 @@
 // built fingerprint (baseline/built-fingerprint.json; refresh it with --write-built in the PR that
 // changes the structure; --out only dumps the structure). With --staging <snapshot> it instead
 // compares with a staging snapshot,
-// allowing only baseline/expected-differences.json. --ci runs the same checks in CI (no network,
+// allowing only baseline/expected-differences.json and the exact approved staging-test-permissions.json.
+// --ci runs the same ordinary build checks in CI (no network,
 // no secrets, digest-pinned image already pulled by the workflow).
+import { compareStructure } from './baseline/staging-comparison.mjs';
+import { parseSnapshot } from '../../../scripts/staging-structure.mjs';
 import { spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -67,51 +70,6 @@ function compareBuilt(localDetail, built) {
   return keys.filter(key => local[key] !== built.objects[key]).map(key => (key in built.objects
     ? (key in local ? `differs: ${key} :: ${localDetail[key]}` : `missing from the build: ${key}`)
     : `new in the build: ${key} :: ${localDetail[key]}`).slice(0, 400));
-}
-
-// Compares the local build with a staging snapshot; returns the unexpected differences.
-function compare(local, localDetail, snapshot, expected) {
-  const same = key => key in local && key in snapshot.groups && local[key].startsWith(snapshot.groups[key]);
-  const keys = [...new Set([...Object.keys(local), ...Object.keys(snapshot.groups)])].sort();
-  const differing = keys.filter(key => !same(key));
-  const seen = { platformOnlyOnStaging: [], pendingOnStaging: [], stricterInFiles: [] };
-  const unexpected = [];
-  const allow = (list, key) => {
-    if (!expected[list].keys.includes(key)) return false;
-    seen[list].push(key);
-    return true;
-  };
-  for (const key of differing) {
-    if (!(key in local)) {
-      if (!allow('platformOnlyOnStaging', key)) unexpected.push(`only on staging: ${key}`);
-    } else if (!(key in snapshot.groups)) {
-      if (!allow('pendingOnStaging', key)) unexpected.push(`only in files: ${key}`);
-    } else {
-      // Object-by-object: ACL text verbatim, everything else by md5 prefix.
-      const objects = Object.keys(localDetail).filter(item => item.split('.')[0] === key);
-      const stagingObjects = Object.keys(snapshot.objects).filter(item => item.split('.')[0] === key);
-      if (stagingObjects.length === 0) unexpected.push(`changed group without staging objects: ${key}`);
-      for (const item of new Set([...objects, ...stagingObjects])) {
-        const stagingValue = snapshot.objects[item];
-        const localValue = localDetail[item];
-        if (stagingValue === undefined) {
-          if (!allow('stricterInFiles', item) && !allow('pendingOnStaging', item)) {
-            unexpected.push(`only in files: ${item} :: ${localValue}`);
-          }
-        } else if (localValue === undefined) {
-          unexpected.push(`only on staging: ${item}`);
-        } else if (/^(acl|defacl):/.test(item) ? localValue !== stagingValue : !md5(localValue).startsWith(stagingValue)) {
-          unexpected.push(`differs: ${item} :: local ${localValue}`);
-        }
-      }
-    }
-  }
-  for (const list of Object.keys(seen)) {
-    for (const key of expected[list].keys) {
-      if (!seen[list].includes(key)) unexpected.push(`expected difference no longer occurs (${list}): ${key}`);
-    }
-  }
-  return { differingGroups: differing.length, unexpected };
 }
 
 let report = { image: POSTGRES_IMAGE, failed: null };
@@ -179,8 +137,8 @@ try {
     }
     if (option('--out')) writeFileSync(option('--out'), JSON.stringify({ groups: local, objects: localDetail }, null, 1));
     if (option('--staging')) {
-      report.comparison = compare(local, localDetail, JSON.parse(readFileSync(option('--staging'), 'utf8')),
-        readJson('packages/db/tests/baseline/expected-differences.json'));
+      report.comparison = compareStructure(localDetail, parseSnapshot(readFileSync(option('--staging'), 'utf8')),
+        { stagingTestPermissions: true });
       if (report.comparison.unexpected.length > 0) report.failed ??= { step: 'staging comparison' };
     } else if (option('--out')) {
       // Dump mode (used by baseline/replay-with-new-migrations.mjs): the structure is written to

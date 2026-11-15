@@ -135,13 +135,19 @@ node packages/db/tests/run-db-baseline-replay.mjs --local-only --write-built
 并随高风险 PR 独立审查，当前没有例外。
 
 经批准向 staging 应用迁移前后，都要在 READ ONLY 事务中用
-`packages/db/tests/baseline/fingerprint.sql` 抓取只读结构指纹，并分别运行：
+`node scripts/staging-structure.mjs sql` 生成的 SQL 抓取只读结构快照，并分别运行：
 
 ```bash
 node packages/db/tests/run-db-baseline-replay.mjs --local-only --staging <只读快照.json>
 ```
 
-只允许 `expected-differences.json` 中列出的差异；已合并但未应用的迁移对象可临时列入
+Owner 2026-11-16 批准：除 `expected-differences.json` 原有差异外，仅 staging 比对逐项核验
+`staging-test-permissions.json` 的 25 项列 SELECT 授权和 3 条 SELECT 策略；完整定义必须一致，
+缺项、多项、定义变化及同表其他差异都阻断。普通空库/正式建库不启用测试权限清单，不在迁移中创建它们。
+快照必须为 v2 完整定义格式，查询固定 `search_path=public`，不完整或旧格式须重新只读采集，不能跳过。
+本机上库工具前后检查使用 `scripts/staging-structure.mjs compare-staging` 的同一核对实现，
+不再按权限类别、测试策略名称或 `ALLOW_EXTRA` 正则忽略。旧脚本替换方式见
+[精确核对说明](runbooks/STAGING_EXACT_PERMISSIONS.md)。已合并但未应用的迁移对象可临时列入
 `pendingOnStaging`，应用后更新 `staging-fingerprint.json` 和差异清单。`--staging` 只读取
 快照文件并与本机建库比对，不连接远程数据库。正式建库的整段 SQL 执行、平台设置和
 建库后比对要求见 [REL-1 注意事项](runbooks/STAGING_REPRODUCIBILITY.md#rel-1-file-built-release-database)。
