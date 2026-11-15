@@ -46,6 +46,16 @@ describe('voiceInput', () => {
 
 describe('parseVoiceDocuments (VOICE-2 PR-1)', () => {
   const two = [...material, { documentId: 'd2', filename: null, text: '第二篇' }];
+  it('does not assign an explicitly invalid file number by position when counts happen to match', () => {
+    for (const file of [0, 99, -1, 1.5, '0', '99', '文件 99', '10000', '-1', '1.5']) {
+      expect(parseVoiceDocuments(answer({ documents: [{ file, type: 'script', topics: ['菜市场'] }] }), material))
+        .toEqual([{ documentId: 'd1', type: 'other', topics: [] }]);
+    }
+    expect(parseVoiceDocuments(answer({ documents: [{ file: 99, type: 'script' }, { type: 'post' }] }), two)
+      .map(label => label.type)).toEqual(['other', 'other']);
+    expect(parseVoiceDocuments(answer({ documents: [{ file: 99, type: 'script' }, { file: 2, type: 'post' }] }), two)
+      .map(label => label.type)).toEqual(['other', 'post']);
+  });
   it('labels every document read, by file number; an unknown type or a missing entry is other', () => {
     const labels = parseVoiceDocuments(answer({ documents: [{ file: 2, type: 'script', topics: ['做饭', '做饭', ' 下班 '] },
       { file: 1, type: 'tweet', topics: 'x' }] }), two);
