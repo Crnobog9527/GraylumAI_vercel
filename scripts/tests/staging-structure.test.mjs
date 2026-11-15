@@ -123,18 +123,21 @@ esac
       writeFileSync(join(temp, 'effects'), '');
       const r = spawnSync('bash', [join(temp, 'apply-test.sh'), '0550', '123', 'testcommit', 'test_migration'], {
         encoding: 'utf8', env: { ...process.env, PATH: `${temp}/bin:${process.env.PATH}`,
-          BEFORE: join(temp, before), AFTER: join(temp, after), ALLOW_EXTRA: '', ...overrides },
+          BEFORE: join(temp, before), AFTER: join(temp, after), ALLOW_EXTRA: '', MIG_REVIEWED: '1', ...overrides },
       });
       return { ...r, effects: readFileSync(join(temp, 'effects'), 'utf8') };
     };
-    let r = run('invalid.json', 'valid.json'); assert.notEqual(r.status, 0); assert.equal(r.effects, '');
+    let r = run('valid.json', 'valid.json', { MIG_REVIEWED: '' }); assert.notEqual(r.status, 0); assert.equal(r.effects, '');
+    r = run('invalid.json', 'valid.json'); assert.notEqual(r.status, 0); assert.equal(r.effects, '');
     r = run('valid.json', 'invalid.json'); assert.notEqual(r.status, 0); assert.match(r.effects, /WRITE/); assert.doesNotMatch(r.effects, /MERGE/);
     r = run('valid.json', 'valid.json'); assert.equal(r.status, 0, r.stderr + r.stdout); assert.match(r.effects, /MERGE/);
     r = run('valid.json', 'valid.json', { ALLOW_EXTRA: '.*' }); assert.notEqual(r.status, 0); assert.equal(r.effects, '');
     writeFileSync(join(temp, 'sb/supabase/.temp/project-ref'), 'wrong-project');
     r = run('valid.json', 'valid.json'); assert.notEqual(r.status, 0); assert.equal(r.effects, '');
     const go = readFileSync(join(temp, 'mig-go.sh'), 'utf8');
-    assert.doesNotMatch(go, /PLATFORM=|grep -vE|ALLOW_EXTRA=/);
+    assert.doesNotMatch(go, /PLATFORM=|grep -vE|ALLOW_EXTRA=|RISK=/);
+    assert.match(go, /MODE=\$\{2:---check\}/);
+    assert.match(go, /--apply\) \[ \"\$MIG_REVIEWED\" = \"1\" \]/);
     assert.match(go, /compare-staging \$M\/before.json \$M\/stg.json/);
   } finally { rmSync(temp, { recursive: true, force: true }); }
 });

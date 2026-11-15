@@ -43,6 +43,19 @@ node scripts/install-staging-structure-tools.mjs --target /absolute/controller-t
 `structure-check/install-sha256.json`。安装后先对真实只读快照跑 `compare-staging`，再确认安装校验值。
 
 两个上库脚本都检查staging绑定；前后比较都调用同一检查器，任何读取、解析或比较失败都停止。
+执行窗口只能运行 `mig-go.sh <PR> --check`（不带模式也默认只检查）。所有迁移的实际执行仅由主窗口
+使用 `MIG_REVIEWED=1 mig-go.sh <PR> --apply`；不再按SQL关键词区分是否需要主窗口确认。
+直接调用 `mig-apply.sh` 同样要求主窗口确认标记。
+
+独立审查后备入口要求最近一条针对该版本的独立审查评论具有下列完整提交标记（提交必须为40位）：
+
+```text
+独立审查通过
+<!-- graylum-independent-review:v1 commit=<完整提交> verdict=pass -->
+```
+
+“未通过”“需修改”、旧版本/短提交、重复标记及之后出现的否决不能通过此入口。未解决审查线程仍阻断。
+标记是审查结果的机器可读记录，不代替独立审查，也不是执行窗口自行批准自己的权限。
 `ALLOW_EXTRA`不再支持。脚本在上库后检查失败时明确报告“已应用、未合并”，不得重新上库。
 本次不为验证脚本而实际应用迁移；写入/合并拦截由模拟CLI集成测试验证。
 

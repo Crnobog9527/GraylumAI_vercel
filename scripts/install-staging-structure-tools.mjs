@@ -10,7 +10,7 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const [flag, destination, ...extra] = process.argv.slice(2);
 if (flag !== '--target' || !destination || extra.length) throw new Error('Usage: --target <local controller-tools directory>');
 const target = resolve(destination.replace(/^~(?=\/|$)/, homedir()));
-const files = ['scripts/staging-structure.mjs', 'packages/db/tests/baseline/staging-comparison.mjs',
+const files = ['scripts/controller-review.mjs', 'scripts/staging-structure.mjs', 'packages/db/tests/baseline/staging-comparison.mjs',
   'packages/db/tests/baseline/staging-test-permissions.json', 'packages/db/tests/baseline/expected-differences.json',
   'packages/db/tests/baseline/fingerprint.sql'];
 const backup = resolve(target, `structure-backup-${Date.now()}`);

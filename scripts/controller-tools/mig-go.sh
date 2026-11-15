@@ -1,15 +1,20 @@
 #!/bin/zsh
-# usage: mig-go.sh <pr> [--check]   Window self-service upload to STAGING ONLY (Owner 2026-11-01 "同意两项").
-# --check runs every gate and stops before applying. High-risk migrations stop here and go to the controller,
-# who runs: MIG_REVIEWED=1 mig-go.sh <pr>. Exit: 0 ok; 2 gate failed; 3 queue busy; 7 needs controller.
+# usage: mig-go.sh <pr> [--check|--apply]   STAGING ONLY.
+# Execution windows only run --check (the default). Only the controller uses MIG_REVIEWED=1 with --apply.
+# Every migration requires controller confirmation, regardless of its SQL keywords.
 set -e
-PR=$1; MODE=$2; REPO=Crnobog9527/GraylumAI_vercel
+PR=$1; MODE=${2:---check}; REPO=Crnobog9527/GraylumAI_vercel
 T=~/.graylum/controller-tools; cd $T
 R="${GRAYLUM_REPO:-$HOME/Graylum_AI/GraylumAI_vercel}"
 CHECKER="$T/structure-check/scripts/staging-structure.mjs"
 LOCK=~/.graylum/mig-lock
 fail() { echo "STOP: $1"; exit 2; }
-[ -n "$PR" ] || fail "usage: mig-go.sh <pr> [--check]"
+[ -n "$PR" ] || fail "usage: mig-go.sh <pr> [--check|--apply]"
+case "$MODE" in
+  --check) ;;
+  --apply) [ "$MIG_REVIEWED" = "1" ] || fail "only the controller may apply migrations (MIG_REVIEWED=1 required)" ;;
+  *) fail "unknown mode: $MODE" ;;
+esac
 
 if ! mkdir $LOCK 2>/dev/null; then echo "QUEUE BUSY: $(cat $LOCK/who 2>/dev/null)"; exit 3; fi
 trap 'rm -rf $LOCK' EXIT
@@ -28,10 +33,16 @@ ncheck=$(gh pr view $PR -R $REPO --json statusCheckRollup --jq '[.statusCheckRol
 rc=$(gh api repos/$REPO/issues/$PR/comments --paginate --jq '[.[]|select(.user.login|test("codex"))]|.[-1].body' | grep -oE 'Reviewed commit:\*\* `[0-9a-f]+' | grep -oE '[0-9a-f]+$' | tail -1)
 if ! { [ -n "$rc" ] && [[ "$H" == $rc* ]]; }; then
   # Owner 2026-11-11 "同意临时审查" (MASTER_PLAN 2.1): while the Codex bot is out of quota, an independent
-  # Claude review comment that names this exact head (first 9 chars) and passes counts as the review.
-  ir=$(gh api repos/$REPO/issues/$PR/comments --paginate --jq '[.[]|select(.body|test("独立审查"))|select(.body|test("'"${H:0:9}"'"))|select(.body|test("需修改")|not)|select(.body|test("通过"))|select(.body|test("Validation handoff")|not)|select(.body|test("还没做")|not)]|length')
-  [ "${ir:-0}" -gt 0 ] || fail "no bot or independent review covers this version ${H:0:9} (bot reviewed: ${rc:-none})"
-  echo "review: independent Claude review covers ${H:0:9} (temporary, Owner 2026-11-11)"
+  # independent review with an exact full-commit passing receipt counts as the review.
+  review_file=$(mktemp "$T/independent-review.XXXXXX")
+  gh api repos/$REPO/issues/$PR/comments --paginate --slurp --jq 'add' > "$review_file"
+  if ! node "$T/structure-check/scripts/controller-review.mjs" "$H" "$review_file"; then
+    rm -f "$review_file"
+    fail "no explicit passing independent review receipt covers this version (bot reviewed: ${rc:-none})"
+  fi
+  rm -f "$review_file"
+  echo "review: explicit independent review receipt covers $H"
+
 fi
 open=$(gh api graphql -F n=$PR -f query='query($n:Int!){repository(owner:"Crnobog9527",name:"GraylumAI_vercel"){pullRequest(number:$n){reviewThreads(first:100){nodes{isResolved}}}}}' --jq '[.data.repository.pullRequest.reviewThreads.nodes[]|select(.isResolved|not)]|length')
 [ "$open" = "0" ] || fail "$open unresolved review threads"
@@ -71,11 +82,6 @@ node "$CHECKER" compare-staging $M/before.json $M/stg.json > $M/before-compare.j
 echo "--- this PR changes:"
 git -C "$R" diff origin/staging $H -- packages/db/tests/baseline/built-fingerprint.json
 
-RISK='turn_open|turn_close|turn_call_|turn_user_charge|turn_resume|atomic_|credit|bill2_|payment|stripe|waffo|refund|subscription|account_erasure|content_erasure|erasure_ledger'
-hit=$(grep -oiE "(CREATE OR REPLACE FUNCTION|ALTER TABLE|DROP)[^(;]*($RISK)[a-z_]*" $M/$N.sql | sort -u | head -8 || true)
-if [ -n "$hit" ] && [ "$MIG_REVIEWED" != "1" ]; then
-  echo "NEEDS CONTROLLER (billing, core or erasure):"; echo "$hit"; exit 7
-fi
 [ "$MODE" = "--check" ] && { echo "ALL GATES PASSED, not applied"; exit 0; }
 
 first=$(basename "$files[-1]" .sql)

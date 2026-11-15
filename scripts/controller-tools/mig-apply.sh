@@ -1,6 +1,7 @@
 #!/bin/zsh
 # usage: mig-apply.sh <num> <pr> <head-sha> <migration-name-without-.sql>
 set -e
+[ "$MIG_REVIEWED" = "1" ] || { echo CONTROLLER_CONFIRMATION_REQUIRED; exit 2; }
 N=$1; PR=$2; H=$3; NAME=$4
 T=~/.graylum/controller-tools; M=$T/m$N; cd $T
 CHECKER="$T/structure-check/scripts/staging-structure.mjs"
