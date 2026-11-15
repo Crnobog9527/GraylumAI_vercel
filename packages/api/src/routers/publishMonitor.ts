@@ -14,6 +14,7 @@ import { addAccountInput, addBrandAccount } from '../services/publishMonitor/acc
 import { readTrend } from '../services/publishMonitor/trend';
 import { importManualRows, manualImportInput } from '../services/publishMonitor/manualImport';
 import { requirePostForMeDeps } from '../services/publishMonitor/secrets';
+import { manualTikhubRead } from '../services/publishMonitor/tikhubManual';
 import {
   addBenchmark, benchmarkAddInput, connectOwnTikhub, tikhubConnectInput,
 } from '../services/publishMonitor/tikhub';
@@ -73,6 +74,11 @@ export const publishMonitorRouter = router({
   refresh: protectedProcedure.input(refreshInput).mutation(({ ctx, input }) => safe(ctx, async () => {
     const days = await dataWindow(ctx);
     return manualRefresh(ctx.supabaseAdmin, await requirePostForMeDeps(ctx.supabaseAdmin), ctx.profileId, days, input);
+  })),
+  // VOICE-2 (Owner 2026-11-14): 「从我的账号导入」's "读取最新帖子" — one billed TikHub read of an own account, once an hour.
+  readTikhub: protectedProcedure.input(refreshInput).mutation(({ ctx, input }) => safe(ctx, async () => {
+    await dataWindow(ctx);
+    return manualTikhubRead(ctx.supabaseAdmin, {}, ctx.profileId, input);
   })),
   // PR-3b: rows the user confirmed from a table export or typed next to a post link (Pro/Gold, plan §11 item 5).
   manualImport: protectedProcedure.input(manualImportInput).mutation(({ ctx, input }) => safe(ctx, async () => {
