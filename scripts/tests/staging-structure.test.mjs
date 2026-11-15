@@ -135,7 +135,7 @@ esac
     writeFileSync(join(temp, 'sb/supabase/.temp/project-ref'), 'wrong-project');
     r = run('valid.json', 'valid.json'); assert.notEqual(r.status, 0); assert.equal(r.effects, '');
     const go = readFileSync(join(temp, 'mig-go.sh'), 'utf8');
-    assert.doesNotMatch(go, /PLATFORM=|grep -vE|ALLOW_EXTRA=|RISK=/);
+    assert.doesNotMatch(go, /PLATFORM=|grep -vE|ALLOW_EXTRA=|RISK=|--slurp.*--jq/);
     assert.match(go, /MODE=\$\{2:---check\}/);
     assert.match(go, /--apply\) \[ \"\$MIG_REVIEWED\" = \"1\" \]/);
     assert.match(go, /compare-staging \$M\/before.json \$M\/stg.json/);

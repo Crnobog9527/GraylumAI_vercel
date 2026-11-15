@@ -35,7 +35,7 @@ if ! { [ -n "$rc" ] && [[ "$H" == $rc* ]]; }; then
   # Owner 2026-11-11 "同意临时审查" (MASTER_PLAN 2.1): while the Codex bot is out of quota, an independent
   # independent review with an exact full-commit passing receipt counts as the review.
   review_file=$(mktemp "$T/independent-review.XXXXXX")
-  gh api repos/$REPO/issues/$PR/comments --paginate --slurp --jq 'add' > "$review_file"
+  gh api repos/$REPO/issues/$PR/comments --paginate --slurp > "$review_file"
   if ! node "$T/structure-check/scripts/controller-review.mjs" "$H" "$review_file"; then
     rm -f "$review_file"
     fail "no explicit passing independent review receipt covers this version (bot reviewed: ${rc:-none})"

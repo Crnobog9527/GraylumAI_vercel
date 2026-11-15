@@ -5,7 +5,9 @@ import { fileURLToPath } from 'node:url';
 // Human-readable prose (especially "未通过") is not an approval. Only an explicit final receipt counts.
 export function independentReviewPassed(comments, head) {
   if (!/^[a-f0-9]{40}$/.test(head) || !Array.isArray(comments)) return false;
-  const relevant = comments.filter(comment => typeof comment.body === 'string'
+  const items = comments.flat();
+  if (items.some(comment => !comment || typeof comment !== 'object' || Array.isArray(comment))) return false;
+  const relevant = items.filter(comment => typeof comment.body === 'string'
     && comment.body.includes('独立审查') && comment.body.includes(head.slice(0, 9)));
   const body = relevant.at(-1)?.body ?? '';
   if (/未通过|不通过|需修改|拒绝|阻塞项\s*[:：]?\s*[1-9]/.test(body)) return false;

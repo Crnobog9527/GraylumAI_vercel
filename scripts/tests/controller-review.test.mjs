@@ -8,6 +8,9 @@ const check = (...bodies) => independentReviewPassed(bodies.map(body => ({ body 
 
 test('accepts one explicit full-commit passing independent receipt', () => {
   assert.equal(check(pass), true);
+  assert.equal(independentReviewPassed([[{ body: pass }]], head), true);
+  assert.equal(independentReviewPassed([[{ body: pass }], [{ body: `独立审查 ${head} 未通过` }]], head), false);
+  assert.equal(independentReviewPassed([null], head), false);
   assert.equal(check(pass, '一般说明，不是审查'), true);
 });
 for (const body of [
