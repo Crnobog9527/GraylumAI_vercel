@@ -57,16 +57,20 @@ export function parseVoiceDocuments(answer: string, material: VoiceMaterial[]): 
   // Which document an entry is, as the model named it (staging 11-14 saw all three): its number (1), the number as text ("1",
   // "文件 1"), or its file name ("notes.md"). When no entry could be placed that way and there is one per document, their order.
   const byFile = new Map<number, Item>();
+  let invalidNumber = false;
   const names = material.map(doc => doc.filename?.trim() ?? null);
   for (const item of items) {
     if (!item || typeof item !== 'object') continue;
     const file = (item as { file?: unknown }).file;
     const text = typeof file === 'string' ? file.trim() : '';
-    const number = typeof file === 'number' ? file : /^(?:文件\s*)?\d{1,4}$/.test(text) ? Number(text.replace(/\D/g, ''))
+    const numeric = typeof file === 'number' || /^(?:文件\s*)?[+-]?\d+(?:\.\d+)?$/.test(text);
+    const number = typeof file === 'number' ? file : numeric ? Number(text.replace(/^文件\s*/, ''))
       : text && names.includes(text) ? names.indexOf(text) + 1 : NaN;
+    if (numeric && (!Number.isInteger(number) || number < 1 || number > material.length)) invalidNumber = true;
     if (Number.isInteger(number) && number >= 1 && number <= material.length && !byFile.has(number)) byFile.set(number, item as Item);
   }
-  if (!byFile.size && items.length === material.length && items.every(item => item && typeof item === 'object')) {
+  // An explicit invalid number is not an absent identifier: do not turn it into a different document by position.
+  if (!invalidNumber && !byFile.size && items.length === material.length && items.every(item => item && typeof item === 'object')) {
     items.forEach((item, index) => byFile.set(index + 1, item as Item));
   }
   return capVoiceDocuments(material.map((doc, index) => {
