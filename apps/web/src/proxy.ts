@@ -91,12 +91,6 @@ function isSentryTunnelPath(pathname: string): boolean {
   return pathname === SENTRY_TUNNEL_PATH || pathname.startsWith(`${SENTRY_TUNNEL_PATH}/`);
 }
 
-// A response other than the session response keeps the cookies a session refresh just wrote.
-function withSessionCookies(response: NextResponse, sessionResponse: NextResponse): NextResponse {
-  sessionResponse.cookies.getAll().forEach(cookie => response.cookies.set(cookie));
-  return response;
-}
-
 function createPublicPricingRedirect(request: NextRequest): NextResponse {
   // The public pricing page (PAYWALL); query parameters such as ?domain=www are kept.
   return NextResponse.redirect(new URL(`/pricing${request.nextUrl.search}`, request.url));
@@ -354,13 +348,6 @@ async function routeRequest(request: NextRequest): Promise<NextResponse> {
 
   if (isPublicPricingEntryPath(pathname)) {
     return createPublicPricingRedirect(request);
-  }
-
-  // The root is the public home page, served from /landing (whose own address 308s back to "/").
-  if (pathname === '/') {
-    const url = request.nextUrl.clone();
-    url.pathname = '/landing';
-    return withSessionCookies(NextResponse.rewrite(url, { request }), supabaseResponse);
   }
 
   if (maintenanceModeEnabled && isAdminUser && pathname === '/maintenance') {
