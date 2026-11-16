@@ -183,6 +183,8 @@ try {
   await c.query(migration); await c.query(migration);
   // PUBLISH-SCHEDULE redefines publish_monitor_publish_record after 0504: replay it too, as the live chain does.
   await c.query(read(scheduleMigrationPath()));
+  // 0550 supersedes 0504's catalog function; replay it before comparing the live chain.
+  await c.query(read('packages/db/migrations/0550_membership_catalog_entitlements.sql'));
   assert.deepEqual(await grants(), before);
   for (const [fn, text] of definitions) assert.equal(await v(`SELECT pg_get_functiondef(p.oid) v FROM pg_proc p
     JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname=$1`, [fn]), text, fn);

@@ -80,8 +80,8 @@ DECLARE plan uuid; saved jsonb; failed boolean; i integer;
 BEGIN
   SELECT id INTO plan FROM membership_plans WHERE level='gold';
   IF plan IS NULL THEN
-    INSERT INTO membership_plans(name,level,monthly_price,yearly_price)
-      VALUES('Gold fixture','gold',9900,99000) RETURNING id INTO plan;
+    INSERT INTO membership_plans(name,level,monthly_price,yearly_price,allow_fusion_review,allow_fusion_compare,library_storage_bytes)
+      VALUES('Gold fixture','gold',9900,99000,true,true,2000000000) RETURNING id INTO plan;
   END IF;
   SET LOCAL ROLE service_role;
   saved:=pay_common_save_catalog('membership_plan',plan,
