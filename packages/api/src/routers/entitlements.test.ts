@@ -68,6 +68,21 @@ describe('ENTITLEMENTS APIs with real tRPC authentication middleware', () => {
     })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
     expect(f.rows.membership_plans![1]!.positioning_profile_limit).toBe(5);
   });
+  it('saves the combined admin editor entitlements and rejects out-of-range caps', async () => {
+    const f = fixture(); f.rows.profiles![0]!.role = 'admin';
+    const caller = adminRouter.createCaller(f.context);
+    const input = { id: planIds.pro, allowFusionReview: false, allowFusionCompare: true,
+      libraryStorageBytes: 123, positioningProfileLimit: 1000, allowExport: 'true' as const,
+      allowBatchExport: 'false' as const };
+    await expect(caller.updateMembershipPlan(input)).resolves.toMatchObject({
+      positioning_profile_limit: 1000, allow_fusion_review: false, allow_fusion_compare: true,
+      library_storage_bytes: 123, allow_export: 'true', allow_batch_export: 'false',
+    });
+    for (const positioningProfileLimit of [0, 1001, 1.5]) {
+      await expect(caller.updateMembershipPlan({ ...input, positioningProfileLimit }))
+        .rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    }
+  });
   it('requires explicit entitlements on actual tier change; same-tier legacy edits stay compatible', async () => {
     const f = fixture(); f.rows.profiles![0]!.role = 'admin';
     const caller = adminRouter.createCaller(f.context);

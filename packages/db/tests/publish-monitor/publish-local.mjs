@@ -89,6 +89,7 @@ try {
   await c.query(read(priceMigrationPath));
   await c.query(refusalsMigration()); // the publish-job refusals answer PT409 (0274 replays them with 40001)
   await c.query(read(scheduleMigrationPath())); // PUBLISH-SCHEDULE redefines the view, close, record and webhook result
+  await c.query(read('packages/db/migrations/0550_membership_catalog_entitlements.sql')); // restore the later catalog definition
   assert.deepEqual(await v(catalogSql), before);
   report.checks.push('0274 and the site-wide price migration run twice with an unchanged catalog');
   // The global BILL-UNIT rows (Owner 2026-10-01: q=100, formal m=6); publishing follows them.

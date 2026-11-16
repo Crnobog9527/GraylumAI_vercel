@@ -18,7 +18,7 @@ export function generateMetadata() {
 }
 
 /**
- * The public Simplified home page, served at "/" (the proxy rewrites the root here and /landing 308s to "/" since the
+ * The public Simplified home page, served at "/" (/landing 308s to "/" since the
  * /app move, SEO_GEO_SPEC section 15); canonical is "/". Owner 2026-10-17: "样稿 L 验收后，正式 /landing 整体换成样稿 L，冻结前完成" — the page
  * is sample L (components/landing/preview-l) in its production mode: no sample switcher, header and footer link only
  * pages that exist. Title, description, canonical, robots (buildPageMetadata), the structured data and the hourly
@@ -37,7 +37,7 @@ export default async function LandingPage() {
   const faqItems = data.faqItems.map(item => ({ ...item, answer: rewordFaq(item.answer) }));
 
   return (
-    <div lang={SITE_LOCALES['zh-Hans'].htmlLang}>
+    <div className="min-h-screen bg-[#0A0A0A]" lang={SITE_LOCALES['zh-Hans'].htmlLang}>
       <JsonLd data={[
         softwareApplicationJsonLd({ description: HOME_DESCRIPTION, offers: data.offerList }),
         ...(faqItems.length > 0 ? [faqPageJsonLd(faqItems)] : []),
