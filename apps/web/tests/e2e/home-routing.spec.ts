@@ -25,13 +25,13 @@ test('canonical home, callback and protected routes over HTTP', async ({ request
   expect(rscResult.headers()['content-type']).toContain('text/x-component');
   const callback = await request.get('/?code=example&source=test', { maxRedirects: 0 });
   expect(callback.status()).toBe(307);
-  expect(new URL(callback.headers().location).pathname).toBe('/auth/callback');
+  expect(new URL(callback.headers().location, callback.url()).pathname).toBe('/auth/callback');
   const error = await request.get('/?error=access_denied', { maxRedirects: 0 });
   expect(error.status()).toBe(307);
-  expect(new URL(error.headers().location).pathname).toBe('/login');
+  expect(new URL(error.headers().location, error.url()).pathname).toBe('/login');
   const protectedPage = await request.get('/app/profile?tab=security', { maxRedirects: 0 });
   expect(protectedPage.status()).toBe(307);
-  expect(new URL(protectedPage.headers().location).searchParams.get('redirect')).toBe('/app/profile?tab=security');
+  expect(new URL(protectedPage.headers().location, protectedPage.url()).searchParams.get('redirect')).toBe('/app/profile?tab=security');
 });
 
 test('anonymous home renders at its canonical URL', async ({ page }) => {
