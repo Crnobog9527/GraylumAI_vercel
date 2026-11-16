@@ -51,6 +51,7 @@ export const createTRPCContext = async (opts: {
   supabaseAuth?: ApiSupabaseClient | null;
   /** Runs work after the response (Next after(), Vercel waitUntil); absent outside a route handler. */
   scheduleAfter?: (task: () => Promise<unknown>) => void;
+  refreshPublicSite?: () => void;
   /** This deployment's origin, for internal relays (FUSION-BACKGROUND). */
   origin?: string;
 }) => {

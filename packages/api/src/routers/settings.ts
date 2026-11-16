@@ -317,7 +317,6 @@ export const settingsRouter = router({
     return result;
   }),
 
-  // Admin only: Update system settings
   updateSystemSettings: adminProcedure
     .input(systemSettingInputSchema)
     .mutation(async ({ ctx, input }) => {
@@ -333,6 +332,7 @@ export const settingsRouter = router({
       if (error) {
         throwSettingsWriteError(error, '更新系统设置失败，请稍后重试');
       }
+      if (input.key === 'site_name' || input.key === 'support_email') ctx.refreshPublicSite?.();
       return data;
     }),
 
@@ -351,7 +351,7 @@ export const settingsRouter = router({
       if (error) {
         throwSettingsWriteError(error, '批量更新系统设置失败，请稍后重试');
       }
-
+      if (input.some(({ key }) => key === 'site_name' || key === 'support_email')) ctx.refreshPublicSite?.();
       return data;
     }),
 
