@@ -1,0 +1,43 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { test, expect } from '@playwright/test';
+import { authStatePaths } from './support/auth';
+
+test('canonical home, callback and protected routes over HTTP', async ({ request }) => {
+  const old = await request.get('/landing?domain=www&source=test', { maxRedirects: 0 });
+  expect(old.status()).toBe(308);
+  const target = new URL(old.headers().location, old.url());
+  expect(target.pathname).toBe('/');
+  expect(target.searchParams.get('domain')).toBe('www');
+  expect(target.searchParams.get('source')).toBe('test');
+  const home = await request.get(target.toString(), { maxRedirects: 0 });
+  expect(home.status()).toBe(200);
+  const rsc = await request.get('/?_rsc=route-test', {
+    maxRedirects: 0, headers: { RSC: '1', 'Next-Router-Prefetch': '1' },
+  });
+  expect(rsc.status()).toBe(200);
+  const callback = await request.get('/?code=example&source=test', { maxRedirects: 0 });
+  expect(callback.status()).toBe(307);
+  expect(new URL(callback.headers().location).pathname).toBe('/auth/callback');
+  const error = await request.get('/?error=access_denied', { maxRedirects: 0 });
+  expect(error.status()).toBe(307);
+  expect(new URL(error.headers().location).pathname).toBe('/login');
+  const protectedPage = await request.get('/app/profile?tab=security', { maxRedirects: 0 });
+  expect(protectedPage.status()).toBe(307);
+  expect(new URL(protectedPage.headers().location).searchParams.get('redirect')).toBe('/app/profile?tab=security');
+});
+
+test('anonymous home renders at its canonical URL', async ({ page }) => {
+  await page.goto('/landing?domain=www&source=test');
+  await expect(page).toHaveURL(/\/\?domain=www&source=test/);
+  await expect(page.getByRole('link', { name: '免费和教练聊聊' }).first()).toBeVisible();
+  await expect(page.locator('div.min-h-screen').first()).toHaveCSS('background-color', 'rgb(10, 10, 10)');
+});
+
+test.describe('signed-in visitor', () => {
+  test.use({ storageState: authStatePaths.user });
+  test('home remains available without a redirect loop', async ({ page }) => {
+    await page.goto('/?domain=www');
+    await expect(page).toHaveURL(/\/\?domain=www/);
+    await expect(page.getByRole('link', { name: '免费和教练聊聊' }).first()).toBeVisible();
+  });
+});
