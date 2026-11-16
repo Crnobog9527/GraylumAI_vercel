@@ -43,10 +43,10 @@
 | 11 | ★ 批准 → 总控 | **从迁移文件建库**：平台前置 → `packages/db/baseline`（0000）→ 全部迁移到冻结版本的最后一个号（含 V2-12 批次 F（0505 已于 2026-11-04 晚上 staging；原写的 0495 作废，0495、0498 两个空号不补）；2026-11-05 目录里最后一个有号的是 0507：0497–0504 是作品复盘、复盘结算标签、对话截图诊断存储和拒绝不再被 PostgREST 重跑的改动，0506 是会员专享 Skill 的等级列（#1739），0507 是刷新后保留步骤列表（#1752），**都不需要额外配置**；#1762 的导师步骤迁移已改名为 `0508_mentor_turn_steps_history.sql`（2026-11-06），之后的新迁移从 0509 起，回放时按目录里实际有的文件逐个来，并重核号码是否连续、没有 9999 之类的占位名漏进正式库；每个文件整段交服务端执行，不用 `psql -f`。**走逐个迁移回放**：Master Plan 第 2.1 节 2026-10-25 BASELINE-SQUASH 只规定"起点建库、逐个迁移建库、staging 指纹三方逐对象一致才用干净起点，不一致就退回旧方式"，所以直接按顺序回放全部迁移就满足那条决定，不需要先做干净起点；若冻结前干净起点已做好且三方一致，才可改用 | 只读抓指纹，和 `built-fingerprint`、`expected-differences.json` 比对，没有解释不了的差异 | B1 |
 | 12 | ★ 批准 → 总控 | **正式库标记**：`runtime_environment="production"`（绝不在 staging 写） | `runtime_production_database()` 为 true；测试窗口为 0 | B2 |
 | 13 | ★ 批准 → 总控 | **模型导入**：Sonnet 5.5、Gemini 3.8 Flash、GPT-6.1 Sol、Opus 5.5、Gemini 4 Argon、GPT-6 Luna 共 6 个（Qwen 不导入，见第 4 部分问题 8）；用 SQL 写 `ai_models` 行（不含密钥，staging 种子也是这样导入的；若实际只能经后台导入，则第 13–15 步整体挪到第 30b 步之后）；价格不从 staging 抄、连接测试记录也不抄（"读取价格"要用后台，挪到第 30c 步）；Sol、Opus 加低思考档；输出上限 32768 | 后台模型页读回；记下 6 个正式 uuid | B3、B7 |
-| 14 | ★ 批准 → 总控 | **Skill 导入**：从私密仓库 `graylum-skills` 导入定位、写作、评审团评审（内部）、运营教练复盘的 Skill 和模块，**全部保持未发布**；评审团内部 Skill 记下 uuid（第 15 步要填）。运营教练复盘包（Skill 名 `review-coach`）要导入**冻结时的最新版本**（2026-11-05 已发到 **v4**，staging 上这一版的发布版本号（revision）是 `167035dd-f1f3-4327-a904-5f1574d19b43`，包哈希以 `ec8b8762` 开头（完整值以总控记录和后台读回为准）；**仓库里的 `file-hashes.json` 目前还是 v3 的内容（2026-11-05 查，`SKILL.md` 哈希 687d623f…），v4 的逐文件哈希还没进仓库——建库日前要先补上，否则“逐文件哈希必须等于该清单”这条核对没有依据**；v3 比早先多了 `SKILL.md` 里请用户发截图的几行，v4 的差异以私密仓库为准；清单内容：`SKILL.md` 正文就是教练方法、`workflow.yaml`、`handbook/douyin.yaml`、`handbook/tiktok.yaml`；原文只在私密仓库，公开仓库只有 `docs/skill-candidates/review-coach-handbook/file-hashes.json` 的哈希清单），导入后逐文件哈希必须等于该清单；这一步只导入，发布和写环境变量在第 30e、30e1 步 | 后台 Skill 版本读回，状态都是未发布 | B3 |
-| 15 | ★ 批准 → 总控 | **非密钥配置种子**：复制 [production_non_secret_baseline.sql](../../../packages/db/seeds/production_non_secret_baseline.sql) 到本机私密副本（不进仓库），填 7 个占位：冻结版本的 `runtime_purpose_budgets` 和 `billing_payg_start_thresholds`、`fusion_settings` 里的正式模型和 Skill uuid 与评审预算、`primary_model_id`、`v3_summary_model_id`、`publish_monitor_review_model_id`、第 4 步 Post for Me 的条数和续期时间；整个文件作为一条 SQL 交服务端执行。还有一个占位没填、标记不对、模型 uuid 不对、价格和已有付款映射冲突，都会整段失败、一行不写。写入 21 个设置（含 9 个发布平台、运营教练复盘开、复盘上限 1 美元）、3 档套餐、3 个积分包；可以重复执行 | 第 2 部分逐项读回 | B3、B7 |
+| 14 | ★ 批准 → 总控 | **Skill 导入**：从私密仓库 `graylum-skills` 导入定位、写作、评审团评审（内部）、运营教练复盘的 Skill 和模块，**全部保持未发布**；评审团内部 Skill 记下 uuid（第 15 步要填）。运营教练复盘包（Skill 名 `review-coach`）要导入**冻结时的最新版本**（2026-11-05 已发到 **v4**，staging 上这一版的发布版本号（revision）是 `167035dd-f1f3-4327-a904-5f1574d19b43`，包哈希以 `ec8b8762` 开头（完整值以总控记录和后台读回为准）；#1777 已更新公开仓库的 v4 逐文件哈希清单；建库时以冻结版本及私密源逐文件核对，包发布记录的 packageHash 不能代替逐文件哈希；清单内容：`SKILL.md` 正文就是教练方法、`workflow.yaml`、`handbook/douyin.yaml`、`handbook/tiktok.yaml`；原文只在私密仓库，公开仓库只有 `docs/skill-candidates/review-coach-handbook/file-hashes.json` 的哈希清单），导入后逐文件哈希必须等于该清单；这一步只导入，发布和写环境变量在第 30e、30e1 步 | 后台 Skill 版本读回，状态都是未发布 | B3 |
+| 15 | ★ 批准 → 总控 | **非密钥配置种子**：复制 [production_non_secret_baseline.sql](../../../packages/db/seeds/production_non_secret_baseline.sql) 到本机私密副本（不进仓库），填 7 个占位：冻结版本的 `runtime_purpose_budgets` 和 `billing_payg_start_thresholds`、`fusion_settings` 里的正式模型和 Skill uuid 与评审预算、`primary_model_id`、`v3_summary_model_id`、`publish_monitor_review_model_id`、第 4 步 Post for Me 的条数和续期时间；按下方四项取帖门槛清单补齐并核对，不把种子必填占位当作已经缺值；整个文件作为一条 SQL 交服务端执行。还有一个占位没填、标记不对、模型 uuid 不对、价格和已有付款映射冲突，都会整段失败、一行不写。写入 21 个设置（含 9 个发布平台、运营教练复盘开、复盘上限 1 美元）、3 档套餐、3 个积分包；可以重复执行 | 第 2 部分逐项读回 | B3、B7 |
 | 16 | — | （已挪到第 30e 步：发布 Skill 要用后台，站点要先部署） | — | B3a |
-| 17 | ★ 批准 → 总控 | **主路径设置**（B12，种子里故意不写）：按"第 8 步连接池 → `core_path_v2.stopLoss` 的 `poolSize`＝`p` → 日限 `limitUsd`"的顺序写 `core_path_v2`（含 `uFastUsd`、`uBigUsd`、`decisionUpperUsd`），再写准入档案：`runtime_payg`（主路径回合报价读它）**和** `runtime_payg_production`（今天的准入配置仍读它，staging 对应的是 `runtime_payg_staging`；V2-12 #1645 合并后旧键才不再有人读，到时按当天代码重核）两份（6 个模型、9 个用途，评审第三位 Gemini 4 Argon；**两份里对话模型 Claude Sonnet 5.5 的档案都必须带 `"imageInput": {"maxDataUrlBytes": 819223, "maxEdge": 2048}`**，否则自由对话附图（#1702）在正式站会提示"当前模型不支持看图"），`runtime_rw_v2` 写 `{"catalogCache":true}`。**冻结版本按 V2-12 批次 F 已上库的形状准备**（总控 2026-11-04 晚定，只备这一种）：F 会删 `core_path_v2.enabled`、`runtime_rw_v2` 和 `runtime_payg_production`，建库日以冻结当天 staging 的读回值和代码为准，不再写旧键。**正式环境取值（Owner 2026-11-05 已定，Master Plan 第 2.1 节，#1763；写入时仍要 Owner 当次批准）**：`stopLoss.limitUsd`＝300、`stopLoss.p`＝8、`stopLoss.poolSize`＝8（PostgREST 连接池也设 8，先于这一步设好）、`stopLoss.uFastUsd`＝3、`stopLoss.uBigUsd`＝5、`decisionUpperUsd`＝0.002；预留带 B＝(8−1)×3+5＝26 美元，300 ≥ 10×26＝260 满足要求；`limitUsd` 在 `stopLoss` 对象里，写到顶层会让整份配置解析失败；**这些值不在非密钥种子里**（种子故意不写 `core_path_v2`，见第 15 步），只在这一步写。**不写 `core_path_v2` 时所有对话回合都被拒（`TURN_CORE_DISABLED`）** | `poolSize`＝`p` ≥ 实际连接池；日限 ≥ 10×B（B＝(p−1)×uFastUsd＋uBigUsd） | B4、B12、3.0a |
+| 17 | ★ 批准 → 总控 | **主路径设置**（B12，种子里故意不写）：按"第 8 步连接池 → `core_path_v2.stopLoss` 的 `poolSize`＝`p` → 日限 `limitUsd`"的顺序写 `core_path_v2`（含 `uFastUsd`、`uBigUsd`、`decisionUpperUsd`），再按冻结版 `services/turn/settingKeys.ts` 和 schema 写 `runtime_payg` 模型及用途档案，逐用途核对，包括 `attached_organizer`；对话模型档案需带 `"imageInput": {"maxDataUrlBytes": 819223, "maxEdge": 2048}`。0505 后不写旧键 `runtime_payg_production`、`runtime_rw_v2`，也不写 `core_path_v2.enabled`。**正式环境取值（Owner 2026-11-05 已定，Master Plan 第 2.1 节，#1763；写入时仍要 Owner 当次批准）**：`stopLoss.limitUsd`＝300、`stopLoss.p`＝8、`stopLoss.poolSize`＝8（PostgREST 连接池也设 8，先于这一步设好）、`stopLoss.uFastUsd`＝3、`stopLoss.uBigUsd`＝5、`decisionUpperUsd`＝0.002；预留带 B＝(8−1)×3+5＝26 美元，300 ≥ 10×26＝260 满足要求；`limitUsd` 在 `stopLoss` 对象里，写到顶层会让整份配置解析失败；**这些值不在非密钥种子里**（种子故意不写 `core_path_v2`，见第 15 步），只在这一步写。**不写 `core_path_v2` 时所有对话回合都被拒（`TURN_CORE_DISABLED`）** | `poolSize`＝`p` ≥ 实际连接池；日限 ≥ 10×B（B＝(p−1)×uFastUsd＋uBigUsd） | B4、B12、3.0a |
 | 18 | ★ 批准 → 总控 | **付款配置**：`payment_terms_version`＝`{"version":"<已发布版本>"}`；第 3 步审核过的 Stripe 绑定 SQL 写进 `payment_provider_refs`（每个套餐／积分包／方式／周期恰好一条当前 live 映射）；`launch_baseline_at`；钱包 `annualVerified=true`；**四条付款路由保持关** | 逐个读回；会员页 `termsVersion` 不为空 | B5 |
 | 19 | ★ 批准 → 总控 | **限流**：`runtime_rate_limits` 初始值，`stopNewCalls`＝开（10-24 的数字在主路径重做后是否适用，按当天 staging 读回对照） | 读回 | B6 |
 | 20 | ★ 批准 → 总控 | **种子之外的功能配置（只写库的部分）**：写作 Skill 的 `modules.uses_user_voice`；`model_identity_guard` 不写（缺省开）。`research_tools_config` 的 `hardCapAttested` 要正式管理员在后台勾，挪到第 30d 步；`publish_monitor_publish_listed` 在一键发布验收通过后才开；`publish_monitor_orphan_sweep_delete` 在第 4 步独占项目确认后才开 | B8 差异表 | B7 |
@@ -73,14 +73,14 @@
 | 30 | ★ Owner 做 | 域名：先撤 www→app 的 307，再把 `graylum.com` 改回 308→www；生成冒烟专用的回调绕过口令，只加在 Stripe 和 Post for Me 回调上；验证通过后放 `app.graylum.com`→www 的 308 | 没有链式跳转；Stripe 测试事件成功、错误签名 400 | S-2–S-4 |
 | 30a | ★ Owner 注册 → ★ 批准 → 总控 | **管理员**：站点已部署并恢复（第 28、29 步），在受保护访问下 Owner 在新库注册自己的管理员账号，总控授予管理员角色 | 管理员能进后台、普通账号被拒 | B10 |
 | 30b | ★ Owner 做 | **后台密钥槽**：`openrouter`、`postforme`、`postforme_webhook`（至少 16 位，末 4 位和 Post for Me 一致）、`tikhub`、`parallel`、`firecrawl`、`resend`；`support_email` 填**可以公开**的客服邮箱（会显示在公开页面）；后台"成本止损"页填每用户每日、全站每日、告警线、供应商余额提醒线（空着就一封告警都不发） | 槽位显示"已填写"；止损页读回 | B11、P4 |
-| 30c | ★ 批准 → 总控 | **读取价格**：`openrouter` 槽已填后，在后台模型页给第 13 步导入的 6 个模型点"读取价格"；读回价格行；`billing_payg_start_thresholds` 的冻结值与读到的价格核对 | 后台模型页价格读回 | B3 |
+| 30c | ★ 批准 → 总控 | **读取价格**：`openrouter` 槽已填后，在后台模型页给第 13 步导入的 6 个模型点"读取价格"；读回价格行；`billing_payg_start_thresholds` 按下方四项清单及其他已启用用途逐一与有效价格核对 | 后台模型页价格读回 | B3 |
 | 30d | ★ Owner 做（正式管理员） | `research_tools_config` 三家 `enabled`，`hardCapAttested` 由**正式管理员**在后台重新勾（第 5 步设好各家上限之后）；TikHub 价格手工刷新留到冒烟 K12 | 后台研究工具页读回 | B7 |
 | 30e | ★ 批准（Owner 看样例） | **首批创作 Skill 正式发布**：Owner 看过样例后对具体 Skill 和版本单独确认，才在正式库发布；运营教练复盘 Skill（`review-coach`，冻结时清单里的最新版本）同样要 Owner 定稿：它的 `SKILL.md` 正文就是教练方法，对话加载和每周复盘读同一份，所以不发布或发布错了，教练复盘都不能用。确认前保持未发布；它只会列给有作品窗口的会员（Pro/Gold），免费账号看不到 | Owner 原话；后台版本读回 | B3a |
 | 30e1 | ★ 批准 → 总控 + ★ Owner 做 | **运营教练复盘包接线**（30e 发布之后）：读回正式库里 `review-coach` 已发布版本（应是 v4 内容，对照第 14 步）的 Skill uuid、版本 uuid 和包哈希（`packageHash` 是正式库发布记录里的包哈希，要从后台／发布记录读，它不等于 `file-hashes.json` 里任何一个文件哈希，也不要求相等；内容核对是第 14 步导入时逐文件对清单，不是这一步），Owner 在 Vercel 正式环境设 `PUBLISH_MONITOR_HANDBOOK_PACKAGE`＝`{"skillId":"…","revisionId":"…","packageHash":"…"}`（三项都是正式库的值，不是 staging 的；这个 JSON 不算密钥，但不进仓库和 PR），再**重新部署**（环境变量只对新部署生效）。**没设、格式错、或指向没发布／已撤回的版本时，带品牌的每周复盘直接等待（不开账、不扣费、过一会儿再试，日志有固定码 `coach_method_unavailable`）；对话里的复盘不依赖这个变量，只要 Skill 已发布（第 30e 步）就能用**；抖音／TikTok 手册读不到时，那两个平台只按用户自己的数据诊断 | 重新部署之后：日志没有 `coach_method_unavailable`；冒烟 K7 的真实复盘能生成 | 本次新增（`coach/handbooks.ts`、`coach/method.ts`） |
 | 30f | 总控（★ 批准只读新库） | **全量核对**（B8）和安全核对（B9）：按第 2 部分逐项和当天 staging 对照，每个差异补上或写明不需要；Vault、两个资料库桶私有、存储表没有策略 | 差异表没有未处理项 | B8、B9 |
 | 31 | 总控 | **先查 `TURN_DATABASE_HOST`**：受控身份打开一次对话，`/api/turn` 不是 503 `TURN_DATABASE_MISMATCH`（缺了或和实际库不一致时**全部对话 503**）；再发一条消息，返回"新调用暂停"（不是 5xx） | 没有 `TURN_DATABASE_MISMATCH`；限流连上 Redis | S-5 |
 | 32 | ★ 批准（模型调用开放，单独一次批准） | 冒烟窗口内临时关 `stopNewCalls`，结束后立刻重新打开 | 读回 | S-6 |
-| 33 | ★ 批准（金额、次数、总预算） → 总控 | **冒烟**：K1 注册／开户 500／找回密码／Google 登录；K2 一次成功、一次拒绝、一次重复、回执对账；K3 定位第 1 步加一次对标；K4 @ 文档、写作 Skill、对话内研究；K5 文风；K6 Gold 评审团和对比各一次；K7 作品复盘页、运营教练复盘真实生成一次（第 30e1 步之后）、对话里说“帮我复盘”能读到已保存的复盘包（免费账号读不到）、在对话里用 + 发一张截图能读出数字（一条最多 4 张，图片不落库）、名单外平台被拒；K10 后台手动跑一次成本告警检查；K11 每日对账；K12 TikHub 价格手工刷新一次；K13 首字速度 20 次（不挡上线）。**不做 K8 真钱付款和 K9**（Owner 11-03：staging 付款链路全部测通即可，正式站不测） | 每项记录贴上线 PR | 4.1 |
+| 33 | ★ 批准（金额、次数、总预算） → 总控 | **冒烟**：K1 注册／开户 500／找回密码／Google 登录；K2 一次成功、一次拒绝、一次重复、回执对账；K3 定位第 1 步加一次对标；K4 @ 文档、写作 Skill、对话内研究；K5 文风；K6 Gold 评审团和对比各一次；K7 作品复盘页、运营教练复盘真实生成一次（第 30e1 步之后）、对话里说“帮我复盘”能读到已保存的复盘包（免费账号读不到）、在对话里用 + 发一张截图能读出数字（一条最多 4 张；对话照片随聊天长期保存，删除对话或注销时一并清理；另行核验私有桶、跨账号拒绝、回看及对象删除。周复盘截图读取数字的路径单独核验）、名单外平台被拒；K10 后台手动跑一次成本告警检查；K11 每日对账；K12 TikHub 价格手工刷新一次；K13 首字速度 20 次（不挡上线）。**不做 K8 真钱付款和 K9**（Owner 11-03：staging 付款链路全部测通即可，正式站不测） | 每项记录贴上线 PR | 4.1 |
 | 34 | ★ 批准（每次） | 一键发布：X、YouTube 各真实发布一次（Owner 在场授权账号） | 帖子在平台上可见，扣费 6 积分／平台 | 核心 10 ③ |
 | 35 | ★ 批准 | 打开四条付款路由（`card`、`card_cn`、`wechat_pay`、`alipay`），逐个读回；只开，不在正式站付真钱 | 结账页能建单（不付款） | S-6 |
 | 36 | 总控 + ★ Owner | **生产 Sentry 测试告警**：确认第 25 步的 `NEXT_PUBLIC_SENTRY_DSN` 已生效且 `SENTRY_ENVIRONMENT` 能分开正式和 staging；在 Sentry 正式项目对每条通知规则点"发送测试通知"，并手动触发一次"Runtime 成本与余额告警"检查（K10），确认 Owner 的邮箱／手机真的收到一条；**同一次检查会往 Graylum 飞书群发一条测试告警**（ALERT-FEISHU，第 24 步的两个飞书变量），Owner 确认群里收到、链接能打开正式后台。部署访问保护还开着时做。**Sentry 给 Owner 的邮件这时先不关**：正式站飞书群收到这条测试消息、再收到过一两条真实告警之后，由 Owner 自己去关 | Owner 回复收到（邮件和飞书各一条）；结果记在上线 PR | 第 3.2 节 |
@@ -119,7 +119,7 @@
 | `billing_credits_per_usd` | 字符串 | B3 | 必须写 | q=100（Owner 2026-10-01，BILL-UNIT）。staging 也是 100 |
 | `billing_token_price_multiplier` | 字符串 | B3 | 必须写 | **m=6**（Owner 2026-10-01）。**staging 是 3（测试专用），正式不复制** |
 | `runtime_purpose_budgets` | 字符串（内含 JSON：`report`、`organize`、`interactive`、`version`） | B3 | 必须写 | 按 B3 照 staging 结构写；数值以冻结版本的设计为准 |
-| `runtime_payg_staging` | 对象（`enabled`、`profiles` 6 条、`version`、`windowId`） | 对应 B4 | 正式不用 | **staging 专用，正式不复制**；正式写 `runtime_payg_production`（见 2.2 D） |
+| `runtime_payg_staging` | 对象（`enabled`、`profiles` 6 条、`version`、`windowId`） | 对应 B4 | 正式不用 | **staging 专用，正式不复制**；主路径使用 `runtime_payg`（见 2.2 E） |
 | `payment_terms_version` | 对象 `{version}` | B5 | 必须写 | 正式写已发布的条款版本；**staging 的值是测试版本号，正式不复制** |
 | `payment_method_routes` | 对象（`card`、`card_cn`、`wechat_pay`、`alipay`、`newPurchaseChannel`、`version`） | B5 / S-6 | 缺省走代码（新购买渠道缺省 stripe） | 建库日四条路由**关**，钱包 `annualVerified=true`；冒烟日 S-6 才打开。staging 四条全开，正式不复制 |
 | `payment_new_purchase_channel` | 对象 | B5（旧键） | 不需要 | 只剩后台旧面板读取，写不写不影响用户（REL-1 B5 已写明） |
@@ -130,7 +130,7 @@
 | `chat_research_tools_enabled` | 布尔 | B7 | 必须写 | 正式 true（核心 11） |
 | `research_tools_config` | 对象（`vendors` 三家、`verifiedPlatforms`、`benchmarkPlatforms`、`limits`、`routes`、`recentGrowth`、`revision` 等） | B7 | 必须写 | 三家 `enabled` 且 `hardCapAttested`（P4 设好硬上限后才勾）。**`hardCapAttested` 里记的是 staging 管理员和时间，正式不复制**，由正式管理员重新勾 |
 | `billing_provider_prices` | 字符串 | B7 | 迁移只建写入函数 | 正式：K12 手工刷新一次 TikHub 价格，之后靠每日刷新；不从 staging 复制（价格有 7 天有效期） |
-| `billing_payg_start_thresholds` | 对象（`thresholds`、`version`） | B7 | 必须写 | 照 staging 结构；数值以冻结版本设计为准 |
+| `billing_payg_start_thresholds` | 对象（`thresholds`、`version`） | B7 | 种子要求私密填入占位 | 按冻结版已定设计核查所有用途及下方四项；不复制测试数值，未确认不能通过 |
 | `library_agent_read_enabled`、`chat_library_retrieval_enabled`、`library_scan_recognition_enabled` | 布尔 | B7 | 必须写 | 正式 true（核心 4） |
 | `library_upload_enabled` | 布尔 | B7 | 迁移写入 false | 正式改 true |
 | `chat_my_posts_enabled` | 布尔 | B7 | 迁移写入 false | 正式 JSON 布尔 `true`（总控 2026-10-26 定：随作品复盘上线开放，Master Plan 2.1 Owner 10-26 决定）。staging 10-26 已改为 `true` 供验收 |
@@ -149,10 +149,10 @@
 | 键 | 类型 | 代码里谁读 | 空库建库后 | 结论 | 理由 |
 | --- | --- | --- | --- | --- | --- |
 | `runtime_report_generation` | 对象 `{enabled}` | 报告准入 `report_admission_check`：不等于 `{"enabled":true}` 就拒绝 `REPORT_DISABLED` | **没有**（没有迁移写入） | **正式要设** `{"enabled":true}` | 不设，定位报告（核心 1）在正式站全部被拒。staging 是 true |
-| `v3_summary_max_tokens` | 字符串 | 整理器输出上限（128–4096） | 缺省走代码 2048 | **待总控定** | staging 是 4096，缺省 2048；文风生成和整理都用整理器，**总控定（2026-11-04 晚，不算 Owner 决定）：正式写 4096** |
+| `v3_summary_max_tokens` | 字符串 | 整理器输出上限（128–4096） | 缺省走代码 2048 | **待总控定** | staging 是 4096，缺省 2048；文风生成和整理都用整理器，旧提议 4096 不是已批准决定；核对冻结代码和有效决定，未确认不得标为通过 |
 | `site_name` | 字符串 | 登录页、维护页、后台侧栏、公开页 | 缺省走代码 | **不需要**（或写正式站名） | staging 的值带"Staging"字样，**正式不复制**；不写时用代码里的站名 |
 | `maintenance_mode` | 字符串 | 入口和上传路由 | 缺省走代码（不维护） | 不需要 | staging 是 false，和缺省一样；需要时才打开 |
-| `max_input_characters` | 字符串 | 公开设置（给前端） | 缺省走代码 | 待总控定 | staging 是 10000；**总控定（2026-11-04 晚，不算 Owner 决定）：正式写 10000** |
+| `max_input_characters` | 字符串 | 公开设置（给前端） | 缺省走代码 | 待总控定 | staging 是 10000；旧提议不是已批准决定；核对冻结代码和有效决定，未确认不得标为通过 |
 | `home_show_onboarding`、`home_show_featured_modules`、`home_analysis_module_id` | 字符串 | 首页 | 缺省走代码（显示） | 不需要（`home_analysis_module_id` 待总控定） | 前两项 staging 和缺省一样；`home_analysis_module_id` 指向 staging 的模块 uuid，正式要么不写，要么写正式库定位模块的 uuid |
 | `fusion_compare_max_models` | 数字 | 对比上限 | 迁移写入 4 | 不需要 | 和 staging 一样 |
 | `report_fixed_price_credits` | 数字 | 报告固定价 | 迁移写入 500 | 不需要 | 和 Owner 决定的 500 积分固定价一致 |
@@ -179,20 +179,28 @@
 | `billing_platform_absorb_alert`、`billing_platform_absorb_ack` | 没有 = 后台"平台承担"提醒关闭 | **待总控定**：这是只在后台账务页显示的平台承担超额提醒（不发邮件、不进 Sentry）。staging 也没配；上线第一周观察平台承担时可以配一个阈值 |
 | `waffo_test_abuse_thresholds` | 5 | 不需要（Waffo 测试用） |
 
-**D. 正式库专有、staging 没有的键**（`runtime_payg_production` 今天仍被准入配置读取，要和 2.2 E 的 `runtime_payg` 一起写；V2-12 合并后旧键才取消）
+**D. 正式库专有标记**
 
 | 键 | 归属 | 备注 |
 | --- | --- | --- |
-| `runtime_environment` = `"production"` | B2 | 正式库标记，**绝不在 staging 写** |
-| `runtime_payg_production` | B4 | 结构同 staging 的 `runtime_payg_staging` 去掉 `windowId` 和到期日。staging 的 6 条档案用途合计正好 9 个（`skill`、`report`、`ordinary`、`skill_matching`、`fusion_review`、`fusion_compare`、`fusion_summary`、`organizer`、`attached_organizer`），和 B4"档案用途上限 9"一致；6 个模型：Gemini 3.8 Flash、Sonnet 5.5、GPT-6 Luna（整理）、GPT-6.1 Sol、Opus 5.5（汇总+对比）、Gemini 4 Argon（评审） |
+| `runtime_environment` = `"production"` | B2 | 正式库标记，绝不在 staging 写 |
 
-**E. 主路径重做（CORE-PATH-V2）后新增的键**（种子文件**故意不写**，建库日第 1 部分第 17 步单独写）
+**E. 主路径设置**（种子故意不写，第 17 步单独准备；冻结时复核代码和 schema）
 
-| 键 | 结构（今天代码） | 谁读 | 空库建库后 | 结论 |
-| --- | --- | --- | --- | --- |
-| `core_path_v2` | 对象 `{enabled, stopLoss:{limitUsd,p,poolSize,uFastUsd,uBigUsd}, decisionUpperUsd}`，严格校验（多一个字段也算无效） | 每个对话、导师、对比、评审团回合开轮前（`services/turn/chat.ts` `readCoreConfig`） | 没有 | **必须写**，否则所有回合 `TURN_CORE_DISABLED`。日限和连接池是 Owner 的数字；V2-12（#1645）会删 `enabled`，形状以合并后的代码为准 |
-| `runtime_payg`（以及今天仍被准入配置读取的 `runtime_payg_production`，两份内容一致；staging 上对应 `runtime_payg_staging` 和 `runtime_payg`，总控 11-04 已在两份的 Sonnet 5.5 档案加了 imageInput） | 准入档案：线路、用途、请求格式、思考档位、容量、`enabled`；没有窗口编号和到期日；对话模型（Sonnet 5.5）的档案带 `imageInput: {maxDataUrlBytes: 819223, maxEdge: 2048}`（自由对话附图 #1702，缺了就不能附图） | 报价（`services/turn/quote.ts`、`fusionQuote.ts`） | 没有 | **必须写**（B4）。取代 `runtime_payg_production`，V2-12 后旧键不再有人读 |
-| `runtime_rw_v2` | 对象，今天只看 `catalogCache`（`admitSplit` 只管旧准入） | 目录缓存 `services/turn/settings/catalogCache.ts`、`runtime_rw_flag` | 没有 = 缓存关 | 写 `{"catalogCache":true}`（100 人复测按开着的状态跑）；V2-12 会删这个开关，合并后重核 |
+| 键 | 来源及核验 |
+| --- | --- |
+| `core_path_v2` | 0505 后形状：`stopLoss` 和 `decisionUpperUsd`，不含 `enabled`；连接池、日限和预留带按第 17 步核验，缺失或非法会拒绝回合。 |
+| `runtime_payg` | 按冻结版本和已定设计准备各模型及用途档案，包括 `attached_organizer` 和对话模型图像输入；不复制测试值。 |
+| `TURN_DATABASE_HOST` | 与正式目标数据库主机私密核对；不一致时回合被拒。 |
+
+
+### 建库前补充核对（冻结版本）
+
+- 文风取帖：在 `billing_payg_start_thresholds` 私密种子中，逐一核对 `publish_monitor` 用途对应 TikHub 四条 route：`douyin:account_profile`（`/douyin/app/v3/handler_user_profile`）、`douyin:account_posts`（`/douyin/app/v3/fetch_user_post_videos`）、`xiaohongshu:account_profile`（`/xiaohongshu/app_v2/get_user_info`）、`xiaohongshu:account_posts`（`/xiaohongshu/app_v2/get_user_posted_notes`）。按冻结版实际 route 格式与计费设计核对每项有效门槛和有效价格，并检查全部其他启用 route/purpose；缺项、重复、无有效价格或来源未确认均阻断上线。种子只检查占位非空等基本格式，不能证明这四项完整。隔离验证缺一项拒绝、四项及有效价格齐全准入；不照搬 staging 数值、不自行定价。
+- 注册赠送防刷：迁移 0526、0528 在缺省时分别提供 `signup_gift_daily_cap` 30、`signup_gift_ip_limit` 5；核对冻结版本迁移、读回和暂停状态，连接并验收 Before User Created Hook，使用隔离身份验证允许、拒绝、日限和去重。不复制 staging 的测试上限。
+- Google Picker：Owner 在获批准的正式配置步骤准备 `NEXT_PUBLIC_GOOGLE_PICKER_API_KEY`、`NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID`、`NEXT_PUBLIC_GOOGLE_APP_ID`，按 Google 项目及回调来源私密核对名称、绑定和存在状态，不记录值；缺任一项入口不显示。使用指定测试账号验证授权、选择和取消，缺配置或未实测不算通过。
+- Shotviva：Graylum 侧由 Owner 在获批准的正式配置步骤准备 `SHOTVIVA_BASE_URL` 和后台 `shotviva` 密钥槽，Shotviva 侧负责对应伙伴接线、回调允许及正式目标；双方私密核对来源、目标和匹配关系，不记录密钥。隔离验证 Pro/Gold 允许、Free 拒绝、连接回跳、断连和失败；真实出图另按已批准预算。
+- `v3_summary_max_tokens`、`max_input_characters`、`home_analysis_module_id` 的实际来源和有效决定待核，未确认不能当作上线通过。飞书及统计依赖各自开发和决定，填配置不能代替完成。
 
 ### 2.3 套餐 `membership_plans`（staging 3 行）
 
