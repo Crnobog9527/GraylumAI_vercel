@@ -37,6 +37,17 @@ describe('plan update input', () => {
     });
   });
 
+  it('accepts the full allowed positioning range and rejects values outside it', () => {
+    const draft = planDraftFromRow(plan);
+    for (const value of ['1', '999', '1000']) {
+      expect(planUpdateInput(plan.id, { ...draft, positioningProfileLimit: value })?.positioningProfileLimit)
+        .toBe(Number(value));
+    }
+    for (const value of ['0', '1001', '1.5', '01', '']) {
+      expect(planUpdateInput(plan.id, { ...draft, positioningProfileLimit: value })).toBeNull();
+    }
+  });
+
   it('builds nothing for an invalid storage amount', () => {
     expect(planUpdateInput(plan.id, { ...planDraftFromRow(plan), storageMb: '-5' })).toBeNull();
   });
