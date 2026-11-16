@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { test, expect } from '@playwright/test';
 import { authStatePaths } from './support/auth';
+import { createIssueMonitor } from './support/monitoring';
 
 test('canonical home, callback and protected routes over HTTP', async ({ request }) => {
   const old = await request.get('/landing?domain=www&source=test', { maxRedirects: 0 });
@@ -27,17 +28,25 @@ test('canonical home, callback and protected routes over HTTP', async ({ request
 });
 
 test('anonymous home renders at its canonical URL', async ({ page }) => {
+  const monitor = createIssueMonitor(page);
   await page.goto('/landing?domain=www&source=test');
   await expect(page).toHaveURL(/\/\?domain=www&source=test/);
   await expect(page.getByRole('link', { name: '免费和教练聊聊' }).first()).toBeVisible();
   await expect(page.locator('div.min-h-screen').first()).toHaveCSS('background-color', 'rgb(10, 10, 10)');
+  await page.waitForLoadState('networkidle');
+  expect(monitor.getIssues('P1')).toEqual([]);
 });
 
 test.describe('signed-in visitor', () => {
   test.use({ storageState: authStatePaths.user });
   test('home remains available without a redirect loop', async ({ page }) => {
+    await page.goto('/app/profile');
+    await expect(page).toHaveURL(/\/app\/profile/);
+    const monitor = createIssueMonitor(page);
     await page.goto('/?domain=www');
     await expect(page).toHaveURL(/\/\?domain=www/);
     await expect(page.getByRole('link', { name: '免费和教练聊聊' }).first()).toBeVisible();
+    await page.waitForLoadState('networkidle');
+    expect(monitor.getIssues('P1')).toEqual([]);
   });
 });
