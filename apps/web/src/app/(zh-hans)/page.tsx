@@ -37,7 +37,7 @@ export default async function LandingPage() {
   const faqItems = data.faqItems.map(item => ({ ...item, answer: rewordFaq(item.answer) }));
 
   return (
-    <div lang={SITE_LOCALES['zh-Hans'].htmlLang}>
+    <div className="min-h-screen bg-[#0A0A0A]" lang={SITE_LOCALES['zh-Hans'].htmlLang}>
       <JsonLd data={[
         softwareApplicationJsonLd({ description: HOME_DESCRIPTION, offers: data.offerList }),
         ...(faqItems.length > 0 ? [faqPageJsonLd(faqItems)] : []),
