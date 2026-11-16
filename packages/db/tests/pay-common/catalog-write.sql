@@ -74,4 +74,48 @@ BEGIN
     RESET ROLE;
   END LOOP;
 END $$;
+-- Exercise the exact combined fields sent by the admin editor against the real RPC.
+DO $$
+DECLARE plan uuid; saved jsonb; failed boolean; i integer;
+BEGIN
+  SELECT id INTO plan FROM membership_plans WHERE level='gold';
+  IF plan IS NULL THEN
+    INSERT INTO membership_plans(name,level,monthly_price,yearly_price,allow_fusion_review,allow_fusion_compare,library_storage_bytes)
+      VALUES('Gold fixture','gold',9900,99000,true,true,2000000000) RETURNING id INTO plan;
+  END IF;
+  SET LOCAL ROLE service_role;
+  saved:=pay_common_save_catalog('membership_plan',plan,
+    '{"positioning_profile_limit":5,"allow_fusion_review":true,"allow_fusion_compare":false,
+      "library_storage_bytes":100,"allow_export":"true","allow_batch_export":"false"}', '{}',NULL,NULL,'gold');
+  PERFORM pg_temp.assert_true((saved->>'positioning_profile_limit')::int=5
+    AND (saved->>'library_storage_bytes')::bigint=100 AND (saved->>'allow_fusion_review')::boolean
+    AND NOT (saved->>'allow_fusion_compare')::boolean,'combined entitlement update');
+  -- An older client omits the new field and must preserve it.
+  saved:=pay_common_save_catalog('membership_plan',plan,'{"name":"Legacy client"}','{}',NULL,NULL,'gold');
+  PERFORM pg_temp.assert_true((saved->>'positioning_profile_limit')::int=5,'old client preserves limit');
+  FOR i IN SELECT unnest(ARRAY[0,1001]) LOOP
+    failed:=false;
+    BEGIN PERFORM pay_common_save_catalog('membership_plan',plan,jsonb_build_object('positioning_profile_limit',i),'{}',NULL,NULL);
+    EXCEPTION WHEN check_violation THEN failed:=true; END;
+    PERFORM pg_temp.assert_true(failed,'invalid limit rejected');
+  END LOOP;
+  failed:=false;
+  BEGIN PERFORM pay_common_save_catalog('membership_plan',NULL,
+    '{"name":"Duplicate","level":"gold","monthly_price":9900,"yearly_price":99000,"positioning_profile_limit":6,
+      "allow_fusion_review":true,"allow_fusion_compare":true,"library_storage_bytes":2000000000}',
+    '{}',NULL,NULL);
+  EXCEPTION WHEN unique_violation THEN failed:=true; END;
+  PERFORM pg_temp.assert_true(failed,'duplicate level returns unique violation');
+  failed:=false;
+  BEGIN PERFORM pay_common_save_catalog('membership_plan',plan,'{"positioning_profile_limit":6}','{}',NULL,NULL,'pro');
+  EXCEPTION WHEN SQLSTATE 'PT409' THEN failed:=true; END;
+  PERFORM pg_temp.assert_true(failed,'stale expected level rejected');
+  RESET ROLE;
+  SET LOCAL ROLE authenticated;
+  failed:=false;
+  BEGIN PERFORM pay_common_save_catalog('membership_plan',plan,'{"positioning_profile_limit":6}','{}',NULL,NULL);
+  EXCEPTION WHEN insufficient_privilege THEN failed:=true; END;
+  PERFORM pg_temp.assert_true(failed,'non-service role rejected');
+  RESET ROLE;
+END $$;
 ROLLBACK;

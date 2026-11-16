@@ -18,7 +18,7 @@ BEGIN
     table_name:='membership_plans';
     allowed:=ARRAY['name','level','monthly_price','yearly_price','monthly_credits','yearly_credits','monthly_bonus_credits',
       'package_discount','features','max_context_messages','allow_export','allow_batch_export','is_active','sort_order',
-      'allow_fusion_review','allow_fusion_compare','library_storage_bytes','allow_publish','own_data_window_days','allow_benchmark_monitor','allow_weekly_auto_review'];
+      'allow_fusion_review','allow_fusion_compare','library_storage_bytes','positioning_profile_limit','allow_publish','own_data_window_days','allow_benchmark_monitor','allow_weekly_auto_review'];
   ELSE RAISE EXCEPTION 'PAY_COMMON_PRODUCT_UNAVAILABLE'; END IF;
   IF jsonb_typeof(p_values) IS DISTINCT FROM 'object' OR p_values-allowed<>'{}'::jsonb OR p_id IS NULL AND p_values='{}'::jsonb
     OR jsonb_typeof(p_prices) IS DISTINCT FROM 'object'

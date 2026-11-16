@@ -73,7 +73,7 @@ export function storageProblem(draft: PlanDraft): string | null {
 }
 
 export function profileLimitProblem(draft: PlanDraft): string | null {
-  return /^[1-9][0-9]{0,2}$/.test(draft.positioningProfileLimit)
+  return /^(?:[1-9][0-9]{0,2}|1000)$/.test(draft.positioningProfileLimit)
     ? null : '请填写 1 到 1000 之间的整数';
 }
 
