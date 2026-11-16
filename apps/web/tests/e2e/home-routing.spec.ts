@@ -15,7 +15,14 @@ test('canonical home, callback and protected routes over HTTP', async ({ request
   const rsc = await request.get('/?_rsc=route-test', {
     maxRedirects: 0, headers: { RSC: '1', 'Next-Router-Prefetch': '1' },
   });
-  expect(rsc.status()).toBe(200);
+  expect(rsc.status()).toBe(307);
+  const rscUrl = new URL(rsc.headers().location, rsc.url());
+  expect(rscUrl.pathname).toBe('/');
+  const rscResult = await request.get(rscUrl.toString(), {
+    maxRedirects: 0, headers: { RSC: '1', 'Next-Router-Prefetch': '1' },
+  });
+  expect(rscResult.status()).toBe(200);
+  expect(rscResult.headers()['content-type']).toContain('text/x-component');
   const callback = await request.get('/?code=example&source=test', { maxRedirects: 0 });
   expect(callback.status()).toBe(307);
   expect(new URL(callback.headers().location).pathname).toBe('/auth/callback');
