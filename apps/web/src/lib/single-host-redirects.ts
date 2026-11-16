@@ -40,7 +40,7 @@ export function buildPathRedirects(): ConfigRedirect[] {
         ? [] : [{ source: `/${segment}`, destination: `${APP_PREFIX}/${segment}`, permanent: true }]),
       { source: `/${segment}/:path+`, destination: `${APP_PREFIX}/${segment}/:path+`, permanent: true },
     ]),
-    // The public home page is served at "/" (the proxy rewrites it to this page), so its own address goes there.
+    // The public home page is served at "/"; its old address goes there.
     { source: '/landing', destination: '/', permanent: true },
     // The old /tutorials page (four generic cards) is gone; the tutorials live in the blog (PUBLIC-SITE cleanup).
     { source: '/tutorials', destination: '/blog', permanent: true },

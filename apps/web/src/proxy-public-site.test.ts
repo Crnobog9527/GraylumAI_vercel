@@ -61,7 +61,7 @@ describe('public pages on every host', () => {
       const { status, to, rewrite } = await get(`https://${host}/`);
       expect(status).toBe(200);
       expect(to).toBeNull();
-      expect(new URL(rewrite!).pathname).toBe('/landing');
+      expect(rewrite).toBeNull();
     }
   });
 });
