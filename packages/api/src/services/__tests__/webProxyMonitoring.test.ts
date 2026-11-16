@@ -127,9 +127,9 @@ describe('web proxy monitoring tunnel routing', () => {
     const appLoginResponse = await runProxy('https://app.graylum.com/login');
     const wwwLoginResponse = await runProxy('https://www.graylum.com/login');
 
-    expect(rootResponse.headers.get('x-middleware-rewrite')).toBe(
-      'https://www.graylum.com/landing',
-    );
+    expect(rootResponse.status).toBe(200);
+    expect(rootResponse.headers.get('location')).toBeNull();
+    expect(rootResponse.headers.get('x-middleware-rewrite')).toBeNull();
     expect(termsResponse.headers.get('location')).toBeNull();
     expect(privacyResponse.headers.get('location')).toBeNull();
     expect(appLoginResponse.headers.get('location')).toBeNull();
