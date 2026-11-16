@@ -3705,7 +3705,7 @@
   "fn:pay_common_record_checkout(uuid,text,text,jsonb)": "6dfc448a55ab",
   "fn:pay_common_record_failed_invoice(uuid,text,text,jsonb)": "dba99a7ed962",
   "fn:pay_common_ref_guard()": "632b117307dd",
-  "fn:pay_common_save_catalog(text,uuid,jsonb,jsonb,text,text,text)": "d7fd4433c91d",
+  "fn:pay_common_save_catalog(text,uuid,jsonb,jsonb,text,text,text)": "799862745bea",
   "fn:pay_common_settle_membership_level(uuid)": "0425c2105840",
   "fn:pay_common_settle_membership_levels(integer)": "6e1c269265b6",
   "fn:pay_common_snapshot_valid(jsonb)": "9e5d4a71a09c",

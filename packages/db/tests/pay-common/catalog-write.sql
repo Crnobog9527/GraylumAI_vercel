@@ -101,7 +101,8 @@ BEGIN
   END LOOP;
   failed:=false;
   BEGIN PERFORM pay_common_save_catalog('membership_plan',NULL,
-    '{"name":"Duplicate","level":"gold","monthly_price":9900,"yearly_price":99000,"positioning_profile_limit":6}',
+    '{"name":"Duplicate","level":"gold","monthly_price":9900,"yearly_price":99000,"positioning_profile_limit":6,
+      "allow_fusion_review":true,"allow_fusion_compare":true,"library_storage_bytes":2000000000}',
     '{}',NULL,NULL);
   EXCEPTION WHEN unique_violation THEN failed:=true; END;
   PERFORM pg_temp.assert_true(failed,'duplicate level returns unique violation');
