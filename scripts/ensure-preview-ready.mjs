@@ -7,6 +7,7 @@
 import { createRequire } from 'node:module';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const require = createRequire(new URL('../apps/web/package.json', import.meta.url));
 const { chromium } = require('@playwright/test');
@@ -90,23 +91,14 @@ async function applyBypass(context, previewUrl, bypassCookie) {
   ]);
 }
 
-async function ensureMaintenanceDisabled(page) {
+export async function ensureMaintenanceDisabled(page) {
   const maintenanceSwitch = page.getByTestId('admin-setting-maintenance_mode');
-  const saveAllButton = page.getByTestId('admin-settings-save-all');
-
   await maintenanceSwitch.waitFor({ state: 'visible', timeout: 15000 });
-  const enabled = (await maintenanceSwitch.getAttribute('data-state')) === 'checked';
-
-  if (!enabled) {
-    writeStdout('maintenance_mode already disabled');
-    return;
+  const state = await maintenanceSwitch.getAttribute('data-state');
+  if (state !== 'unchecked') {
+    throw new Error(`maintenance_mode is ${state ?? 'unknown'}; preflight stopped without changing settings`);
   }
-
-  writeStdout('maintenance_mode enabled; restoring to false');
-  await maintenanceSwitch.click();
-  await saveAllButton.click();
-  await saveAllButton.waitFor({ state: 'visible', timeout: 15000 });
-  await page.waitForTimeout(2500);
+  writeStdout('maintenance_mode disabled');
 }
 
 async function verifyPublicLoginAccessible(previewUrl, bypassCookie) {
@@ -159,7 +151,9 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  writeStderr(error instanceof Error ? error.message : String(error));
-  process.exit(1);
-});
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((error) => {
+    writeStderr(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  });
+}

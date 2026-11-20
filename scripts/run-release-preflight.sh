@@ -1,193 +1,165 @@
 #!/usr/bin/env bash
-# Copyright (c) 2026 Grayscale Luminary LLC.
-# All rights reserved.
-# This code is proprietary and confidential.
-
+# Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved.
+# The browser rehearsal owns an ephemeral local stack; never run the old write suites on a shared deployment.
 set -uo pipefail
-
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
 OUTPUT_ROOT="$ROOT_DIR/.release-output/preflight"
-TIMESTAMP="$(date +"%Y%m%d-%H%M%S")"
-RUN_DIR="$OUTPUT_ROOT/$TIMESTAMP"
-LOG_DIR="$RUN_DIR/logs"
-EVIDENCE_DIR="$RUN_DIR/evidence"
-PREVIEW_REPORT_DIR="$EVIDENCE_DIR/playwright-preview"
+RUN_DIR="$(mktemp -d "$OUTPUT_ROOT/run-XXXXXXXX" 2>/dev/null || { mkdir -p "$OUTPUT_ROOT"; mktemp -d "$OUTPUT_ROOT/run-XXXXXXXX"; })"
+mkdir -p "$RUN_DIR/logs"
 SUMMARY_FILE="$RUN_DIR/00-release-preflight-summary.md"
-
 WITH_PREVIEW=0
-WITH_ADMIN_DESTRUCTIVE=0
+LOCAL_ONLY=0
+REMOTE_REQUESTED=0
 SKIP_LOCAL_BUILD=0
-PREVIEW_URL="${PREVIEW_URL:-}"
-BYPASS_COOKIE="${VERCEL_BYPASS_COOKIE:-}"
-
-mkdir -p "$LOG_DIR" "$PREVIEW_REPORT_DIR"
-
-usage() {
-  cat <<'EOF'
-Usage: bash ./scripts/run-release-preflight.sh [options]
-
-Options:
-  --with-preview                Run preview/staging rehearsal suites.
-  --preview-url <url>           Locked preview/staging base URL.
-  --bypass-cookie <cookie>      Deployment Protection bypass cookie.
-  --with-admin-destructive      Include isolated destructive admin suite.
-  --skip-local-build            Skip local pnpm build.
-EOF
-}
-
+WITH_ADMIN_DESTRUCTIVE=0
+INVALID=''
+PREVIEW_URL_ARG=''
+STAGING_WORKDIR=''
+if [[ -n "${PREVIEW_URL:-}" || -n "${PLAYWRIGHT_BASE_URL:-}" || -n "${VERCEL_BYPASS_COOKIE:-}" ||
+      -n "${DATABASE_URL:-}" || -n "${NEXT_PUBLIC_SUPABASE_URL:-}" || -n "${TURN_DATABASE_HOST:-}" ]]; then
+  INVALID='External target or bypass credentials supplied; only the owned local rehearsal is supported.'
+fi
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --)
-      shift
-      ;;
-    --with-preview)
-      WITH_PREVIEW=1
-      shift
-      ;;
-    --preview-url)
-      PREVIEW_URL="${2:-}"
-      shift 2
-      ;;
-    --bypass-cookie)
-      BYPASS_COOKIE="${2:-}"
-      shift 2
-      ;;
-    --with-admin-destructive)
-      WITH_ADMIN_DESTRUCTIVE=1
-      shift
-      ;;
-    --skip-local-build)
-      SKIP_LOCAL_BUILD=1
-      shift
-      ;;
-    -h|--help)
-      usage
-      exit 0
-      ;;
-    *)
-      echo "Unknown option: $1" >&2
-      usage >&2
-      exit 1
-      ;;
+    --with-preview) WITH_PREVIEW=1; REMOTE_REQUESTED=1; shift ;;
+    --local-only) WITH_PREVIEW=1; LOCAL_ONLY=1; shift ;;
+    --with-admin-destructive) WITH_ADMIN_DESTRUCTIVE=1; shift ;;
+    --skip-local-build) SKIP_LOCAL_BUILD=1; shift ;;
+    --preview-url) PREVIEW_URL_ARG="${2:-}"; shift; [[ $# -gt 0 ]] && shift ;;
+    --staging-workdir) STAGING_WORKDIR="${2:-}"; shift; [[ $# -gt 0 ]] && shift ;;
+    --bypass-cookie) INVALID='Bypass credentials are not accepted.'; shift; [[ $# -gt 0 ]] && shift ;;
+    -h|--help) echo 'Usage: run-release-preflight.sh [--with-preview|--local-only] [--with-admin-destructive] [--skip-local-build]'
+      echo '--local-only validates the isolated rehearsal; --with-preview also requires a remote target check.'; exit 0 ;;
+    *) INVALID="Unknown option: $1"; shift ;;
   esac
 done
-
-STEP_RESULTS=""
-
-run_step() {
-  local step_name="$1"
-  shift
-
-  local log_file="$LOG_DIR/${step_name}.log"
-  local status="failed"
-
-  printf '## %s\n' "$step_name" > "$log_file"
-  printf 'Command: %s\n\n' "$*" >> "$log_file"
-
-  if "$@" 2>&1 | tee -a "$log_file"; then
-    status="passed"
-  fi
-
-  STEP_RESULTS="${STEP_RESULTS}- ${step_name}: ${status} (log: logs/${step_name}.log)\n"
-}
-
-run_preview_step() {
-  local step_name="$1"
-  shift
-
-  local log_file="$LOG_DIR/${step_name}.log"
-  local status="failed"
-
-  printf '## %s\n' "$step_name" > "$log_file"
-  printf 'Preview URL: %s\n' "$PREVIEW_URL" >> "$log_file"
-  printf 'Command: PLAYWRIGHT_BASE_URL=%s VERCEL_BYPASS_COOKIE=<redacted> %s\n\n' "$PREVIEW_URL" "$*" >> "$log_file"
-
-  if PLAYWRIGHT_BASE_URL="$PREVIEW_URL" VERCEL_BYPASS_COOKIE="$BYPASS_COOKIE" "$@" 2>&1 | tee -a "$log_file"; then
-    status="passed"
-  fi
-
-  STEP_RESULTS="${STEP_RESULTS}- ${step_name}: ${status} (log: logs/${step_name}.log)\n"
-}
-
-run_preview_normalization() {
-  local step_name="$1"
-  local log_file="$LOG_DIR/${step_name}.log"
-  local status="failed"
-
-  printf '## %s\n' "$step_name" > "$log_file"
-  printf 'Preview URL: %s\n' "$PREVIEW_URL" >> "$log_file"
-  printf 'Command: pnpm --dir apps/web exec node ../../scripts/ensure-preview-ready.mjs --preview-url %s --bypass-cookie <redacted> --admin-state tests/e2e/.auth/admin.json\n\n' "$PREVIEW_URL" >> "$log_file"
-
-  if pnpm --dir apps/web exec node ../../scripts/ensure-preview-ready.mjs --preview-url "$PREVIEW_URL" --bypass-cookie "$BYPASS_COOKIE" --admin-state tests/e2e/.auth/admin.json 2>&1 | tee -a "$log_file"; then
-    status="passed"
-  fi
-
-  STEP_RESULTS="${STEP_RESULTS}- ${step_name}: ${status} (log: logs/${step_name}.log)\n"
-}
-
-write_summary() {
+if [[ "$LOCAL_ONLY" == 1 && "$REMOTE_REQUESTED" == 1 ]]; then
+  INVALID='--local-only and --with-preview cannot be combined'
+elif [[ "$REMOTE_REQUESTED" == 1 && ( "$PREVIEW_URL_ARG" != 'https://auth-staging.graylum.com' || -z "$STAGING_WORKDIR" ) ]]; then
+  INVALID='--with-preview requires the approved staging URL and linked staging workdir'
+elif [[ "$REMOTE_REQUESTED" == 1 && "$(cat "$STAGING_WORKDIR/supabase/.temp/project-ref" 2>/dev/null || true)" != 'gvcpmcunmfrbxuwimxfa' ]]; then
+  INVALID='staging workdir is not linked to the approved test project'
+elif [[ "$REMOTE_REQUESTED" != 1 && ( -n "$PREVIEW_URL_ARG" || -n "$STAGING_WORKDIR" ) ]]; then
+  INVALID='staging arguments require --with-preview'
+fi
+results=()
+failed=0
+record() { results+=("- $1: $2${3:+ ($3)}"); [[ "$2" == passed ]] || failed=1; }
+finish() {
   {
-    echo "# Release Preflight Summary"
+    echo '# Release Preflight Summary'
     echo
-    echo "- Generated at: \`$TIMESTAMP\`"
-    echo "- Run directory: \`.release-output/preflight/$TIMESTAMP\`"
-    echo "- Preview rehearsal requested: \`$([[ "$WITH_PREVIEW" -eq 1 ]] && echo yes || echo no)\`"
-    if [[ -n "$PREVIEW_URL" ]]; then
-      echo "- Locked preview URL: \`$PREVIEW_URL\`"
+    echo 'The browser rehearsal uses a disposable local database and simulated providers; it does not establish production readiness.'
+    echo 'Stripe account and balance reads use a local synthetic service; real Stripe connectivity and payments are not tested.'
+    echo 'Attachment storage is simulated in memory; real Storage access controls and signed downloads are not tested.'
+    echo
+    echo '## Step Results'
+    printf '%s\n' "${results[@]}"
+    if [[ -f "$RUN_DIR/logs/isolated-rehearsal.log" ]]; then
+      for suite in chat home-routing auth admin admin-config admin-ops security user-extended user-supplemental; do
+        line=$(grep -F "release suite $suite:" "$RUN_DIR/logs/isolated-rehearsal.log" | tail -1 || true)
+        printf -- '- %s\n' "${line:-release suite $suite: not-run}"
+      done
+      if [[ "$WITH_ADMIN_DESTRUCTIVE" == 1 ]]; then
+        line=$(grep -F 'release suite admin-destructive:' "$RUN_DIR/logs/isolated-rehearsal.log" | tail -1 || true)
+        printf -- '- %s\n' "${line:-release suite admin-destructive: not-run}"
+      fi
     fi
     echo
-    echo "## Step Results"
-    printf "%b" "$STEP_RESULTS"
-    echo
-    echo "## Accepted Risk"
-    echo "- Supabase 免费套餐暂不支持 leaked password protection；该项保留为 accepted risk。"
-    echo
-    echo "## Stripe"
-    echo "- 本次 preflight 不启用 Stripe。"
-    echo "- Stripe 接入后需单独补跑 checkout / cancel / fail / webhook 幂等 / 到账核对。"
+    if [[ -f "$RUN_DIR/logs/remote-preview.log" ]]; then
+      while IFS= read -r line; do printf -- '- %s\n' "$line"; done < "$RUN_DIR/logs/remote-preview.log"
+    fi
+    echo '- runtime binding is not verified unless an authoritative deployment source establishes it'
+    echo '- Stripe, real providers and production configuration: not-run'
+    echo '- long-text confirmation: retired by Owner decision; current input-length protection is checked in the steps above'
+    echo '- risk acceptance: not evaluated'
+    echo 'These items require separate evidence; no conclusion is inferred here.'
   } > "$SUMMARY_FILE"
+  printf '%s\n' "$RUN_DIR" > "$OUTPUT_ROOT/latest-run.txt"
+  echo "Release preflight summary: $SUMMARY_FILE"
+  exit "$failed"
 }
-
-run_step "typecheck" pnpm --dir apps/web typecheck
-
-if [[ "$SKIP_LOCAL_BUILD" -eq 0 ]]; then
-  run_step "build" pnpm build
-else
-  STEP_RESULTS="${STEP_RESULTS}- build: skipped (--skip-local-build)\n"
-fi
-
-if [[ "$WITH_PREVIEW" -eq 1 ]]; then
-  if [[ -z "$PREVIEW_URL" ]]; then
-    STEP_RESULTS="${STEP_RESULTS}- preview-config: failed (missing --preview-url or PREVIEW_URL)\n"
-  else
-    if [[ -z "$BYPASS_COOKIE" ]]; then
-      STEP_RESULTS="${STEP_RESULTS}- preview-config: passed (no bypass cookie; assuming unprotected preview)\n"
-    else
-      STEP_RESULTS="${STEP_RESULTS}- preview-config: passed (bypass cookie configured)\n"
-    fi
-
-    run_preview_step "preview-auth" pnpm --dir apps/web exec playwright test tests/e2e/auth.spec.ts --project=chromium
-    run_preview_normalization "preview-ready"
-    run_preview_step "preview-chat" pnpm --dir apps/web exec playwright test tests/e2e/chat.spec.ts --project=chromium
-    run_preview_step "preview-admin" pnpm --dir apps/web exec playwright test tests/e2e/admin.spec.ts --project=chromium
-    run_preview_step "preview-admin-config" pnpm --dir apps/web test:e2e:admin-config
-    run_preview_step "preview-admin-ops" pnpm --dir apps/web test:e2e:admin-ops
-    run_preview_step "preview-security" pnpm --dir apps/web exec playwright test tests/e2e/security.spec.ts --project=chromium
-    run_preview_step "preview-user-extended" pnpm --dir apps/web test:e2e:user-extended
-    run_preview_step "preview-user-supplemental" pnpm --dir apps/web test:e2e:user-supplemental
-
-    if [[ "$WITH_ADMIN_DESTRUCTIVE" -eq 1 ]]; then
-      run_preview_step "preview-admin-destructive" env ENABLE_PARITY_DESTRUCTIVE_E2E=true pnpm --dir apps/web test:e2e:admin-destructive
-    else
-      STEP_RESULTS="${STEP_RESULTS}- preview-admin-destructive: skipped (enable with --with-admin-destructive)\n"
-    fi
+clean_env=(env -i "PATH=$PATH" "HOME=$HOME" NEXT_TELEMETRY_DISABLED=1)
+[[ -n "${PNPM_HOME:-}" ]] && clean_env+=("PNPM_HOME=$PNPM_HOME")
+step() {
+  local name="$1"; shift
+  local ok=0
+  "${clean_env[@]}" "$@" > "$RUN_DIR/logs/$name.log" 2>&1 || ok=1
+  if [[ "$name" == remote-preview ]]; then
+    local required
+    for required in 'staging-target: passed' 'deployment-project: passed' 'deployment-identity: passed' \
+      'deployment-version: passed' 'staging-maintenance: passed' 'runtime-binding: passed'; do
+      grep -Fq "$required" "$RUN_DIR/logs/$name.log" || ok=1
+    done
   fi
-else
-  STEP_RESULTS="${STEP_RESULTS}- preview-rehearsal: skipped (--with-preview not set)\n"
+  if [[ "$name" == isolated-rehearsal ]]; then
+    local suite
+    local suites=(chat home-routing auth admin admin-config admin-ops security user-extended user-supplemental)
+    [[ "$WITH_ADMIN_DESTRUCTIVE" == 1 ]] && suites+=(admin-destructive)
+    for suite in "${suites[@]}"; do
+      suffix=''
+      [ "$suite" != user-extended ] || suffix=' [checkout display uses simulated reads, not payment integration]'
+      grep -Fxq "release suite $suite: passed (skipped: 0)$suffix" "$RUN_DIR/logs/$name.log" || ok=1
+    done
+  fi
+  if [[ "$ok" == 0 ]]; then record "$name" passed "logs/$name.log"; else record "$name" failed "logs/$name.log"; fi
+}
+if [[ -n "$INVALID" ]]; then
+  record configuration failed "$INVALID"
+  record typecheck not-run 'configuration failed'
+  record build not-run 'configuration failed'
+  record chat-input-ui not-run 'configuration failed'
+  record chat-input-api not-run 'configuration failed'
+  record isolated-rehearsal not-run 'configuration failed'
+  record remote-preview not-run 'configuration failed'
+  finish
 fi
-
-write_summary
-printf '%s\n' "$RUN_DIR" > "$OUTPUT_ROOT/latest-run.txt"
-
-echo
-echo "Release preflight summary written to: $SUMMARY_FILE"
+for dir in . apps/web; do
+ for name in .env .env.local .env.development .env.development.local .env.production .env.production.local .env.test .env.test.local; do
+  file="$dir/$name"
+  if [[ -e "$file" ]]; then
+    record configuration failed "environment file present: $file; use a clean isolated checkout"
+    record typecheck not-run 'configuration failed'
+    record build not-run 'configuration failed'
+    record chat-input-ui not-run 'configuration failed'
+    record chat-input-api not-run 'configuration failed'
+    record isolated-rehearsal not-run 'configuration failed'
+    finish
+  fi
+ done
+done
+if [[ "$REMOTE_REQUESTED" == 1 ]] && ! "${clean_env[@]}" node scripts/release-staging-readonly.mjs \
+  --staging-workdir "$STAGING_WORKDIR" --validate-only > "$RUN_DIR/logs/staging-target.log" 2>&1; then
+  record configuration failed 'staging link or pooler target is invalid'
+  record typecheck not-run 'configuration failed'
+  record build not-run 'configuration failed'
+  record chat-input-ui not-run 'configuration failed'
+  record chat-input-api not-run 'configuration failed'
+  record isolated-rehearsal not-run 'configuration failed'
+  record remote-preview not-run 'configuration failed'
+  finish
+fi
+record configuration passed 'clean checkout; inherited application environment removed'
+step typecheck pnpm --dir apps/web typecheck
+step chat-input-ui pnpm --filter web exec vitest run src/components/opc/composer-editor.browser.test.tsx \
+  'src/app/(zh-hans)/app/runtime/turn-notices.test.ts' 'src/app/(zh-hans)/app/runtime/gate-notices.test.ts' \
+  'src/app/(zh-hans)/app/runtime/use-turn-chat.test.ts' --config vitest.config.ts
+step chat-input-api pnpm --filter @repo/api exec vitest run src/services/turn/bodyBound.test.ts
+if [[ "$SKIP_LOCAL_BUILD" == 1 ]]; then record build skipped '--skip-local-build'; else step build pnpm build; fi
+if [[ "$WITH_PREVIEW" != 1 ]]; then
+  record isolated-rehearsal not-run 'requires --with-preview'
+elif [[ "$WITH_ADMIN_DESTRUCTIVE" == 1 ]]; then
+  step isolated-rehearsal node scripts/e2e-sim/run.mjs --release-preflight --with-admin-destructive
+else
+  step isolated-rehearsal node scripts/e2e-sim/run.mjs --release-preflight
+  results+=("- admin-destructive: skipped (optional; enable only in disposable local stack)")
+fi
+if [[ "$LOCAL_ONLY" == 1 ]]; then
+  results+=("- remote-preview: not-run (outside local-only scope)")
+elif [[ "$REMOTE_REQUESTED" == 1 ]]; then
+  step remote-preview node scripts/release-staging-readonly.mjs --staging-workdir "$STAGING_WORKDIR"
+else
+  record remote-preview not-run 'requires --with-preview and approved staging inputs'
+fi
+finish

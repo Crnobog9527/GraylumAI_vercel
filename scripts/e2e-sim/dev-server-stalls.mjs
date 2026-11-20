@@ -16,7 +16,7 @@ const DENIAL = /(\w*rate_limit\w*_denying_request)/;
 export function createStallWatch(resetTimes) {
   const pending = new Map();
   const loop = [], gc = [], compiles = [];
-  const denials = [];
+  const denials = [], redisFetchFailures = [];
   const read = (line, receivedAt) => {
     const stall = /\[sim-preload\] loop_stall_ms=(\d+) cpu_ms=(\d+) at=(\d+)/.exec(line);
     if (stall) loop.push({ ms: Number(stall[1]), cpu: Number(stall[2]), at: Number(stall[3]) });
@@ -26,6 +26,8 @@ export function createStallWatch(resetTimes) {
     if (compile) compiles.push({ route: compile[1], at: receivedAt });
     const denial = DENIAL.exec(line);
     if (denial) denials.push({ name: denial[1], at: receivedAt });
+    const redisFailure = /\[sim-rate\] local Redis fetch rejected: (AbortError|TimeoutError|TypeError|Other)/.exec(line);
+    if (redisFailure) redisFetchFailures.push(redisFailure[1]);
   };
   const testAt = at => resetTimes().filter(time => time <= at).length;
   const tally = keys => { const counts = {}; for (const key of keys) counts[key] = (counts[key] ?? 0) + 1; return counts; };
@@ -52,6 +54,7 @@ export function createStallWatch(resetTimes) {
         gcPauses: { count: gc.length, maxMs: Math.max(0, ...gc.map(item => item.ms)) },
         // Every refusal, the web proxy's included (run.mjs also counts those by their kind); by log name, and by the test it fell in.
         appRateLimitDenials: denials.length,
+        redisFetchFailures: tally(redisFetchFailures),
         rateLimitDenialsByName: tally(denials.map(item => item.name)),
         rateLimitDenialsByTest: tally(denials.map(item => testAt(item.at))),
         stallsByTest: byTest,
