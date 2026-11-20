@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { afterEach, expect, it, vi } from 'vitest';
 import type { Page, Route } from '@playwright/test';
-import { simulateCheckoutDisplay } from './simulatedCheckout';
+import { simulateCheckoutDisplay } from '../e2e/support/simulatedCheckout';
 
 afterEach(() => vi.unstubAllEnvs());
 it.each(['payments.methodCheckout', 'payments%2EmethodCheckout', 'user.getProfile%2Cpayments.methodCheckout', '%ZZ'])(

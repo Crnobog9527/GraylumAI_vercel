@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
-import { securityHeaderProblems } from './securityHeaders';
+import { securityHeaderProblems } from '../e2e/support/securityHeaders';
 
 const configured = {
   'x-frame-options': 'DENY', 'x-content-type-options': 'nosniff',

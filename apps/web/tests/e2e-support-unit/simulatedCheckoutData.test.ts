@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { expect, it } from 'vitest';
-import { simulateCheckoutData } from './simulatedCheckoutData';
+import { simulateCheckoutData } from '../e2e/support/simulatedCheckoutData';
 
 it('simulates only successful checkout display reads in a batch', () => {
   const body = [ { result: { data: [{ level: 'free', checkoutReady: false }, { level: 'gold', checkoutReady: false }] } },
