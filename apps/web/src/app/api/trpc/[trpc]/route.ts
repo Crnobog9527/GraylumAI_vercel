@@ -1,5 +1,6 @@
 import { fetchRequestHandler } from '@trpc/server/adapters/fetch';
 import { after, type NextRequest } from 'next/server';
+import { revalidatePath } from 'next/cache';
 import { createServerClient } from '@supabase/ssr';
 import { createClient } from '@supabase/supabase-js';
 import { appRouter } from '@repo/api/src/root';
@@ -164,6 +165,7 @@ async function handleTrpc(req: NextRequest, runtimeBudget: ReturnType<typeof cre
       user,
       supabaseAuth: authClient,
       scheduleAfter: (task) => after(task),
+      refreshPublicSite: () => revalidatePath('/', 'layout'),
       origin: new URL(req.url).origin,
     }),
   });
