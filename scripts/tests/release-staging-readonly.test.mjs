@@ -67,7 +67,7 @@ test('a dirty tracked checkout cannot be reported as matching deployment', () =>
 });
 test('unsafe pooler binding stops before any external command', () => {
   const f = fixture(); try {
-    writeFileSync(join(f.temp, 'sb/supabase/.temp/pooler-url'), 'postgresql://postgres.other:secret@evil.test/postgres');
+    writeFileSync(join(f.temp, 'sb/supabase/.temp/pooler-url'), 'postgresql://postgres.other@evil.test/postgres');
     const r = f.run(); assert.match(r.stdout, /staging-target: failed/); assert.equal(existsSync(join(f.temp, 'calls')), false);
   } finally { f.close(); }
 });
