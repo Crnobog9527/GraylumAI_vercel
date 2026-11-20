@@ -22,7 +22,9 @@ test.describe('User Supplemental Flows', () => {
 
       steps.push('Wait for the route guard to redirect to /login');
       await page.waitForURL(/\/login/, { timeout: 15000 });
-      await expect(page.locator('form').getByRole('button', { name: /^登录$|^Login$/i })).toBeVisible({ timeout: 10000 });
+      await expect(page.getByRole('tab', { name: '手机号' })).toHaveAttribute('aria-selected', 'true', { timeout: 10000 });
+      await expect(page.locator('form input[type="tel"]')).toBeVisible();
+      await expect(page.locator('form').getByRole('button', { name: '获取验证码' })).toBeVisible();
 
       const blockingIssues = monitor.getIssues('P1');
       expect(blockingIssues, JSON.stringify(blockingIssues, null, 2)).toEqual([]);
@@ -77,7 +79,7 @@ test.describe('User Supplemental Flows', () => {
         await page.locator('#confirm-password').fill('12345679');
         await page.getByRole('button', { name: '确认修改' }).click();
         await expect(page.getByRole('dialog')).toBeVisible({ timeout: 2000 });
-        await expect(page.getByText('两次输入的新密码不一致')).toBeVisible({ timeout: 10000 });
+        await expect(page.getByRole('dialog').getByRole('alert')).toContainText('两次输入的新密码不一致', { timeout: 10000 });
 
         steps.push('Close the dialog explicitly because password updates now require a real current password');
         await page.getByRole('button', { name: '取消' }).click();

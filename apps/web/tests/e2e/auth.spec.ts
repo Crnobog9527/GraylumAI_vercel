@@ -95,7 +95,7 @@ test.describe('Authentication', () => {
 
       steps.push('Verify login redirect preserves the original destination');
       await expect(page).toHaveURL(/\/login\?redirect=%2Fapp%2Fprofile%3Ftab%3Dsecurity/);
-      await expect(page.getByText('/app/profile?tab=security')).toBeVisible({ timeout: 10000 });
+      await expect(page.getByTestId('auth-redirect-notice')).toContainText('登录后会直接带你去刚才要打开的页面');
 
       steps.push('Authenticate with the normal E2E user');
       // PHONE-OTP: the Simplified login page opens on the phone tab; this redirect keeps its address, so switch to email.
@@ -187,7 +187,7 @@ test.describe('Authentication', () => {
         steps.push(`Open ${route}`);
         await gotoWithBypass(page, route);
 
-        await expect(page).toHaveURL(/\/landing\/pricing\?domain=www$/);
+        await expect(page).toHaveURL(/\/pricing\?domain=www$/);
         await expect(page.getByRole('heading', { name: '选一个适合你的方案' })).toBeVisible();
       }
 
@@ -241,7 +241,7 @@ test.describe('Authentication', () => {
         steps.push(`Open ${expectation.route}`);
         await gotoWithBypass(page, expectation.route);
         await expect(page).toHaveURL(new RegExp(expectation.route.replace('/', '\\/')));
-        await expect(page.getByRole('heading', { name: expectation.heading })).toBeVisible();
+        await expect(page.getByRole('heading', { name: expectation.heading, exact: true })).toBeVisible();
       }
 
       // The old tutorials page is gone: its address moves on to the blog.
@@ -292,8 +292,17 @@ test.describe('Authentication', () => {
         await gotoWithBypass(page, '/');
         await expect(page).toHaveURL(/\/$/);
 
-        steps.push('Verify authenticated navigation is visible');
-        await expect(page.getByText('个人中心').first()).toBeVisible();
+        steps.push('Verify the public home and its login entry are visible');
+        await expect(page.getByRole('heading', { level: 1, name: '你的 AI 自媒体陪跑教练' })).toBeVisible();
+        const loginEntry = page.getByRole('link', { name: '登录', exact: true }).first();
+        await expect(loginEntry).toBeVisible();
+        await expect(loginEntry).toHaveAttribute('href', /\/login/);
+
+        steps.push('Follow the login entry to the account page using the same signed-in session');
+        await loginEntry.click();
+        await expect(page).toHaveURL(/\/app\/profile/, { timeout: 30000 });
+        await expect(page.getByRole('heading', { name: '个人中心' })).toBeVisible({ timeout: 30000 });
+        await expect(page.getByText(getCredentials('user').email, { exact: true }).first()).toBeVisible();
 
         const blockingIssues = monitor.getIssues('P1');
         expect(blockingIssues, JSON.stringify(blockingIssues, null, 2)).toEqual([]);
@@ -308,7 +317,7 @@ test.describe('Authentication', () => {
             title: 'authenticated-home-smoke',
             role: 'user',
             route: '/',
-            expected: 'Authenticated users can load the home page without redirect loops or blocking runtime issues.',
+            expected: 'Authenticated users can load the public home without redirect loops and access their account in the same session.',
           },
           actual,
           steps,
@@ -333,7 +342,7 @@ test.describe('Authentication', () => {
         steps.push('Open the subscription tab route and verify yearly pricing copy and highlight tone');
         await gotoWithBypass(page, '/app/profile?tab=subscription');
         await expect(page).toHaveURL(/\/app\/profile\?tab=subscription/, { timeout: 15000 });
-        const yearlyCycleButton = page.getByRole('button', { name: /按年|年付/ });
+        const yearlyCycleButton = page.getByRole('radio', { name: '按年' });
         await expect(yearlyCycleButton).toBeVisible({ timeout: 30000 });
         await yearlyCycleButton.click();
         await expect(page.getByText('年付积分按月释放', { exact: false })).toBeVisible();

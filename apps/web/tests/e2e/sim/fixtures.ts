@@ -43,9 +43,11 @@ export const test = base.extend<{ evidence: void }>({
       if (page.isClosed()) continue;
       index += 1;
       await report(`${testInfo.title} — page ${index}`);
-      const file = testInfo.outputPath(`page-${index}.png`);
-      if (await page.screenshot({ path: file, timeout: 10_000 }).then(() => true, () => false)) {
-        await testInfo.attach(`page-${index}`, { path: file, contentType: 'image/png' });
+      if (!process.env.RELEASE_PREFLIGHT_PROXY) {
+        const file = testInfo.outputPath(`page-${index}.png`);
+        if (await page.screenshot({ path: file, timeout: 10_000 }).then(() => true, () => false)) {
+          await testInfo.attach(`page-${index}`, { path: file, contentType: 'image/png' });
+        }
       }
     }
   }, { auto: true }],

@@ -381,7 +381,7 @@ ALERT-FEISHU 起，下表的付款、退款、拒付、止损、积压告警和�
 | --- | --- |
 | 输入框和对话框架、发送、流式回复、持久化与积分 | `sim/00-warmup.spec.ts`、`sim/01-free-chat.spec.ts`：本地真实浏览器与模拟模型，检查回复、刷新、回合和账本。 |
 | 供应商错误、断流与错误提示 | `sim/02-failures.spec.ts`：模拟拒绝、断流和恢复，检查界面与结算；不证明真实供应商网络。 |
-| 超长文本发送前确认 | 原测试只针对旧路径和旧开关；当前编辑器限制长度，`composer-editor.browser.test.tsx` 检查截断，`bodyBound.test.ts` 检查模型输入上限，`turn-notices.test.ts` 检查超限提示。当前代码不再使用旧确认开关；是否满足原产品意图需冻结版验收，不能宣称对话框仍存在。 |
+| 超长文本输入保护 | Owner 2026-11-16 决定不恢复旧发送前确认弹窗，保留现行长度保护，取代旧的弹窗确认及取消发送验收（见 Master Plan 第 2.1 节）。`composer-editor.browser.test.tsx` 检查截断，`bodyBound.test.ts` 检查模型请求的输入上限，`turn-notices.test.ts`、`gate-notices.test.ts` 和 `use-turn-chat.test.ts` 检查超限拒绝与提示；按实际测试结果验收，不能用这些测试声称弹窗存在。`chat.integration.ts` 另有超限前不打开回合、不调用供应商的隔离集成测试；该测试是否通过以实际运行记录为准。 |
 | 旧路由升级事件 | 旧 `/api/ai/stream` 及 `route_upgraded` 属删除的旧路径；主路径使用 `/api/turn`。不能用新路径普通回复证明旧事件。 |
 | 流式停止按钮 | 旧聊天的停止功能不适用于现行普通对话：`turn-workspace.tsx` 记录 Owner 10-28 决定普通对话运行至结束；报告和导师停止是其他路径，按其各自验收，不把模拟断流称为用户停止。 |
 

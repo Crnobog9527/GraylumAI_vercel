@@ -15,11 +15,13 @@ import { createLocalRateLimit } from '../../packages/db/tests/v3/local-rate-limi
 import { signPreviewJwt } from '../../packages/db/tests/v3/preview-lifecycle.mjs';
 
 import { createRedisShim } from './redis-shim.mjs';
+import { createLocalStorage } from './local-storage.mjs';
 
 const docker = (...args) => execFileSync('docker', args, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-export async function startStack({ root, log = console.log }) {
+export async function startStack({ root, log = console.log, isAborted = () => false, releaseStorage = false }) {
+  const checkAbort = () => { if (isAborted()) throw new Error('simulation interrupted'); };
   const tag = `graylum-sim-${randomUUID().slice(0, 8)}`;
   const names = { db: `${tag}-db`, rest: `${tag}-rest`, auth: `${tag}-auth` };
   const secret = randomUUID() + randomUUID();
@@ -34,10 +36,12 @@ export async function startStack({ root, log = console.log }) {
     try { rateLimit.cleanup(); } catch (error) { log(String(error.message)); }
   };
   try {
+    checkAbort();
     docker('network', 'create', tag);
     docker('run', '-d', '--name', names.db, '--network', tag, '-p', '127.0.0.1::5432', '-e', 'POSTGRES_DB=sim',
       '-e', 'POSTGRES_HOST_AUTH_METHOD=trust', POSTGRES_IMAGE);
     for (let i = 0; ; i++) {
+      checkAbort();
       try { docker('exec', names.db, 'pg_isready', '-h', '127.0.0.1', '-U', 'postgres'); break; }
       catch { if (i > 150) throw new Error('local database not ready'); await sleep(200); }
     }
@@ -51,6 +55,7 @@ export async function startStack({ root, log = console.log }) {
       applyFile: path => outcome(() => psql(readFileSync(resolve(root, path), 'utf8'))),
       applyServerOnly: text => outcome(() => psql('', ['-c', text])),
     });
+    checkAbort();
     if (build.failed) throw new Error(`schema from files failed at ${build.failed.step}: ${build.failed.error.join(' | ')}`);
     log(`schema built from repository files: ${build.passed}/${build.steps} steps in ${Math.round((Date.now() - started) / 1000)} s`);
     psql('CREATE ROLE sim_auth LOGIN SUPERUSER; ALTER ROLE sim_auth SET search_path=auth,public;'
@@ -71,11 +76,14 @@ export async function startStack({ root, log = console.log }) {
     const port = (name, inner) => docker('port', name, inner).split(':').at(-1);
     const restUrl = `http://127.0.0.1:${port(names.rest, '3000')}`, authUrl = `http://127.0.0.1:${port(names.auth, '9999')}`;
     const bridge = await rateLimit.start();
+    checkAbort();
     // Lua flag and transaction fixes between the app and the bridge: scripts/e2e-sim/redis-shim.mjs.
     redisShim = createRedisShim(bridge.UPSTASH_REDIS_REST_URL);
     await new Promise((resolve, reject) => { redisShim.once('error', reject); redisShim.listen(0, '127.0.0.1', resolve); });
     const redis = { UPSTASH_REDIS_REST_URL: `http://127.0.0.1:${redisShim.address().port}`, UPSTASH_REDIS_REST_TOKEN: bridge.UPSTASH_REDIS_REST_TOKEN };
+    const localStorage = createLocalStorage(secret);
     gateway = createServer(async (req, res) => {
+      if (releaseStorage && req.url?.startsWith('/storage/v1/')) return localStorage(req, res);
       const prefix = req.url?.startsWith('/rest/v1/') ? '/rest/v1' : req.url?.startsWith('/auth/v1/') ? '/auth/v1' : null;
       if (!prefix) { res.writeHead(404).end(); return; }
       res.setHeader('Access-Control-Allow-Origin', '*');
@@ -98,11 +106,13 @@ export async function startStack({ root, log = console.log }) {
     await new Promise((resolve, reject) => { gateway.once('error', reject); gateway.listen(0, '127.0.0.1', resolve); });
     const apiUrl = `http://127.0.0.1:${gateway.address().port}`;
     for (let i = 0; ; i++) {
+      checkAbort();
       const ok = await Promise.all([fetch(`${restUrl}/`).then(r => r.status < 500, () => false), fetch(`${authUrl}/health`).then(r => r.ok, () => false)]);
       if (ok.every(Boolean)) break;
       if (i > 150) throw new Error('PostgREST or GoTrue not ready');
       await sleep(200);
     }
+    checkAbort();
     log(`local backend ready on ${apiUrl}`);
     return {
       apiUrl, secret, redis, stop, psql, redisStats: () => redisShim.stats,
