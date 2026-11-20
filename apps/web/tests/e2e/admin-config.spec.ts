@@ -111,11 +111,14 @@ test.describe('Admin Config Flows', () => {
       });
       await openAdminSettings(page);
 
-      const membershipPlan = page.getByTestId(/^membership-plan-/).first();
-      const membershipPlanCount = await membershipPlan.count();
+      await page.getByRole('tab', { name: '会员权限' }).click();
+      const firstMembershipPlan = page.getByTestId(/^membership-plan-/).first();
+      const membershipPlanCount = await firstMembershipPlan.count();
+      if (process.env.RELEASE_PREFLIGHT_ISOLATED === '1') expect(membershipPlanCount, 'isolated fixture requires a membership plan').toBeGreaterThan(0);
       if (membershipPlanCount > 0) {
-        const planId = (await membershipPlan.getAttribute('data-testid'))?.replace('membership-plan-', '') ?? '';
-        const exportSwitch = page.getByTestId(`membership-plan-allow-export-${planId}`);
+        const planId = (await firstMembershipPlan.getAttribute('data-testid'))?.replace('membership-plan-', '') ?? '';
+        const membershipPlan = page.getByTestId(`membership-plan-${planId}`);
+        const exportSwitch = page.getByTestId(`membership-plan-${planId}-allow-export`);
         const planSaveButton = page.getByTestId(`membership-plan-save-${planId}`);
 
         const originalExportChecked = await exportSwitch.getAttribute('data-state');
@@ -124,8 +127,9 @@ test.describe('Admin Config Flows', () => {
         steps.push('Update membership export permission, then verify persistence');
         await exportSwitch.click();
         await planSaveButton.click();
-        await expect(planSaveButton).toBeEnabled({ timeout: 30000 });
+        await expect(membershipPlan).toContainText('已保存并读回', { timeout: 30000 });
         await page.reload();
+        await page.getByRole('tab', { name: '会员权限' }).click();
         await expect(exportSwitch).toHaveAttribute('data-state', updatedExportChecked, { timeout: 15000 });
 
         steps.push('Restore the original membership export permission value');
@@ -134,13 +138,17 @@ test.describe('Admin Config Flows', () => {
           await exportSwitch.click();
         }
         await planSaveButton.click();
-        await expect(planSaveButton).toBeEnabled({ timeout: 30000 });
+        await expect(membershipPlan).toContainText('已保存并读回', { timeout: 30000 });
+        await page.reload();
+        await page.getByRole('tab', { name: '会员权限' }).click();
+        await expect(exportSwitch).toHaveAttribute('data-state', originalExportChecked!, { timeout: 15000 });
       } else {
         steps.push('Record that no membership plans exist in the current preview environment');
         actual = 'Global settings verified; membership plan settings unavailable in current preview data';
       }
 
       steps.push('Restore the original site name and support email');
+      await page.getByRole('tab', { name: '基础设置' }).click();
       await siteNameInput.fill(originalSiteName);
       await supportEmailInput.fill(originalSupportEmail);
       await saveAllSettings(page);
@@ -166,6 +174,44 @@ test.describe('Admin Config Flows', () => {
       );
     }
   });
+
+  if (process.env.RELEASE_PREFLIGHT_ENTITLEMENT_PROBE === '1') {
+    test('isolated membership entitlement save and restore', async ({ page }) => {
+      if (process.env.RELEASE_PREFLIGHT_ISOLATED !== '1') throw new Error('entitlement probe requires an isolated local stack');
+      await openAdminSettings(page);
+      await page.getByRole('tab', { name: '会员权限' }).click();
+      const firstRow = page.getByTestId(/^membership-plan-/).first();
+      await expect(firstRow).toBeVisible();
+      const planId = (await firstRow.getAttribute('data-testid'))?.replace('membership-plan-', '') ?? '';
+      const row = page.getByTestId(`membership-plan-${planId}`);
+      const input = page.getByTestId(`membership-plan-${planId}-profiles`);
+      const save = page.getByTestId(`membership-plan-save-${planId}`);
+      const exportSwitch = page.getByTestId(`membership-plan-${planId}-allow-export`);
+      const original = await input.inputValue();
+      const originalExport = await exportSwitch.getAttribute('data-state');
+      expect(['checked', 'unchecked']).toContain(originalExport);
+      const updatedExport = originalExport === 'checked' ? 'unchecked' : 'checked';
+      const updated = original === '1000' ? '999' : '1000';
+      await input.fill('1001');
+      await expect(save).toBeDisabled();
+      await input.fill(updated);
+      await exportSwitch.click();
+      await save.click();
+      await expect(row).toContainText('已保存并读回');
+      await page.reload();
+      await page.getByRole('tab', { name: '会员权限' }).click();
+      await expect(input).toHaveValue(updated);
+      await expect(exportSwitch).toHaveAttribute('data-state', updatedExport);
+      await input.fill(original);
+      await exportSwitch.click();
+      await save.click();
+      await expect(row).toContainText('已保存并读回');
+      await page.reload();
+      await page.getByRole('tab', { name: '会员权限' }).click();
+      await expect(input).toHaveValue(original);
+      await expect(exportSwitch).toHaveAttribute('data-state', originalExport!);
+    });
+  }
 
   test('should redirect public visitors to maintenance mode while allowing admins to continue', async ({ browser, page }, testInfo) => {
     test.setTimeout(90000);
@@ -340,15 +386,16 @@ test.describe('Admin Config Flows', () => {
     }
   });
 
-  test('should create, edit, and delete credit packages and membership plans', async ({ page }, testInfo) => {
+  test('should manage credit packages and enforce membership plan safeguards', async ({ page }, testInfo) => {
     test.setTimeout(90000);
     const steps: string[] = [];
     const monitor = createIssueMonitor(page);
     const packageName = `Parity Package ${Date.now()}`;
     const editedPackageName = `${packageName} Edited`;
     const planName = `Parity Plan ${Date.now()}`;
-    const editedPlanName = `${planName} Edited`;
     let actual = 'Package and membership flow completed';
+    const expectedIssues = new Set<ReturnType<typeof monitor.getIssues>[number]>();
+    const unexpectedIssues = (minimum?: 'P1') => monitor.getIssues(minimum).filter(issue => !expectedIssues.has(issue));
 
     try {
       steps.push('Open /admin/packages');
@@ -378,7 +425,7 @@ test.describe('Admin Config Flows', () => {
       await deletePackageDialogPromise;
       await expect(page.locator('tr').filter({ hasText: editedPackageName }).first()).toHaveCount(0, { timeout: 15000 });
 
-      steps.push('Switch to membership plans and create a new plan');
+      steps.push('Verify duplicate membership levels are rejected');
       await page.getByRole('tab', { name: '会员等级' }).click();
       await page.getByRole('button', { name: '创建会员等级' }).click();
       await page.getByTestId('membership-plan-name-input').fill(planName);
@@ -387,25 +434,54 @@ test.describe('Admin Config Flows', () => {
       await page.getByTestId('membership-plan-yearly-price-input').fill('299');
       await page.getByTestId('membership-plan-monthly-credits-input').fill('2900');
       await page.getByTestId('membership-plan-yearly-credits-input').fill('29900');
+      const issuesBeforeConflict = new Set(monitor.getIssues('P1'));
+      const conflictResponse = page.waitForResponse(response => response.url().includes('/api/trpc/admin.createMembershipPlan')
+        && response.request().method() === 'POST');
       await page.getByTestId('membership-plan-save').click();
-      await expect(page.getByRole('dialog')).toHaveCount(0, { timeout: 15000 });
-      await expect(page.locator('tr').filter({ hasText: planName }).first()).toBeVisible({ timeout: 15000 });
+      const response = await conflictResponse;
+      expect(response.status()).toBe(409);
+      await expect(page.getByText('该会员等级已存在方案，请编辑现有方案。')).toBeVisible({ timeout: 15000 });
+      let responseIgnored = false, consoleIgnored = false;
+      for (const issue of monitor.getIssues('P1')) {
+        if (issuesBeforeConflict.has(issue)) continue;
+        if (!responseIgnored && issue.source === 'response' && issue.status === 409 && issue.url === response.url()) {
+          expectedIssues.add(issue); responseIgnored = true;
+        } else if (!consoleIgnored && issue.source === 'console'
+          && /^Failed to load resource: the server responded with a status of 409\b/.test(issue.message)) {
+          expectedIssues.add(issue); consoleIgnored = true;
+        }
+      }
+      await expect(page.getByRole('dialog')).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(page.getByRole('dialog')).toHaveCount(0);
 
-      steps.push('Edit and then delete the temporary membership plan');
-      const planRow = page.locator('tr').filter({ hasText: planName }).first();
-      await planRow.getByRole('button').first().click();
-      await page.getByTestId('membership-plan-name-input').fill(editedPlanName);
-      await page.getByTestId('membership-plan-monthly-price-input').fill('39.9');
-      await page.getByTestId('membership-plan-save').click();
-      await expect(page.getByRole('dialog')).toHaveCount(0, { timeout: 15000 });
-      await expect(page.locator('tr').filter({ hasText: editedPlanName }).first()).toBeVisible({ timeout: 15000 });
+      steps.push('Verify an existing membership plan keeps its prices read-only');
+      const editButton = page.getByTestId(/^admin-membership-plan-edit-/).first();
+      await expect(editButton).toBeVisible();
+      const editId = await editButton.getAttribute('data-testid');
+      expect(editId).toBeTruthy();
+      await editButton.click();
+      await expect(page.getByTestId('membership-plan-monthly-price-input')).toBeDisabled();
+      await expect(page.getByTestId('membership-plan-yearly-price-input')).toBeDisabled();
+      if (process.env.RELEASE_PREFLIGHT_ISOLATED === '1') {
+        steps.push('Edit and restore the synthetic membership plan name');
+        const name = page.getByTestId('membership-plan-name-input');
+        const original = await name.inputValue();
+        await name.fill(planName);
+        await page.getByTestId('membership-plan-save').click();
+        await expect(page.getByRole('dialog')).toHaveCount(0, { timeout: 15000 });
+        await expect(page.locator('tr').filter({ hasText: planName }).first()).toBeVisible();
+        await page.getByTestId(editId!).click();
+        await name.fill(original);
+        await page.getByTestId('membership-plan-save').click();
+        await expect(page.getByRole('dialog')).toHaveCount(0, { timeout: 15000 });
+        await page.reload();
+        await page.getByRole('tab', { name: '会员等级' }).click();
+        await expect(page.getByTestId(editId!).locator('xpath=ancestor::tr')).toContainText(original);
+      } else await page.keyboard.press('Escape');
+      await expect(page.getByRole('dialog')).toHaveCount(0);
 
-      const deletePlanDialogPromise = acceptNextDialog(page);
-      await page.locator('tr').filter({ hasText: editedPlanName }).first().getByRole('button').nth(1).click();
-      await deletePlanDialogPromise;
-      await expect(page.locator('tr').filter({ hasText: editedPlanName }).first()).toHaveCount(0, { timeout: 15000 });
-
-      const blockingIssues = monitor.getIssues('P1');
+      const blockingIssues = unexpectedIssues('P1');
       expect(blockingIssues, JSON.stringify(blockingIssues, null, 2)).toEqual([]);
     } catch (error) {
       actual = error instanceof Error ? error.message : 'Unknown package or membership flow failure';
@@ -418,11 +494,11 @@ test.describe('Admin Config Flows', () => {
           title: 'admin-packages-membership-crud',
           role: 'admin',
           route: '/admin/packages',
-          expected: 'Admin users can create, edit, and delete temporary credit packages and membership plans without blocking issues.',
+          expected: 'Admin users can manage temporary credit packages; duplicate membership levels are rejected and existing prices are read-only.',
         },
         actual,
         steps,
-        monitor.getIssues(),
+        unexpectedIssues(),
       );
     }
   });

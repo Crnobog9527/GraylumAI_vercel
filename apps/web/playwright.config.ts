@@ -3,15 +3,20 @@ import path from 'node:path';
 import dotenv from 'dotenv';
 import { defineConfig, devices } from '@playwright/test';
 
-dotenv.config({
-  path: path.resolve(__dirname, '../../.env.local'),
-});
-dotenv.config({
-  path: path.resolve(__dirname, '.env.local'),
-  override: true,
-});
+if (process.env.RELEASE_PREFLIGHT_ISOLATED !== '1') {
+  dotenv.config({ path: path.resolve(__dirname, '../../.env.local') });
+  dotenv.config({ path: path.resolve(__dirname, '.env.local'), override: true });
+}
 
+const isolated = process.env.RELEASE_PREFLIGHT_ISOLATED === '1';
+const isolatedDir = process.env.RELEASE_PREFLIGHT_RUN_DIR;
+const isolatedSuite = process.env.RELEASE_PREFLIGHT_SUITE ?? 'default';
 const remoteBaseUrl = process.env.PLAYWRIGHT_BASE_URL;
+if (isolated && (!isolatedDir || !/^http:\/\/127\.0\.0\.1:\d+$/.test(remoteBaseUrl ?? '') ||
+  !/^http:\/\/127\.0\.0\.1:\d+$/.test(process.env.RELEASE_PREFLIGHT_PROXY ?? '') ||
+  !/^[a-z0-9-]+$/.test(isolatedSuite))) {
+  throw new Error('release preflight requires its local app and blocking proxy');
+}
 const shouldUseLocalWebServer = !process.env.CI && !remoteBaseUrl;
 const shouldSkipAuthSetup = process.env.SECURITY_E2E_LOCAL_ONLY === 'true';
 
@@ -28,7 +33,7 @@ export default defineConfig({
   testIgnore: ['**/core-path/**', '**/sim/**'],
 
   // Keep structured reports and per-test evidence under a stable directory
-  outputDir: 'test-results/artifacts',
+  outputDir: isolated ? path.join(isolatedDir!, 'artifacts', isolatedSuite) : 'test-results/artifacts',
 
   // Run tests in parallel
   fullyParallel: true,
@@ -44,24 +49,25 @@ export default defineConfig({
 
   // Reporter to use
   reporter: [
-    ['html', { open: 'never' }],
-    ['json', { outputFile: 'test-results/report.json' }],
+    ['html', { open: 'never', ...(isolated ? { outputFolder: path.join(isolatedDir!, 'html', isolatedSuite) } : {}) }],
+    ['json', { outputFile: isolated ? path.join(isolatedDir!, `report-${isolatedSuite}.json`) : 'test-results/report.json' }],
     ['list'],
   ],
 
   // Shared settings for all projects
   use: {
+    ...(isolated ? { proxy: { server: process.env.RELEASE_PREFLIGHT_PROXY! } } : {}),
     // Base URL for navigation
     baseURL: remoteBaseUrl || 'http://localhost:3000',
 
     // Keep trace artifacts for any failing flow audit in local runs
-    trace: 'retain-on-failure',
+    trace: isolated ? 'off' : 'retain-on-failure',
 
     // Take screenshot on failure
-    screenshot: 'only-on-failure',
+    screenshot: isolated ? 'off' : 'only-on-failure',
 
     // Record video on failure
-    video: 'retain-on-failure',
+    video: isolated ? 'off' : 'retain-on-failure',
   },
 
   // Configure projects for major browsers

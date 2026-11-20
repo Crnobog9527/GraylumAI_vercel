@@ -11,7 +11,9 @@ import { getE2ESql } from './e2eDb';
 
 export type E2ERole = 'user' | 'admin';
 
-const authDirectory = path.join(__dirname, '../.auth');
+const authDirectory = process.env.RELEASE_PREFLIGHT_ISOLATED === '1'
+  ? (process.env.RELEASE_PREFLIGHT_AUTH_DIR ?? '') : path.join(__dirname, '../.auth');
+if (!authDirectory) throw new Error('isolated preflight requires its temporary auth directory');
 
 export const authStatePaths = {
   user: path.join(authDirectory, 'user.json'),
@@ -41,13 +43,12 @@ export async function ensureAuthStateDirectory() {
   await mkdir(authDirectory, { recursive: true });
 }
 
-export async function ensureMaintenanceModeDisabled() {
-  const sql = getE2ESql();
-  await sql`
-    insert into system_settings (key, value)
-    values ('maintenance_mode', 'false'::jsonb)
-    on conflict (key) do update set value = excluded.value
-  `;
+export async function ensureMaintenanceModeDisabled(sql = getE2ESql()) {
+  const rows = await sql<{ value: unknown }[]>`select value from system_settings where key = 'maintenance_mode'`;
+  const value = rows[0]?.value;
+  if (value !== undefined && value !== false && value !== 'false') {
+    throw new Error('maintenance_mode is enabled or invalid; E2E setup will not modify it');
+  }
 }
 
 export async function waitForLoginFormReady(page: Page) {

@@ -7,10 +7,11 @@ vi.mock('../research/vendors/config',async original=>({...await original<object>
  config:{enabled:true,vendors:{tikhub:{enabled:true}}}})}));
 import {admitReadTurn} from './billedRead';
 const routes=['/xiaohongshu/app_v2/get_user_info','/xiaohongshu/app_v2/get_user_posted_notes'];
+const allRoutes=['/douyin/app/v3/handler_user_profile','/douyin/app/v3/fetch_user_post_videos',...routes];
 const now=new Date('2026-10-18T00:00:00Z');
 const STOP_LOSS={limitUsd:100,p:4,poolSize:16,uFastUsd:1,uBigUsd:5};
-function fixture(q='100',thresholds=routes){
- const entries:ProviderPriceEntry[]=routes.map((route,index)=>({provider:'tikhub',route,appliesToUnlistedRoutes:false,
+function fixture(q='100',thresholds=routes,priceRoutes=routes){
+ const entries:ProviderPriceEntry[]=priceRoutes.map((route,index)=>({provider:'tikhub',route,appliesToUnlistedRoutes:false,
   currency:'USD',usageUnit:'call',unitsPerPrice:'1',price:'0.01',usdPerCurrency:null,fxSourceUrl:null,fxEffectiveAt:null,
   fxValidUntil:null,pricingBasis:'fixture',sourceUrl:'https://example.org/pricing',evidenceHash:'a'.repeat(64),
   verifiedAt:'2026-10-17T00:00:00Z',validUntil:'2030-01-01T00:00:00Z',chargeCondition:'per call',
@@ -40,4 +41,13 @@ it('a route without its own start threshold refuses the read before anything ope
 it('the core-path switch off refuses the read',async()=>{
  const db=fixture();mock.rows=mock.rows.map(row=>(row as {key:string}).key==='core_path_v2'?{key:'core_path_v2',value:{enabled:false}}:row);
  expect(await admitReadTurn(db,routes,now)).toBeNull();
+});
+
+it('all four post-import routes require their own publish_monitor threshold and valid price',async()=>{
+ expect(await admitReadTurn(fixture('100',allRoutes,allRoutes),allRoutes,now)).not.toBeNull();
+ for (const missing of allRoutes) {
+  expect(await admitReadTurn(fixture('100',allRoutes.filter(route=>route!==missing),allRoutes),allRoutes,now)).toBeNull();
+  await expect(admitReadTurn(fixture('100',allRoutes,allRoutes.filter(route=>route!==missing)),allRoutes,now))
+   .rejects.toThrow('BILLING_UNIT_PROVIDER_PRICE_UNKNOWN');
+ }
 });

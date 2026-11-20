@@ -12,6 +12,7 @@ import { authStatePaths, hasCredentials } from './support/auth';
 import { gotoWithBypass } from './support/deploymentProtection';
 import { openMethodCheckoutDialog, settledPackBuyButton } from './support/methodCheckout';
 import { createIssueMonitor, writeFlowAudit } from './support/monitoring';
+import { simulateCheckoutDisplay } from './support/simulatedCheckout';
 
 const ticketUploadFixture = path.resolve(__dirname, './fixtures/ticket-attachment.png');
 const ticketUploadFixtureName = path.basename(ticketUploadFixture);
@@ -96,6 +97,7 @@ test.describe('User Extended Flows', () => {
   });
 
   test('should route subscription purchase actions into a real next step instead of failing silently', async ({ page }, testInfo) => {
+    const blockedPaymentWrites = process.env.RELEASE_PREFLIGHT_ISOLATED === '1' ? await simulateCheckoutDisplay(page) : null;
     const steps: string[] = [];
     const monitor = createIssueMonitor(page);
     let actual = 'Subscription purchase action reached a real next step';
@@ -128,6 +130,7 @@ test.describe('User Extended Flows', () => {
         await page.keyboard.press('Escape');
       }
 
+      if (blockedPaymentWrites) expect(blockedPaymentWrites()).toBe(0);
       const blockingIssues = monitor.getIssues('P1');
       expect(blockingIssues, JSON.stringify(blockingIssues, null, 2)).toEqual([]);
     } catch (error) {

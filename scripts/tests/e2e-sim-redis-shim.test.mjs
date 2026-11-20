@@ -72,3 +72,15 @@ test('the shim counts bridge errors and keeps only path, status and time, never 
   assert.match(shim.stats.anomalies[0], /^\d\d:\d\d:\d\d\.\d{3} \/pipeline 500 \d+ms$/);
   assert.doesNotMatch(JSON.stringify(shim.stats), /secret-key/);
 });
+
+test('the shim counts Redis protocol errors without recording their contents', async t => {
+  const bridge = createServer((req, res) => { req.resume(); req.on('end', () => res.writeHead(200).end(JSON.stringify([
+    { error: 'NOSCRIPT missing secret-key' }, { error: 'ERR secret-key' }, { result: 1 },
+  ]))); });
+  const shim = createRedisShim(await listen(t, bridge));
+  const base = await listen(t, shim);
+  assert.equal((await post(base, '/pipeline', [['get', 'secret-key']])).status, 200);
+  assert.equal(shim.stats.redisNoScript, 1);
+  assert.equal(shim.stats.redisOtherErrors, 1);
+  assert.doesNotMatch(JSON.stringify(shim.stats), /secret-key/);
+});

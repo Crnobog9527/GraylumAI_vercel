@@ -42,7 +42,7 @@ export function transactionGate() {
  */
 export function createRedisShim(bridgeUrl, { request = fetch } = {}) {
   const gate = transactionGate();
-  const stats = { calls: 0, errors: 0, slow: 0, maxMs: 0, anomalies: [] };
+  const stats = { calls: 0, errors: 0, redisNoScript: 0, redisOtherErrors: 0, invalidJson: 0, slow: 0, maxMs: 0, anomalies: [] };
   const note = (path, status, started) => {
     const ms = Date.now() - started;
     stats.calls++; stats.maxMs = Math.max(stats.maxMs, ms);
@@ -66,6 +66,15 @@ export function createRedisShim(bridgeUrl, { request = fetch } = {}) {
       const response = await request(bridgeUrl + req.url, { method: req.method, signal: AbortSignal.timeout(15_000),
         headers: { authorization: req.headers.authorization ?? '', 'content-type': 'application/json' }, body: req.method === 'GET' ? undefined : body });
       const payload = Buffer.from(await response.arrayBuffer());
+      try {
+        const result = JSON.parse(payload.toString('utf8'));
+        for (const item of Array.isArray(result) ? result : [result]) {
+          if (item && typeof item === 'object' && typeof item.error === 'string') {
+            if (/^NOSCRIPT\b/i.test(item.error)) stats.redisNoScript++;
+            else stats.redisOtherErrors++;
+          }
+        }
+      } catch { stats.invalidJson++; }
       res.writeHead(response.status, { 'content-type': response.headers.get('content-type') ?? 'application/json' });
       res.end(payload);
       note(path, response.status, started);
