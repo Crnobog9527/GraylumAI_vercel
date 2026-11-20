@@ -1,4 +1,6 @@
 import { defineConfig, devices } from '@playwright/test';
+import path from 'node:path';
+const isolatedDir = process.env.RELEASE_PREFLIGHT_RUN_DIR;
 
 // ANALYTICS-CONSENT: the local app has no visitor country, so it counts as an opt-in region and shows the statistics consent bar until
 // the visitor chooses. Journeys start as a visitor who already accepted (like one outside Europe); 12-consent-bar.spec.ts clears this to
@@ -16,21 +18,22 @@ const storageState = process.env.SIM_BASE_URL
 export default defineConfig({
   testDir: './tests/e2e/sim',
   testMatch: /.*\.spec\.ts/,
-  outputDir: 'test-results/sim/artifacts',
+  outputDir: isolatedDir ? path.join(isolatedDir, 'sim-artifacts') : 'test-results/sim/artifacts',
   // One local app and one database: journeys run one after another, each on its own account where balances matter.
   fullyParallel: false,
   workers: 1,
   retries: 0,
   forbidOnly: !!process.env.CI,
-  reporter: [['list'], ['json', { outputFile: 'test-results/sim/report.json' }]],
+  reporter: [['list'], ['json', { outputFile: isolatedDir ? path.join(isolatedDir, 'sim-report.json') : 'test-results/sim/report.json' }]],
   use: {
+    ...(process.env.RELEASE_PREFLIGHT_PROXY ? { proxy: { server: process.env.RELEASE_PREFLIGHT_PROXY } } : {}),
     baseURL: process.env.SIM_BASE_URL,
     storageState,
     actionTimeout: 30_000,
     // The development server compiles a route on its first visit.
     navigationTimeout: 120_000,
-    trace: 'retain-on-failure',
-    screenshot: 'only-on-failure',
+    trace: process.env.RELEASE_PREFLIGHT_PROXY ? 'off' : 'retain-on-failure',
+    screenshot: process.env.RELEASE_PREFLIGHT_PROXY ? 'off' : 'only-on-failure',
     ...devices['Desktop Chrome'],
   },
   timeout: 4 * 60_000,

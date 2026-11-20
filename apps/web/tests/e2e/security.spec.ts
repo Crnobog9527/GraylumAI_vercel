@@ -4,6 +4,7 @@ import { test, expect } from '@playwright/test';
 import { TRPCClientError, createTRPCProxyClient, httpBatchLink } from '@trpc/client';
 import type { AppRouter } from '@repo/api/src/root';
 import { gotoWithBypass } from './support/deploymentProtection';
+import { securityHeaderProblems } from './support/securityHeaders';
 import { authStatePaths, clearBrowserAuthState, hasCredentials, waitForLoginFormReady } from './support/auth';
 
 function getBaseUrl() {
@@ -113,7 +114,7 @@ test.describe('Security', () => {
     });
 
     test('should sanitize HTML entities in displayed content', async ({ page }) => {
-      await gotoWithBypass(page, '/register');
+      await gotoWithBypass(page, '/login?action=signup&method=email');
 
       // Attempt XSS via various payloads
       const xssPayloads = [
@@ -292,37 +293,27 @@ test.describe('Security', () => {
   // Security Headers Tests
   // ============================================
   test.describe('Security Headers', () => {
+    test('should publish the configured security headers on the login page', async ({ page }) => {
+      const response = await gotoWithBypass(page, '/login');
+      expect(securityHeaderProblems(response?.headers() ?? {})).toEqual([]);
+    });
+
     test('should have X-Frame-Options header', async ({ page }) => {
       const response = await gotoWithBypass(page, '/');
 
-      const xFrameOptions = response?.headers()['x-frame-options'];
-      // Should be set (DENY or SAMEORIGIN)
-      // Note: May be set by Vercel middleware or Next.js
-      if (xFrameOptions) {
-        expect(['DENY', 'SAMEORIGIN', 'deny', 'sameorigin']).toContain(xFrameOptions);
-      }
+      expect(securityHeaderProblems(response?.headers() ?? {})).not.toContain('x-frame-options');
     });
 
     test('should have X-Content-Type-Options header', async ({ page }) => {
       const response = await gotoWithBypass(page, '/');
 
-      const xContentType = response?.headers()['x-content-type-options'];
-      if (xContentType) {
-        expect(xContentType.toLowerCase()).toBe('nosniff');
-      }
+      expect(securityHeaderProblems(response?.headers() ?? {})).not.toContain('x-content-type-options');
     });
 
-    test('should have X-XSS-Protection header or CSP', async ({ page }) => {
+    test('should publish the configured report-only CSP directives', async ({ page }) => {
       const response = await gotoWithBypass(page, '/');
-      const headers = response?.headers() || {};
-
-      // Either X-XSS-Protection or Content-Security-Policy should be present
-      const hasXSSProtection = headers['x-xss-protection'] !== undefined;
-      const hasCSP = headers['content-security-policy'] !== undefined;
-
-      // At least one protection should be enabled
-      // Note: Modern browsers rely more on CSP than X-XSS-Protection
-      expect(hasXSSProtection || hasCSP || true).toBe(true); // Soft check
+      // The current CSP is report-only. This checks its configuration, not browser enforcement.
+      expect(securityHeaderProblems(response?.headers() ?? {})).not.toContain('content-security-policy-report-only');
     });
 
     test('should not expose server version in headers', async ({ page }) => {
@@ -584,9 +575,14 @@ test.describe('Retired invitation links', () => {
         if (request.url().includes('invitation.')) invitationCalls.push(request.url());
       });
       await gotoWithBypass(page, `/login?${query}`);
-      await waitForLoginFormReady(page);
       const signup = query.startsWith('action=signup');
-      await expect(page.locator('form button[type="submit"]')).toContainText(signup ? '创建账户' : '登录', { timeout: 30000 });
+      // Simplified Chinese defaults to phone; an old invitation link must preserve that normal entry.
+      await expect(page.getByRole('tab', { name: '手机号' })).toHaveAttribute('aria-selected', 'true');
+      await expect(page.locator('input[type="tel"]')).toBeVisible();
+      await expect(page.locator('form button[type="submit"]')).toContainText('获取验证码', { timeout: 30000 });
+      await page.getByRole('tab', { name: '邮箱' }).click();
+      await expect(page.locator('input[type="email"]')).toBeVisible();
+      await expect(page.locator('form button[type="submit"]')).toContainText(signup ? '创建账户' : '登录');
       if (signup) await expect(page.locator('#nickname')).toBeVisible();
       await expect(page.locator('#invite-code')).toHaveCount(0);
       await expect(page.getByText('邀请码')).toHaveCount(0);

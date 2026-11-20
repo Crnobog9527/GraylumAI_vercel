@@ -2,10 +2,11 @@
 import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { chromium, expect as ui, type Browser, type Page } from '@playwright/test';
+import { chromium, expect as ui, type Browser, type BrowserServer, type Page } from '@playwright/test';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 
 let browser: Browser;
+let browserServer: BrowserServer;
 let code: string;
 const entry = fileURLToPath(new URL('./__composer_fixture__.js', import.meta.url));
 
@@ -35,9 +36,12 @@ beforeAll(async () => {
   const output = Array.isArray(bundle) ? bundle[0].output : bundle.output;
   code = output.find((item: { type: string }) => item.type === 'chunk').code;
   const chrome = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-  browser = await chromium.launch({ executablePath: existsSync(chrome) ? chrome : undefined, headless: true });
+  browserServer = await chromium.launchServer({ executablePath: existsSync(chrome) ? chrome : undefined, headless: true });
+  browser = await chromium.connect(browserServer.wsEndpoint());
 }, 60000);
-afterAll(async () => { await browser?.close(); });
+afterAll(async () => {
+  try { await browser?.close(); } finally { await browserServer?.kill(); }
+});
 
 async function open(run: (page: Page) => Promise<void>) {
   const page = await browser.newPage();

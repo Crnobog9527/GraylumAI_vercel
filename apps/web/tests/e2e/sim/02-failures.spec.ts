@@ -114,12 +114,19 @@ test('provider timeout after its headers (240 s deadline): the turn closes, its 
   await expectHeldThenRefunded(turn, before);
 });
 
-// Known gap, reported (not a pass): when the provider sends nothing at all before the 240 s deadline, the call has no generation id,
-// so the recovery job can never look it up and rule 0489 (which needs the provider's own "not found") never applies: the freeze has
-// no automatic exit. Observed with the simulator on 2026-11-03 (turn_calls: status unknown, cost_pending, provider_id null).
-// Whether such a freeze is refunded is a billing decision for the Owner; until then this case is listed, not asserted.
-test.fixme('provider silent until the deadline (no generation id): the freeze has an automatic exit', async ({ page }) => {
+// 0494 / #1681: an unknown model call without a provider id is kept for 24 hours, then refunded once.
+// The simulator withholds even the response headers, so the real transport never receives an identity.
+test('provider silent until the deadline: no identity is refunded once after 24 hours', async ({ page }) => {
   test.setTimeout(10 * 60_000);
   const { turn, before } = await failedTurn(page, { mode: 'silent' }, 300_000);
+  const bob = seed().users.bob;
+  const pending = await db()`select status, cost_pending, provider_id from turn_calls
+    where actor_id = ${bob.id}::uuid and turn_id = ${turn.id}::bigint and call_kind = 'model'`;
+  expect(pending).toHaveLength(1);
+  expect(pending[0]).toMatchObject({ status: 'unknown', cost_pending: true, provider_id: null });
   await expectHeldThenRefunded(turn, before);
+  const settled = await db()`select status, cost_pending, provider_id, usage->>'source' as source from turn_calls
+    where actor_id = ${bob.id}::uuid and turn_id = ${turn.id}::bigint and call_kind = 'model'`;
+  expect(settled).toHaveLength(1);
+  expect(settled[0]).toMatchObject({ status: 'rejected', cost_pending: false, provider_id: null, source: 'no_identity_24h' });
 });

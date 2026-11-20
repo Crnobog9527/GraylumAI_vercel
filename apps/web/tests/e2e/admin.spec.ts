@@ -135,7 +135,7 @@ test.describe('Admin Dashboard', () => {
       steps.push('Verify users page heading and filter form');
       await expect(page.getByRole('heading', { name: '用户管理' })).toBeVisible();
       await expect(page.locator('table').first()).toBeVisible();
-      await expect(page.locator('input[placeholder="邮箱或昵称..."]').first()).toBeVisible();
+      await expect(page.locator('input[placeholder="邮箱、昵称或手机号..."]').first()).toBeVisible();
 
       const blockingIssues = monitor.getIssues('P1');
       expect(blockingIssues, JSON.stringify(blockingIssues, null, 2)).toEqual([]);
