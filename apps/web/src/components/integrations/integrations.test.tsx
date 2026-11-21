@@ -7,7 +7,7 @@ vi.mock('@/trpc/client', () => ({ trpc: {
   useUtils: () => ({ connectors: { shotvivaStatus: { invalidate: vi.fn() }, connectionStatus: { invalidate: vi.fn() } } }),
   connectors: { shotvivaStatus: { useQuery: mocks.status }, shotvivaDisconnect: { useMutation: mocks.disconnect },
     connectionStatus: { useQuery: mocks.connection }, connectionDisconnect: { useMutation: mocks.connectionDisconnect } } } }));
-import { INTEGRATIONS } from '@/lib/integrations/catalog';
+import { FEISHU_BASE_MODULE, INTEGRATIONS } from '@/lib/integrations/catalog';
 import { IntegrationDetailBody, IntegrationViewLink } from './IntegrationDetail';
 import { IntegrationsView } from './IntegrationsView';
 import type { ShotvivaState } from './use-shotviva';
@@ -134,16 +134,23 @@ describe('starting a connection', () => {
   });
 });
 
-describe('INTEGRATION-BASE: the Feishu Base module', () => {
-  const feishu = INTEGRATIONS.find(module => module.id === 'feishu-base')!;
+describe('INTEGRATION-BASE: the Feishu Base module (paused 2026-11-22, not listed; the component is still tested from its constant)', () => {
+  const feishu = FEISHU_BASE_MODULE;
   const conn = (data: unknown, over: Partial<ConnectionState> = {}) => ({ provider: 'feishu_base', status: { data, isLoading: false },
     disconnect: { mutate: vi.fn(), isPending: false, isError: false }, ...over }) as unknown as ConnectionState;
   const view = (c: ConnectionState) => renderToStaticMarkup(<><IntegrationDetailBody module={feishu} connection={c}/>
     <IntegrationViewLink module={feishu}/></>);
   const words = (html: string) => html.replace(/<[^>]+>/g, '');
 
-  it('a card on the page with its own state; the detail draws what it does instead of pictures', () => {
+  it('the page lists no Feishu card and asks for no Feishu status while it is paused', () => {
     const page = renderToStaticMarkup(<IntegrationsView result={{}}/>);
+    expect(page).toContain('Shotviva');
+    expect(page).not.toContain('飞书');
+    expect(mocks.connection).toHaveBeenCalledWith({ provider: 'feishu_base' }, expect.objectContaining({ enabled: false }));
+  });
+
+  it('a card on the page with its own state; the detail draws what it does instead of pictures', () => {
+    const page = renderToStaticMarkup(<IntegrationsView result={{}} modules={[shotviva, feishu]}/>);
     expect(page).toContain('飞书多维表格');
     expect(mocks.connection).toHaveBeenCalledWith({ provider: 'feishu_base' }, expect.anything());
     const html = view(conn({ eligible: true, connected: false, label: null, last4: null, failed: false }));
@@ -174,7 +181,7 @@ describe('INTEGRATION-BASE: the Feishu Base module', () => {
     expect(words(failed)).toContain('授权已失效');
     expect(failed).toContain('data-connection="failed"');
     mocks.connection.mockReturnValue({ data: { eligible: true, connected: true, label: 'x', last4: 'ab12', failed: true }, isLoading: false });
-    expect(renderToStaticMarkup(<IntegrationsView result={{}}/>)).toContain('需重新连接');
+    expect(renderToStaticMarkup(<IntegrationsView result={{}} modules={[shotviva, feishu]}/>)).toContain('需重新连接');
   });
 
   it('an unreadable state is not "未连接"', () => {
