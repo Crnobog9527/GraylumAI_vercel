@@ -41,7 +41,8 @@ const STATES = {
 export type StateName = keyof typeof STATES | 'loading' | 'failed';
 
 /** The integrations page as one HTML document: the real components, the app's compiled CSS, the server stood in for. */
-export async function buildIntegrationsPage(): Promise<string> {
+/** `withFeishu`: also lists the paused Feishu card (FEISHU_BASE_MODULE), for the test that measures its own introduction. */
+export async function buildIntegrationsPage(withFeishu = false): Promise<string> {
   const require = createRequire(import.meta.url);
   const { build } = await import(pathToFileURL(createRequire(require.resolve('vitest/package.json')).resolve('vite')).href);
   const file = (name: string) => JSON.stringify(fileURLToPath(new URL(name, import.meta.url)));
@@ -60,8 +61,9 @@ export async function buildIntegrationsPage(): Promise<string> {
       return `import React from 'react'; import { createRoot } from 'react-dom/client';
         import ${file('../../../app/globals.css')};
         import { IntegrationsView } from ${file('../IntegrationsView.tsx')};
+        import { FEISHU_BASE_MODULE, INTEGRATIONS } from ${file('../../../lib/integrations/catalog.ts')};
         createRoot(document.getElementById('root')).render(React.createElement('div', { style: { height: '100vh', background: '#f7f5f1' } },
-          React.createElement(IntegrationsView, { result: {} })));`;
+          React.createElement(IntegrationsView, { result: {}, modules: ${withFeishu ? '[...INTEGRATIONS, FEISHU_BASE_MODULE]' : 'INTEGRATIONS'} })));`;
     } }],
     build: { write: false, minify: false, cssCodeSplit: false, lib: { entry, name: 'IntegrationDetailTest', formats: ['iife'] } },
   });

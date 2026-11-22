@@ -100,6 +100,17 @@ Owner 在总控窗口的原话：
 - 隐私政策和 Termly 里原计划新增的 PostHog 数据处理方不再需要；pvuv 是否涉及新的数据处理方，等方案到后再看（条款文字仍由 Owner 生成）。
 - 本条只记决定，不授权开新外部账号、新增密钥或改正式环境。
 
+**2026-11-22：面向用户的飞书多维表格连接器暂停，集成页不再显示飞书卡片（INTEGRATION-BASE、V3-FEISHU；取代 2026-11-14"飞书集成上线前做缩小版"一条，以及同日把这两项挪到上线前的那一行）**
+
+Owner 原话（2026-11-22）：
+
+> 修改一下，连接器暂时不要接飞书了。
+
+- 面向用户的飞书连接器暂停：F1（飞书连接）、F2（写入闭环）不开工；集成页的"飞书多维表格"卡片已隐藏，只显示 Shotviva；作品旁不出现"写入飞书"按钮。
+- 已有代码不删，以后恢复时重新列入：B1 连接表和 Vault（迁移 0534）、连接器后端、飞书卡片组件和介绍都保留，但上线范围内没有入口、不使用（`apps/web/src/lib/integrations/catalog.ts` 里改为单独导出的 `FEISHU_BASE_MODULE`，不在 `INTEGRATIONS` 里）。
+- 取代：2026-11-14"飞书集成上线前做缩小版"整条的上线范围和排期；以及 2026-11-14 把 INTEGRATION-BASE、V3-FEISHU 挪到上线前的那一行。7.1 节任务表里这两个任务标注为"阻塞：Owner 暂不接飞书"，Owner 再次决定恢复时删掉标注。
+- 不受影响：ALERT-FEISHU（Owner 自己的飞书群告警机器人，2026-11-07 一条）照常。
+
 **2026-11-16：后台站点设置保存后及时更新公开页面**
 
 Owner 在总控窗口回复：
@@ -4627,7 +4638,7 @@ node scripts/plan-progress.mjs --ref origin/staging
 | | MOBILE-UX | 落地页和应用内页面按原生 App 交互重做手机端（底部导航、全屏页面切换、底部弹层、大点击区等），开工前先出方案由 Owner 定稿；上线前做（第 2.1 节 2026-10-23、2026-11-12） | 方案由 Owner 定稿；与 LANDING-ART、UI-UNIFY、PUBLISH-SCHEDULE 按页面排队改同一批文件 | 高 | 大 / 待方案 | — |
 | | PROFILE-AVATAR | 用户自定义头像：上传、裁剪、换头像删旧文件、注销时一起删；上线前做（第 2.1 节 2026-11-12） | — | 中（含注销清理和存储策略） | 小 / 2 | — |
 | | INTEGRATION-SHOTVIVA | Shotviva 生图连接器和"集成"展示页：连接/断开（只存 shotviva_account_id）、对话里出图（Shotviva 计费，Graylum 不结算，免费会员不能用）、集成页每个自家产品一个展示模块、跳转带追踪；打通后才上线（第 2.1 节 2026-11-05、2026-11-12） | Shotviva 伙伴接口（Shotviva 侧已有）；staging 伙伴密钥由 Owner 填 | 高 | 中 / 5 | — |
-| **5 上线后** | INTEGRATION-BASE → V3-FEISHU、SOCIAL-SYNC | **2026-11-14 Owner 把 INTEGRATION-BASE、V3-FEISHU 改为上线前**（第 2.1 节 2026-11-14），**同日选定缩小版：作品一键写入飞书多维表格，授权码连接，只做飞书，只给 Pro/Gold**（第 2.1 节 2026-11-14 飞书条）。沿用 v11 §8（C1 套餐式自动追踪已确认）。2026-10-13：SOCIAL-SYNC 并入 PUBLISH-MONITOR 上线前完成（第 2.1 节），本行只剩 INTEGRATION-BASE、V3-FEISHU | — | 高 | 大 | SOCIAL-SYNC：关闭：2026-10-13 并入 PUBLISH-MONITOR 上线前完成 |
+| **5 上线后** | INTEGRATION-BASE → V3-FEISHU、SOCIAL-SYNC | **2026-11-22 Owner 决定暂不接飞书，这两项暂停（第 2.1 节 2026-11-22）。** 2026-11-14 Owner 把 INTEGRATION-BASE、V3-FEISHU 改为上线前**（第 2.1 节 2026-11-14），**同日选定缩小版：作品一键写入飞书多维表格，授权码连接，只做飞书，只给 Pro/Gold**（第 2.1 节 2026-11-14 飞书条）。沿用 v11 §8（C1 套餐式自动追踪已确认）。2026-10-13：SOCIAL-SYNC 并入 PUBLISH-MONITOR 上线前完成（第 2.1 节），本行只剩 INTEGRATION-BASE、V3-FEISHU | — | 高 | 大 | INTEGRATION-BASE：阻塞：Owner 2026-11-22 决定暂不接飞书；V3-FEISHU：阻塞：Owner 2026-11-22 决定暂不接飞书；SOCIAL-SYNC：关闭：2026-10-13 并入 PUBLISH-MONITOR 上线前完成 |
 | | ANALYTICS-POSTHOG | **已关闭（2026-11-22，Owner 决定改用 pvuv，见第 2.1 节 2026-11-22；由 ANALYTICS-PVUV 取代）**。原内容：用户归因接入 PostHog 云（美国区）（第 2.1 节 2026-10-21，已被取代） | — | — | — | 关闭：Owner 2026-11-22 改用 pvuv |
 | | ANALYTICS-PVUV | **2026-11-22 Owner 决定，上线前做**（第 2.1 节 2026-11-22）：照 Shotviva 现在的 pvuv 做法实现 Graylum 的访问和来源统计（页面浏览、访客去重、来源归因），按 Graylum 自己的代码写；跟随现有 Termly 同意状态；注销时删除该用户的统计数据。具体范围以 Shotviva 方案到后总控出的方案为准 | 等 Shotviva 总控提供 pvuv 方案 | 中（含注销对接） | 待方案 | 阻塞：等 Shotviva 的 pvuv 方案 |
 | | CHARGEBACK | **2026-11-14 Owner 改为上线前**（第 2.1 节 2026-11-14）；**范围以第 2.1 节 2026-11-14"拒付处理上线前四块全做"为准**：G1 判输结案（Owner 点按钮）、G2 判赢补发加重订邮件、G3 申诉材料汇总页（不自动提交）、G4 未结或判输拒付不能再买；账单商户名"GRAYLUM AI"由 Owner 在 Stripe 正式后台设置。以下旧写法里与之冲突的（"上线后""限制反复拒付"未定规则、账单商户名由 Waffo 控制）以该条为准。方向（Owner 2026-10-04，第 2.1 节第 51 项，[记录 W](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981381009)、[记录 X](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981808905)；**上线后任务，不阻塞上线**）：拒付最终判定输了，按商品分别处理：订阅按退款规则处理这一期（扣掉还没用完的积分、终止这份订阅以后的积分发放，是创始会员的立即结束创始身份，名额不放回）；微信一次性会员结束这一期，1 年期的终止以后按月发放的积分、扣掉这一期还没用完的积分（是创始会员的同样结束创始身份）；订阅和微信一次性会员被冻结的已发积分判输扣回、判赢解冻，不动其他来源（[记录 AC](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982525998)）；积分包扣回这个包里没用完的积分、判赢解冻，不动其他来源的积分（[记录 Z](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982115736)）；所有拒付都不自动接受，由 Owner 人工处理（[记录 Y](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982111397)）；赢了就解除 PAY-DISPUTE-GUARD 的冻结、恢复，按幂等处理（拒付期间被暂停的按月积分，判赢后按原发放日逐期补发，幂等，不改变原会员期限和发放日期，不延到原到期日之后）；订阅判赢后不自动恢复扣费，提醒用户自己重新订阅；判输时订阅终止（[记录 AD](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982615688)），具体由 CHARGEBACK 方案提出、Owner 批准；一键导出申诉材料（用收款核心的同意记录和订单、付款、Stripe 记录；PAY-EVIDENCE 已于 2026-10-19 决定不做，不采集付款 IP/设备证据）；限制同一人反复拒付；信用卡账单商户名（由 Waffo 控制）。续费和到期提醒归 PAY-NOTIFY，拒付事件接收和可撤回冻结归 PAY-DISPUTE-GUARD，上线前完成（2026-10-09 拆分）。拒付通知方式、举证截止日和手续费（每笔 $25）已由 [Waffo 2026-10-10 答复](https://github.com/Crnobog9527/GraylumAI_vercel/pull/752#issuecomment-6095292601)；开工前仍须向 Waffo 核实要交的材料和账单商户名。2026-10-12 补充：新订单改走 Stripe（MP 订单由 Stripe 作为记录商户处理拒付，大陆通道和钱包单笔由我们处理），上文 Waffo 的通知方式、手续费、材料和账单商户名只适用于旧 Waffo 订单；按 Stripe 的做法实施时由方案细化 | PAY-STRIPE-MP、PAY-NOTIFY、PAY-DISPUTE-GUARD；拒付材料和账单商户名核实（旧 Waffo 订单仍向 Waffo 核实） | 高 | 待实施方案细化 | — |
