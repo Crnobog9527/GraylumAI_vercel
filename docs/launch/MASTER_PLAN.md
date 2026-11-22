@@ -84,7 +84,7 @@
 
 ### 2.1 Owner 的新决定（2026-09-27 起，2026-11-22 更新）
 
-**2026-11-22：统计跟 Shotviva 一样改用 pvuv，不再接 PostHog（ANALYTICS-PVUV，取代 ANALYTICS-POSTHOG）**
+**2026-11-22：统计跟 Shotviva 一样改用 pvuv，不接 PostHog，也不接 GA4（ANALYTICS-PVUV，取代 ANALYTICS-POSTHOG、ANALYTICS-GA4）**
 
 Owner 在总控窗口的原话：
 > shotviva 的统计换成了pvuv 了。 posthog 下线了。
@@ -94,7 +94,9 @@ Owner 在总控窗口的原话：
 
 - Graylum 不接 PostHog；用户来源和访问统计照 Shotviva 现在的 pvuv 做法实现，按 Graylum 自己的代码写，不直接复制。新任务 ANALYTICS-PVUV（第 7.1 节），上线前做。
 - 取代：2026-10-21"用户归因接入 PostHog（美国区）"；2026-11-14 条里 ANALYTICS-POSTHOG 挪到上线前的部分。2026-11-14"参照 Shotviva 方案实施"的原则不变，方案改为参照 Shotviva 的 pvuv。
-- GA4 不在本决定范围：Owner 这次回答的是 PostHog 换 pvuv。ANALYTICS-GA4 仍按 2026-11-14 的决定上线前做；Shotviva 已确认自己不用 GA4，"Graylum 是否也不接 GA4"待 Owner 单独确认后再改。
+- GA4：Shotviva 总控确认 Shotviva 不用 GA4、也没接 Google Ads。总控单独问"GA4 也跟 Shotviva 一样不接吗？"（选项：不接 GA4 / 照旧接 GA4），Owner 回复：
+  > 不接 GA4
+  ANALYTICS-GA4 关闭；Graylum 现有的 GA 代码保持休眠（不设编号就不加载），不删。取代 2026-11-14 条里 ANALYTICS-GA4 挪到上线前的部分和 2026-10-13/10-26 的 GA4 安排。
 - 隐私政策和 Termly 里原计划新增的 PostHog 数据处理方不再需要；pvuv 是否涉及新的数据处理方，等方案到后再看（条款文字仍由 Owner 生成）。
 - 本条只记决定，不授权开新外部账号、新增密钥或改正式环境。
 
@@ -4635,7 +4637,7 @@ node scripts/plan-progress.mjs --ref origin/staging
 | | I18N-EN | 产品英文版（第 2.1 节 2026-10-12 多语言决定）：产品界面英文化、语言切换提示条、英文 Skill 用户可见文字、英文网站页面（/en）；Skill 内核仍以简体中文为唯一原版。上线前只做 SKILL-I18N-HOOK 打底。 | REL-1 上线、SKILL-I18N-HOOK | 高 | 中 | — |
 | | VOICE-2 | **2026-11-14 Owner 改为上线前**（第 2.1 节 2026-11-14）。**上线后**文风 2.0（Owner 2026-10-25）：按需检索 2–3 篇同类型不同话题旧稿做范例、导入自己账号的历史帖子、代码统计句长/开头/结构、生成后代码查雷同并只改雷同句、学习用户对稿子的修改、网盘连接用 Google Picker 方式；开工前先出方案由 Owner 定稿（第 2.1 节 2026-10-25） | VOICE、REL-1 | 中 | 上线后，待出方案 | — |
 | | CONTENT-CONVERSATION-2 | **2026-11-14 Owner 改为上线前**（第 2.1 节 2026-11-14）。从 CONTENT-CONVERSATION-DRIVEN 拆出的上线后部分（Owner 2026-10-26）：内容对话剩余 7 个 PR、"一窗口一选题"提醒、整理纪要（REL-1 第 1.3 节） | CONTENT-CONVERSATION-DRIVEN | 高 | 中 / 7 | — |
-| | ANALYTICS-GA4 | **2026-11-14 Owner 改为上线前**（第 2.1 节 2026-11-14）。参照 Shotviva 埋点方案实施，方案到之前不开工。**2026-11-22：Shotviva 不用 GA4；Graylum 是否也不接，待 Owner 单独确认（第 2.1 节 2026-11-22），确认前范围不变。**从 ANALYTICS 拆出的 GA4 部分（Owner 2026-10-26，沿用 2026-10-13 决定：上线后第一周再定）：GA4 编号和密钥、付款与首次来源上报接 GA4、`paywall_view` 结果 | ANALYTICS | 普通 | 小 / 1 | 阻塞：待 Owner 确认是否跟 Shotviva 一样不接 GA4（第 2.1 节 2026-11-22） |
+| | ANALYTICS-GA4 | **已关闭（2026-11-22，Owner："不接 GA4"，见第 2.1 节 2026-11-22）**。现有 GA 代码保持休眠，不删 | — | — | — | 关闭：Owner 2026-11-22 不接 GA4 |
 | | IMAGE-GEN | **已关闭（2026-11-14，Owner 决定不做）**。图片生成（Owner 2026-10-27 列为上线后立即开发的核心功能；2026-11-03 选 A：11-15 照常上线，上线后第一个大版本，目标 11-25 左右）：Agent 对话生图、教练环节封面生成、左侧导航"图片创作"模板模块、一键做同款。方案与模型对比见 [IMAGE-GEN-PLAN](tasks/IMAGE-GEN-PLAN.md)（[#1687](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1687)）及 Master Plan 第 2.1 节 2026-11-03 逐条决定。**2026-11-05 Owner 改方向：图片生成交给 Shotviva，作为连接器嵌入 Graylum、不做内部结算（第 2.1 节 2026-11-05）；拟归入 INTEGRATION-BASE 连接器框架，这一点是总控的理解、Owner 未确认，所以下面“依赖”列暂不改；** 上线前只出方案，不占开发人力；方案不授权对正式环境开启、合并 main、花钱或新增密钥 | CORE-PATH-V2、REL-1 | 高 | 大 / 多个 | 关闭：Owner 2026-11-14 决定不做（第 2.1 节） |
 | | EXPERT-CONSULT | 真人专家诊断的预约入口（**2026-11-04 Owner 选 A：推迟到上线后**，第 2.1 节 2026-11-04；#1060 已合并的代码保留；第 2.1 节第 51 项，[记录 L](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5972732100)、[记录 Q](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980762284)、[记录 R](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980780017)）：放在报告末尾、价格页和工作室版联系入口；只面向已有数据基础的账号，卡片写"预约咨询，免费询价"，不写价格；用户填写需求和联系方式，提交后通知 Owner，由 Owner 线下跟进。不做"同意专家查看报告"的授权开关，资料由用户自己导出后发来；授权查看功能上线时不做。咨询费不进产品结账流程（Stripe 或线下收款，税务由 Owner 处理）。联系方式按个人数据处理，接入账号注销和数据保留规则 | PAYWALL（入口位置）、DATA-ERASURE | 高 | 小 / 1–2 | — |
 
