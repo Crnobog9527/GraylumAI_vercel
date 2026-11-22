@@ -180,6 +180,9 @@ export function ResearchShortfallCard({ sessionId, disabled, onChosen }: {
   );
 }
 
+/** Delays (ms) of the bounded re-reads after a turn settles. */
+export const SETTLE_REREAD_MS = [1500, 4000, 9000] as const;
+
 /**
  * Cards, then the benchmark table, under the positioning conversation. `settledTurns` counts the session's saved
  * mentor turns: each new one re-reads both, since a turn's account fetches commit their rows only as it finishes.
@@ -242,14 +245,23 @@ export function ResearchSessionPanel({ settledTurns, onSend, continuation = null
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `counts` is derived from the other inputs
   }, [decision, toSend, continuation, autoContinue, onSend, sessionId, utils]);
   const batch = autoContinue?.batch ?? 0;
+  // History lists a turn once its reply is saved, which can be a moment before the turn's account fetch commits its rows
+  // (benchmark row, shortfall card). One read at that signal can miss them, and nothing else re-reads before the 30 s stale
+  // time ends (batch 11-23-2: card and new row appeared only after a reload). So the signal also re-reads on a short bounded
+  // schedule. Only the host's own database reads: no model or supplier call.
   useEffect(() => {
     if (seen.current === settledTurns) return;
     seen.current = settledTurns;
-    void utils.research.cards.invalidate({ sessionId });
-    void utils.research.benchmarks.invalidate({ sessionId });
-    void utils.research.shortfall.invalidate({ sessionId });
-    void utils.runtime.reportPreflight.invalidate({ sessionId });
-    void utils.research.unfinishedRound.invalidate({ sessionId });
+    const reread = () => {
+      void utils.research.cards.invalidate({ sessionId });
+      void utils.research.benchmarks.invalidate({ sessionId });
+      void utils.research.shortfall.invalidate({ sessionId });
+      void utils.runtime.reportPreflight.invalidate({ sessionId });
+      void utils.research.unfinishedRound.invalidate({ sessionId });
+    };
+    reread();
+    const timers = SETTLE_REREAD_MS.map(delay => setTimeout(reread, delay));
+    return () => timers.forEach(clearTimeout);
   }, [settledTurns, sessionId, utils]);
   return (
     <>
