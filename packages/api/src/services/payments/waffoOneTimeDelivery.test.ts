@@ -3,7 +3,8 @@
  * All rights reserved.
  * This code is proprietary and confidential.
  */
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { registerPvuvScheduler } from '../analytics/pvuv';
 import { processWaffoReceipt } from './waffoPaymentDelivery';
 import { reconcileWaffoPayments } from './waffoReconciliation';
 import { fakeDb, payment } from './waffoTestHarness';
@@ -30,6 +31,41 @@ function setup(method = 'card', fields = {}) {
     cancelSubscription: vi.fn(), readSubscription: vi.fn() };
   return { db, rpc, provider };
 }
+describe('Waffo one-time purchase report (ANALYTICS-PVUV)', () => {
+  afterEach(() => { registerPvuvScheduler(null); vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
+  const snapshot = { version: 1, item_type: 'credit_package', item_id: '00000000-0000-4000-8000-0000000000cc',
+    item_updated_at: '2026-11-01T00:00:00.000Z', billing_cycle: 'one_time', currency: 'usd', unit: 'major', price: '69.00',
+    discount: '0', tax_behavior: 'exclusive', credits: 1000, bonus_credits: 200 };
+
+  it('queues one purchase per payment id after a delivered one-time payment, without making the receipt wait', async () => {
+    vi.stubEnv('PVUV_SITE', 'site_abc123');
+    vi.stubEnv('PVUV_INGEST_TOKEN', 'token-value-123');
+    const fetch = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    vi.stubGlobal('fetch', fetch);
+    const queued: (() => Promise<unknown>)[] = [];
+    registerPvuvScheduler(task => { queued.push(task); });
+    const f = setup('card', { item_type: 'credit_package', amount_total: 6900, purchase_snapshot: snapshot });
+    expect(await processWaffoReceipt(f.db, f.provider, receipt)).toEqual({ state: 'applied', reason: 'delivered' });
+    // The receipt is done and nothing was sent yet: the report is only queued for after the response.
+    expect(queued).toHaveLength(1);
+    expect(fetch).not.toHaveBeenCalled();
+    await queued[0]();
+    const event = JSON.parse(fetch.mock.calls[0][1].body).events[0];
+    expect(event).toMatchObject({ name: 'purchase', id: 'purchase-PAY_fixture1', user_id: 'buyer', revenue: 69, currency: 'USD',
+      props: { channel: 'waffo', credits: 1200 } });
+  });
+
+  it('reports nothing for a payment held for review', async () => {
+    vi.stubEnv('PVUV_SITE', 'site_abc123');
+    vi.stubEnv('PVUV_INGEST_TOKEN', 'token-value-123');
+    const queued: (() => Promise<unknown>)[] = [];
+    registerPvuvScheduler(task => { queued.push(task); });
+    const f = setup('unknown');
+    await processWaffoReceipt(f.db, f.provider, receipt);
+    expect(queued).toHaveLength(0);
+  });
+});
+
 describe('Waffo one-time delivery and backstop', () => {
   it('delivers card/Alipay from the original checkout without external subscription operations', async () => {
     const f = setup('alipay');

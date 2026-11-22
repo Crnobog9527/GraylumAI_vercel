@@ -1,6 +1,6 @@
 import { createServerClient } from '@supabase/ssr';
 import { createClient } from '@supabase/supabase-js';
-import { NextResponse, type NextRequest } from 'next/server';
+import { NextResponse, type NextFetchEvent, type NextRequest } from 'next/server';
 import { checkRateLimit } from '@/lib/rateLimit';
 import { TRPC_MAX_BATCH_CALLS, trpcCallCount } from '@/lib/trpcBatchLimit';
 import { isEmailVerified, sanitizeRedirectTarget } from '@/lib/auth';
@@ -11,6 +11,7 @@ import { BUY_INTENT_PATH, buyIntentPath, parseBuyIntent } from '@/lib/buyIntent'
 import { resolveSupabaseCookieOptions } from '@/lib/site-config';
 import { withEntryLanguage } from '@/lib/entry-language-server';
 import { withConsentRegion } from '@/lib/analytics/consent-region-proxy';
+import { reportCrawlerHit } from '@/lib/analytics/pvuv-crawler';
 
 const SENTRY_TUNNEL_PATH = '/monitoring';
 
@@ -259,7 +260,9 @@ async function isMaintenanceModeEnabled(
 }
 
 // ANALYTICS-CONSENT: every response leaves the visitor's statistics region class for the page (consent-region-proxy.ts).
-export async function proxy(request: NextRequest) {
+// ANALYTICS-PVUV: a page fetch by an AI assistant or search crawler is reported to pvuv.ai after the response (never awaited).
+export async function proxy(request: NextRequest, event?: NextFetchEvent) {
+  reportCrawlerHit(request, event);
   return withConsentRegion(request, await routeRequest(request));
 }
 

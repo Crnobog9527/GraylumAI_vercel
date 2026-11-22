@@ -9,6 +9,7 @@ import { walletMembershipTerm } from './methodMembershipTerm';
 import { chargebackCash } from './waffoChargebacks';
 import type { WaffoChargeback } from './waffoTestOperationsClient';
 import type { PaymentFacts } from './waffoPayments';
+import { reportOrderEvent } from '../analytics/pvuv';
 
 type Db = Pick<SupabaseClient, 'from' | 'rpc'>;
 type Scope = { merchant: string; mode: 'test' | 'live'; readChargebacks?: (paymentId: string, deadline?: number) => Promise<WaffoChargeback[]> };
@@ -75,6 +76,10 @@ export async function deliverWaffoOneTime(db: Db, provider: Scope, facts: Paymen
   }
   if (chargebacks.length) return { state: 'review' as const,
     reason: disputeNeedsReview ? 'chargeback_amount_unknown' : 'chargeback_observed' };
-  if (result.data?.state === 'fulfilled') return { state: 'applied' as const, reason: 'delivered' };
+  if (result.data?.state === 'fulfilled') {
+    // ANALYTICS-PVUV: the delivered Waffo one-time payment, once per payment id (queued, never awaited, never throws).
+    reportOrderEvent(db as SupabaseClient, order.id, 'purchase', facts.paymentId, { order });
+    return { state: 'applied' as const, reason: 'delivered' };
+  }
   return { state: 'review' as const, reason: review ?? 'payment_in_review' };
 }

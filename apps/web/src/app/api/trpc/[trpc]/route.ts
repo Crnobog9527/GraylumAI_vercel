@@ -1,3 +1,4 @@
+import '@/lib/analytics/pvuv-scheduler';
 import { fetchRequestHandler } from '@trpc/server/adapters/fetch';
 import { after, type NextRequest } from 'next/server';
 import { revalidatePath } from 'next/cache';

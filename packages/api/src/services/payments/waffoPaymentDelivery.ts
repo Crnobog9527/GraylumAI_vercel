@@ -7,6 +7,7 @@ import { describeWaffoFailure } from './waffoFailure';
 import type { WaffoChargeback } from './waffoTestOperationsClient';
 import { deliverWaffoOneTime } from './waffoOneTimeDelivery';
 import { logger } from '../../lib/logger';
+import { reportOrderEvent } from '../analytics/pvuv';
 
 type Db = Pick<SupabaseClient, 'rpc' | 'from'>;
 type Provider = WaffoTestPayments & Pick<WaffoTestOperations, 'cancelSubscription' | 'readSubscription'>
@@ -54,11 +55,14 @@ async function firstPayment(db: Db, provider: Provider, facts: PaymentFacts): Pr
   const checkout = await single(db.from('payment_provider_refs').select('external_id').eq('order_id', order.id)
     .eq('object_type', 'checkout').eq('channel', 'waffo').eq('merchant_namespace', provider.merchant).eq('mode', provider.mode).maybeSingle());
   if (!checkout) return { state: 'review', reason: 'checkout_unmapped' };
-  return decide(db, 'pay_waffo_fulfill_payment', {
+  const decision = await decide(db, 'pay_waffo_fulfill_payment', {
     p_order: order.id, p_merchant: provider.merchant, p_checkout: checkout.external_id, p_payment: facts.paymentId,
     p_amount: facts.amountCents, p_currency: facts.currency, p_paid_at: facts.createdAt, p_subscription: facts.waffoOrderId,
     p_start: facts.periodStart, p_end: facts.periodEnd,
   });
+  // ANALYTICS-PVUV: a delivered payment, once per payment id (statistics only; never throws or changes the decision).
+  if (decision.state === 'applied') reportOrderEvent(db as SupabaseClient, order.id, 'purchase', facts.paymentId);
+  return decision;
 }
 
 /** Waffo checkout has no idempotency and orderMerchantExternalId is not unique (official answer 2026-10-12),
