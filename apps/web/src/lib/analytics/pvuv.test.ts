@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { identifyPvuv, installPvuvScrubber, resetPvuvForTests, syncPvuv } from './pvuv';
+import { forgetPvuvUser, identifyPvuv, installPvuvScrubber, resetPvuvForTests, syncPvuv } from './pvuv';
 
 const consent = vi.hoisted(() => ({ analytics: false, persisted: true }));
 vi.mock('./consent', () => ({ analyticsAllowed: () => consent.analytics, refusalPersisted: () => consent.persisted }));
@@ -126,6 +126,23 @@ describe('pvuv identify', () => {
     identifyPvuv('user-1');
     syncPvuv('site_abc', '/pricing');
     expect((win.pvuv as unknown as { q: unknown[][] }).q).toEqual([['identify', 'user-1']]);
+  });
+
+  it('sign-out removes an identify queued before the script loaded, and nothing re-identifies the old account', () => {
+    consent.analytics = true;
+    syncPvuv('site_abc', '/pricing');
+    identifyPvuv('user-1');
+    const queue = (win.pvuv as unknown as { q: unknown[][] }).q;
+    queue.push(['event', 'other']);
+    expect(queue).toContainEqual(['identify', 'user-1']);
+    forgetPvuvUser();
+    expect(queue).toEqual([['event', 'other']]);
+    // A page that signs out before the script exists drops the pending id too.
+    resetPvuvForTests();
+    identifyPvuv('user-2');
+    forgetPvuvUser();
+    syncPvuv('site_abc', '/pricing');
+    expect((win.pvuv as unknown as { q: unknown[][] }).q).toEqual([]);
   });
 
   it('sends nothing without consent', () => {
