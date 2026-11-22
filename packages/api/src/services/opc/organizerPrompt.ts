@@ -1,5 +1,4 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import {CAPTURE_VALUE_LIMIT, CAPTURE_VALUE_TARGET} from '../../shared/conversationCapture';
 import {elicitFieldSpecs, type MethodInformationField} from '../../shared/opcMethodPolicy';
 
 export const ORGANIZER_INSTRUCTIONS = [
@@ -59,8 +58,8 @@ export const ORGANIZER_INSTRUCTIONS = [
   "Return the updated COMPLETE value, preserving valid information and adding the",
   "new substance. Never replace the whole value with only the latest sentence. Change or remove old",
   "content only for an explicit correction or contradiction; preserve qualifications and uncertainty.",
-  `Each field value has a hard limit of ${CAPTURE_VALUE_LIMIT} characters; a longer value is discarded entirely and the field`,
-  `stays empty. Keep every value to at most about ${CAPTURE_VALUE_TARGET} characters, counting each Chinese character, letter,`,
+  "Each field value has a hard limit of 400 characters; a longer value is discarded entirely and the field",
+  "stays empty. Keep every value to at most about 300 characters, counting each Chinese character, letter,",
   "digit, space, emoji and punctuation mark as one. If the merged value would be longer, condense it into concise",
   "key points, preserving key facts, decisions, negation, constraints and uncertainty. For a field that bundles",
   "several items, such as a name, an avatar and a bio, give the recommended option for each item with at most one",

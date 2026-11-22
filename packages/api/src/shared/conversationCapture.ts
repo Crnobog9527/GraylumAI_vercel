@@ -10,7 +10,8 @@ export type CaptureOutput = {inputKind: CaptureInputKind; patches: CapturePatch[
   withdrawals: CaptureWithdrawal[]; invalidWithdrawals: number[]};
 /** Per-field value bound, in code points. SQL (turn_mentor_apply, opc_information) enforces the same 400. */
 export const CAPTURE_VALUE_LIMIT = 400;
-/** What the organizer is asked for: models miscount mixed Chinese/English text, so leave a margin below the limit. */
+/** What the organizer is asked for: models miscount mixed Chinese/English text, so leave a margin below the limit.
+ * organizerPrompt.ts states both numbers literally (its prompt must stay a pure string expression); its test checks they match. */
 export const CAPTURE_VALUE_TARGET = 300;
 const object = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
