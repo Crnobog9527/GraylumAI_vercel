@@ -546,9 +546,12 @@
     {
       "id": "attribution",
       "name": "看清用户从哪来、卡在哪",
-      "plain": "上线后接入 PostHog，看访客从哪来（含 AI 推荐）、中间走了哪些页面、在哪一步离开、哪条路径付了钱。",
-      "afterLaunch": true,
+      "plain": "上线前接入 pvuv（和 Shotviva 一样），看访客从哪来（含 AI 推荐和 AI 爬虫）、注册和付款多少；PostHog 和 GA4 不接。",
       "tasks": [
+        {
+          "name": "ANALYTICS-PVUV",
+          "plain": "接入 pvuv.ai：公开页浏览、注册和付款事件、AI 爬虫访问，跟随 Cookie 同意。"
+        },
         {
           "name": "ANALYTICS-POSTHOG",
           "plain": "接入 PostHog（美国区），跟随 Cookie 同意弹窗；开工前先出方案。",
