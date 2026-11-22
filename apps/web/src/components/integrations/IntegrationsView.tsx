@@ -10,9 +10,12 @@ import styles from './integrations.module.css';
 
 /** The integrations page (INTEGRATION-SHOTVIVA PR C): one module per product built around Graylum, its connection state,
  * and its full introduction on a click. `result`: what Shotviva's redirect back said (?shotviva / ?shotviva_error). */
-export function IntegrationsView({ result }: { result: { connected?: string | null; error?: string | null } }) {
+export function IntegrationsView({ result, modules = INTEGRATIONS }: { result: { connected?: string | null; error?: string | null };
+  /** The modules to list; only tests pass another list (the Feishu card is paused, Owner 2026-11-22). */
+  modules?: readonly IntegrationModule[] }) {
   const shotviva = useShotviva();
-  const feishu = useConnection('feishu_base');
+  // No status request while no Feishu card is listed.
+  const feishu = useConnection('feishu_base', modules.some(module => module.connector === 'feishu_base'));
   const [openId, setOpenId] = useState<string | null>(null);
   const banner = connectMessage(result);
   return (
@@ -22,7 +25,7 @@ export function IntegrationsView({ result }: { result: { connected?: string | nu
       {banner && <p role={banner.tone === 'error' ? 'alert' : 'status'} className={banner.tone === 'error' ? styles.bannerError : styles.banner}>
         {banner.text}</p>}
       <ul className={styles.cards}>
-        {INTEGRATIONS.map(module => (
+        {modules.map(module => (
           <li key={module.id}>
             <button type="button" className={styles.card} onClick={() => setOpenId(module.id)} aria-haspopup="dialog">
               <IntegrationIcon module={module}/>
