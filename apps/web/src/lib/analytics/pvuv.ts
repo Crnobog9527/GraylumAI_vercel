@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 
-import { analyticsAllowed } from './consent';
+import { analyticsAllowed, refusalPersisted } from './consent';
 import { isPvuvHost, isPvuvPath, PVUV_COOKIES, scrubFirstTouchCookie, scrubPvuvBody } from './pvuv-scrub';
 
 /**
@@ -158,9 +158,13 @@ export function syncPvuv(site: string | null, pathname: string, reload: () => vo
   if (!analyticsAllowed()) {
     if (inserted) {
       clearPvuvStorage();
-      inserted = false;
       pendingUser = null;
-      reload();
+      // Reload only when the refusal will survive it; if it could not be stored, a reload would lose it and (in a region that
+      // allows statistics by default) load the script again. The running script stays blocked by the request scrubber.
+      if (refusalPersisted()) {
+        inserted = false;
+        reload();
+      }
     }
     return;
   }
