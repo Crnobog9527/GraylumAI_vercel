@@ -8,6 +8,10 @@ export type CaptureInputKind = 'answer'|'acknowledgement'|'uncertainty'|'request
 export type CaptureWithdrawal = {stepId: string; fieldId: string};
 export type CaptureOutput = {inputKind: CaptureInputKind; patches: CapturePatch[]; discarded: number[];
   withdrawals: CaptureWithdrawal[]; invalidWithdrawals: number[]};
+/** Per-field value bound, in code points. SQL (turn_mentor_apply, opc_information) enforces the same 400. */
+export const CAPTURE_VALUE_LIMIT = 400;
+/** What the organizer is asked for: models miscount mixed Chinese/English text, so leave a margin below the limit. */
+export const CAPTURE_VALUE_TARGET = 300;
 const object = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
 export function readCaptureOutput(raw: string | null | undefined, fields: CaptureFields): CaptureOutput | null {
@@ -29,7 +33,7 @@ export function readCaptureOutput(raw: string | null | undefined, fields: Captur
   output.patches.forEach((patch: unknown, index: number) => {
     // PostgreSQL char_length counts code points; btrim without a character set removes ASCII spaces only.
     if (!object(patch) || typeof patch.value !== 'string' || !patch.value.replace(/^ +| +$/g, '') ||
-        Array.from(patch.value).length > 400 || typeof patch.status !== 'string' || !['provisional','unclear'].includes(patch.status) ||
+        Array.from(patch.value).length > CAPTURE_VALUE_LIMIT || typeof patch.status !== 'string' || !['provisional','unclear'].includes(patch.status) ||
         typeof patch.nature !== 'string' || !['fact','decision','hypothesis','unknown'].includes(patch.nature) ||
         typeof patch.basis !== 'string' || !['user_statement','agent_proposal'].includes(patch.basis) ||
         typeof patch.stepId !== 'string' || typeof patch.fieldId !== 'string' ||

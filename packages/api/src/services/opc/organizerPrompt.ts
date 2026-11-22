@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {CAPTURE_VALUE_LIMIT, CAPTURE_VALUE_TARGET} from '../../shared/conversationCapture';
 import {elicitFieldSpecs, type MethodInformationField} from '../../shared/opcMethodPolicy';
 
 export const ORGANIZER_INSTRUCTIONS = [
@@ -58,10 +59,12 @@ export const ORGANIZER_INSTRUCTIONS = [
   "Return the updated COMPLETE value, preserving valid information and adding the",
   "new substance. Never replace the whole value with only the latest sentence. Change or remove old",
   "content only for an explicit correction or contradiction; preserve qualifications and uncertainty.",
-  "Each field value must be at most 400 characters. If the merged value would exceed 400 characters,",
-  "condense it into concise key points within that limit, preserving key facts, decisions, negation,",
-  "constraints and uncertainty. Do not emit an overlong value that the host would discard, or drop",
-  "important qualifications merely to shorten it.",
+  `Each field value has a hard limit of ${CAPTURE_VALUE_LIMIT} characters; a longer value is discarded entirely and the field`,
+  `stays empty. Keep every value to at most about ${CAPTURE_VALUE_TARGET} characters, counting each Chinese character, letter,`,
+  "digit, space, emoji and punctuation mark as one. If the merged value would be longer, condense it into concise",
+  "key points, preserving key facts, decisions, negation, constraints and uncertainty. For a field that bundles",
+  "several items, such as a name, an avatar and a bio, give the recommended option for each item with at most one",
+  "short alternative instead of long candidate lists. Do not drop important qualifications merely to shorten it.",
   "If there is no substantive change, return empty patches. When a turn answers multiple fields, return",
   "one complete update per field, each with its own stepId and fieldId. Do not put an audience answer or",
   "platform choice into a goal field. A relevant answer for another step must be captured in that step.",
