@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+// The Feishu card is paused (Owner 2026-11-22) and not on the page; this renders it from FEISHU_BASE_MODULE so the component stays tested.
 // INTEGRATION-BASE B2: the Feishu Base introduction, opened from its card, in a real browser with the app's CSS. Owner 2026-11-14:
 // the wording of the approved draft, a drawn animation of "a work becomes one row of the table" instead of screenshots (played
 // when the dialog opens, still with reduced motion), and 去查看 to Feishu's official Base page. Measured: every line can be read,
@@ -10,7 +11,7 @@ import { buildIntegrationsPage, openIntroduction } from './__tests__/browser-har
 let browser: Browser;
 let html = '';
 beforeAll(async () => {
-  html = await buildIntegrationsPage();
+  html = await buildIntegrationsPage(true);
   browser = await chromium.launch({ headless: true });
 }, 60000);
 afterAll(async () => { await browser?.close(); }, 30000);

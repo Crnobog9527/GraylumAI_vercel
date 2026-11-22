@@ -113,34 +113,40 @@ export const INTEGRATIONS: readonly IntegrationModule[] = [
     viewUrl: 'https://shotviva.com/zh',
     connector: 'shotviva',
   },
-  {
-    // INTEGRATION-BASE / V3-FEISHU (Owner 2026-11-14): plan B, works written into the user's own Feishu Base; Pro/Gold only.
-    // Wording: the draft the Owner approved on 2026-11-14 ("可以，就这样"); the connection steps are added once the
-    // authorization-code path is verified. No pictures: a drawn animation (Owner: "画示意动效，不用截图").
-    id: 'feishu-base',
-    name: '飞书多维表格',
-    glyph: 'table',
-    tagline: '把 Graylum 里写好的作品，一键存进你自己的飞书多维表格，和团队一起排期、打分、追进度。',
-    features: [
-      '选好要写入的表格，标题、正文、平台、日期等内容按你设定的对应关系填进各列。',
-      '写入前先给你看预览，确认后才写；同一篇作品再写一次，是更新原来那一行，不会重复新增。',
-    ],
-    whenToUse: [
-      '你已经在飞书多维表格里管理选题和发布排期，不想再手动复制粘贴的时候。',
-      '和同事、剪辑或客户一起看稿、改稿的时候。',
-    ],
-    illustration: 'feishu-write',
-    inGraylum: [
-      '作品旁会多一个"写入飞书"按钮。',
-      'Graylum 只保存你这张表格的授权码（加密保存）和表格地址，只用来往这张表写入你确认过的作品；不会读你飞书里的其他内容。',
-      '随时可以在这里断开，断开后授权码立即删除；已经写进飞书的内容还在你自己的表格里。',
-    ],
-    // Feishu's official Base page (checked 2026-11-14: 200, "飞书多维表格｜…- 飞书官网").
-    viewUrl: 'https://www.feishu.cn/product/base',
-    tracked: false,
-    connector: 'feishu_base',
-  },
 ];
+
+/**
+ * The Feishu Base module, taken out of INTEGRATIONS: Owner 2026-11-22 ("修改一下，连接器暂时不要接飞书了。") paused the user-facing
+ * Feishu connector. It is kept whole (card, detail, illustration, backend) so it can come back by adding it to INTEGRATIONS again;
+ * while it is not listed there, the page shows no Feishu card and nothing can open its detail. catalog.test.ts fails if it returns by accident.
+ */
+export const FEISHU_BASE_MODULE: IntegrationModule = {
+  // INTEGRATION-BASE / V3-FEISHU (Owner 2026-11-14): plan B, works written into the user's own Feishu Base; Pro/Gold only.
+  // Wording: the draft the Owner approved on 2026-11-14 ("可以，就这样"); the connection steps are added once the
+  // authorization-code path is verified. No pictures: a drawn animation (Owner: "画示意动效，不用截图").
+  id: 'feishu-base',
+  name: '飞书多维表格',
+  glyph: 'table',
+  tagline: '把 Graylum 里写好的作品，一键存进你自己的飞书多维表格，和团队一起排期、打分、追进度。',
+  features: [
+    '选好要写入的表格，标题、正文、平台、日期等内容按你设定的对应关系填进各列。',
+    '写入前先给你看预览，确认后才写；同一篇作品再写一次，是更新原来那一行，不会重复新增。',
+  ],
+  whenToUse: [
+    '你已经在飞书多维表格里管理选题和发布排期，不想再手动复制粘贴的时候。',
+    '和同事、剪辑或客户一起看稿、改稿的时候。',
+  ],
+  illustration: 'feishu-write',
+  inGraylum: [
+    '作品旁会多一个"写入飞书"按钮。',
+    'Graylum 只保存你这张表格的授权码（加密保存）和表格地址，只用来往这张表写入你确认过的作品；不会读你飞书里的其他内容。',
+    '随时可以在这里断开，断开后授权码立即删除；已经写进飞书的内容还在你自己的表格里。',
+  ],
+  // Feishu's official Base page (checked 2026-11-14: 200, "飞书多维表格｜…- 飞书官网").
+  viewUrl: 'https://www.feishu.cn/product/base',
+  tracked: false,
+  connector: 'feishu_base',
+};
 
 /**
  * A sample picture's large version, for looking at it closely (Owner 2026-11-13: "要支持用户点击以后看大图"): the same picture

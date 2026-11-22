@@ -2,15 +2,21 @@
 import { readdirSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { connectMessage, INTEGRATIONS, largePicture, showcasePairs, trackedLink, viewLink, type IntegrationModule } from './catalog';
+import { connectMessage, FEISHU_BASE_MODULE, INTEGRATIONS, largePicture, showcasePairs, trackedLink, viewLink, type IntegrationModule } from './catalog';
 
 /** Every sample picture of a module: the two of 能做什么, then the photo and the result of each kind of use. */
 const pictures = (module: IntegrationModule) => (module.showcase
   ? [module.showcase.before, module.showcase.after, ...module.showcase.uses.flatMap(use => [use.before, use.after])] : []);
 
 describe('integration modules', () => {
+  it('the Feishu card is paused (Owner 2026-11-22): not listed, so the page shows only Shotviva', () => {
+    expect(INTEGRATIONS.map(module => module.id)).toEqual(['shotviva']);
+    expect(INTEGRATIONS.some(module => module.id === 'feishu-base' || module.connector === 'feishu_base')).toBe(false);
+    expect(FEISHU_BASE_MODULE.id).toBe('feishu-base');
+  });
+
   it('Feishu (someone else\'s product): its official Base page as it is, no partner marker; ours stay tracked', () => {
-    const feishu = INTEGRATIONS.find(module => module.id === 'feishu-base')!;
+    const feishu = FEISHU_BASE_MODULE;
     expect(feishu.connector).toBe('feishu_base');
     expect(viewLink(feishu)).toBe('https://www.feishu.cn/product/base');
     expect(viewLink(INTEGRATIONS[0]!)).toBe(trackedLink('https://shotviva.com/zh', 'shotviva'));
@@ -20,8 +26,7 @@ describe('integration modules', () => {
   });
 
   it('each module has its introduction, when to use it, and an https link to its own page; no link to buy', () => {
-    expect(INTEGRATIONS.map(module => module.id)).toEqual(['shotviva', 'feishu-base']);
-    for (const module of INTEGRATIONS) {
+    for (const module of [...INTEGRATIONS, FEISHU_BASE_MODULE]) {
       expect(module.features.length).toBeGreaterThan(0);
       expect(module.whenToUse.length).toBeGreaterThan(0);
       const parsed = new URL(module.viewUrl);
@@ -35,7 +40,7 @@ describe('integration modules', () => {
   });
 
   it('the copy carries no amounts of our own (no digits, prices or quotas; the Owner confirmed the wording 2026-11-13)', () => {
-    for (const module of INTEGRATIONS) {
+    for (const module of [...INTEGRATIONS, FEISHU_BASE_MODULE]) {
       // What a poster inside a sample picture says (a date, a discount) is not repeated in the words beside or behind it.
       for (const line of [module.tagline, module.philosophy ?? '', ...module.features, ...module.whenToUse, ...(module.inGraylum ?? []),
         module.showcase?.before.label ?? '', module.showcase?.after.label ?? '', ...pictures(module).map(picture => picture.alt),
