@@ -170,6 +170,7 @@ const envSchema = z.object({
   NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID: optionalString,
   NEXT_PUBLIC_GOOGLE_APP_ID: optionalString,
   NEXT_PUBLIC_GA4_MEASUREMENT_ID: optionalString,
+  NEXT_PUBLIC_PVUV_SITE: optionalString, // ANALYTICS-PVUV: pvuv.ai site id (public); unset = no pvuv script
   NEXT_PUBLIC_VERCEL_ANALYTICS_CATEGORY: optionalString,
 
   // 平台注入和测试专用

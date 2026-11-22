@@ -22,7 +22,7 @@ const reportOnlyCsp = [
   "frame-ancestors 'none'",
   // VOICE-2 PR-7 (Owner 2026-11-14 in the controller window: "同意放开"): Google's file picker (apis.google.com) and its sign-in
   // token client (accounts.google.com), named hosts only, no wildcard.
-  "script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://apis.google.com https://accounts.google.com",
+  "script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://apis.google.com https://accounts.google.com https://www.pvuv.ai",
   // VOICE-2 PR-7: the picker and the Google sign-in window are frames from these two hosts; same-origin frames stay as before.
   "frame-src 'self' https://docs.google.com https://accounts.google.com",
   "style-src 'self' 'unsafe-inline'",
@@ -38,6 +38,8 @@ const reportOnlyCsp = [
     "https://vitals.vercel-insights.com",
     // ANALYTICS: GA4 collection (report-only, observed before enforcing). Termly's consent script is gone (ANALYTICS-CONSENT).
     "https://*.google-analytics.com https://*.analytics.google.com https://www.googletagmanager.com",
+    // ANALYTICS-PVUV: pvuv.ai's collection address (the script itself comes from www.pvuv.ai, allowed in script-src).
+    "https://in.pvuv.ai",
     // VOICE-2 PR-7: the picked files are downloaded in the browser from the Drive API.
     "https://www.googleapis.com https://content.googleapis.com",
   ].join(" "),
