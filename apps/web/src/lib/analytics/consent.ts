@@ -120,6 +120,12 @@ export function analyticsAllowed(): boolean {
   return snapshot.analytics;
 }
 
+/** A refusal that a reload will still see: stored in this browser, or sent by the browser itself (GPC). */
+export function refusalPersisted(): boolean {
+  ensureLoaded();
+  return readGpc() || readStoredChoice() === 'denied';
+}
+
 export function consentSnapshot(): ConsentSnapshot {
   ensureLoaded();
   return snapshot;

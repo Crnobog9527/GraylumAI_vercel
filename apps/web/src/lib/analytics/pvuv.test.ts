@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { identifyPvuv, installPvuvScrubber, resetPvuvForTests, syncPvuv } from './pvuv';
 
-const consent = vi.hoisted(() => ({ analytics: false }));
-vi.mock('./consent', () => ({ analyticsAllowed: () => consent.analytics }));
+const consent = vi.hoisted(() => ({ analytics: false, persisted: true }));
+vi.mock('./consent', () => ({ analyticsAllowed: () => consent.analytics, refusalPersisted: () => consent.persisted }));
 
 const ORIGIN = 'https://www.graylum.com';
 type Script = { src?: string; attrs: Record<string, string>; setAttribute: (k: string, v: string) => void; onload?: () => void };
@@ -21,6 +21,7 @@ function makeScript(): Script {
 beforeEach(() => {
   resetPvuvForTests();
   consent.analytics = false;
+  consent.persisted = true;
   appended = [];
   sent = [];
   beacons = [];
@@ -97,6 +98,24 @@ describe('pvuv script loading', () => {
     consent.analytics = false;
     syncPvuv('site_abc', '/pricing', reload);
     expect(reload).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('refusal that could not be stored', () => {
+  it('does not reload and keeps the running script blocked', async () => {
+    const reload = vi.fn();
+    consent.analytics = true;
+    syncPvuv('site_abc', '/pricing', reload);
+    installPvuvScrubber();
+    consent.analytics = false;
+    consent.persisted = false;
+    syncPvuv('site_abc', '/pricing', reload);
+    expect(reload).not.toHaveBeenCalled();
+    await (win.fetch as FetchFn)('https://in.pvuv.ai/in', { method: 'POST', body: JSON.stringify({ e: 'pageview', u: `${ORIGIN}/pricing` }) });
+    expect(sent).toHaveLength(0);
+    // Not re-added either, even if the page is synced again.
+    syncPvuv('site_abc', '/pricing', reload);
+    expect(appended).toHaveLength(1);
   });
 });
 

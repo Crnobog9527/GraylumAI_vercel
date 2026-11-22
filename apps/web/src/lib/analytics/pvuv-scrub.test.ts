@@ -50,6 +50,13 @@ describe('pvuv referrer and request bodies', () => {
     });
   });
 
+  it('applies the utm value checks to every first-touch field, in requests and in the cookie', () => {
+    const ft = { s: 'me@example.com', m: 'cpc', c: 'x'.repeat(200), r: 'https://t.co/a?b=1', extra: { nested: 'a@b.co' } };
+    const out = JSON.parse(scrubPvuvBody(JSON.stringify({ e: 'pageview', u: `${ORIGIN}/`, ft }), ORIGIN)!);
+    expect(out.ft).toEqual({ m: 'cpc', r: 'https://t.co' });
+    expect(JSON.parse(scrubFirstTouchCookie(JSON.stringify(ft), ORIGIN)!)).toEqual({ m: 'cpc', r: 'https://t.co' });
+  });
+
   it('drops events for private pages from a batch, and the whole request when none is left', () => {
     const ok = { e: 'pageview', u: `${ORIGIN}/pricing` };
     const bad = { e: 'pageview', u: `${ORIGIN}/app/positioning/abc` };

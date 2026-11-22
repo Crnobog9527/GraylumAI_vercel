@@ -60,7 +60,12 @@ const isObject = (value: unknown): value is Json => typeof value === 'object' &&
 
 function scrubFirstTouch(ft: unknown, ownOrigin: string): unknown {
   if (!isObject(ft)) return ft;
-  const next: Json = { ...ft };
+  const next: Json = {};
+  // Source, medium, campaign and any other field get the same value checks as a page address's utm parameters.
+  for (const [key, value] of Object.entries(ft)) {
+    if (key === 'r') continue;
+    if (typeof value === 'string' && value.length <= UTM_VALUE_MAX && !EMAIL_LIKE.test(value)) next[key] = value;
+  }
   const referrer = scrubPvuvReferrer(ft.r, ownOrigin);
   if (referrer) next.r = referrer; else delete next.r;
   return next;
