@@ -107,8 +107,8 @@ export async function recoverMethodCheckout(db: SupabaseClient, stripe: Stripe, 
         p_state: validated.status === 'complete' && !isCard(order.payment_method) ? 'failed_unpaid' : 'closed_unpaid',
         p_payment: null, p_amount: 0, p_currency: 'usd', p_paid_at: null });
       if (closed.error) throw new Error('PAY_WAFFO_CHECKOUT_UNAVAILABLE');
-      // ANALYTICS-PVUV: the buyer left without paying (statistics only; never throws, repeats are ignored by its dedupe id).
-      await reportOrderEvent(db, order.id, 'checkout_cancel', sessionId, { order });
+      // ANALYTICS-PVUV: the buyer left without paying (statistics only; queued, never awaited, repeats are ignored by its dedupe id).
+      reportOrderEvent(db, order.id, 'checkout_cancel', sessionId, { order });
     }
     // The session as this recovery validated it (newer than the caller's copy): a browser return reports it.
     return { orderId: order.id, checkoutStatus: validated?.status ?? null, paymentStatus: validated?.payment_status ?? null };
@@ -170,7 +170,7 @@ export async function recoverMethodCheckout(db: SupabaseClient, stripe: Stripe, 
   if (delivered && (applied.data as { duplicate?: unknown }).duplicate === false) {
     await reportGaPurchase(db, order);
     // ANALYTICS-PVUV: the same newly delivered payment, once per payment id (statistics only; never throws).
-    await reportOrderEvent(db, order.id, 'purchase', cash.paymentId, { order });
+    reportOrderEvent(db, order.id, 'purchase', cash.paymentId, { order });
   }
   if (failures.length) throw failures[0];
   return { orderId: order.id, checkoutStatus: validated?.status ?? null, paymentStatus: 'paid' as const };

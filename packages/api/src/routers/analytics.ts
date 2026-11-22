@@ -25,7 +25,7 @@ export const analyticsRouter = router({
   // ANALYTICS-PVUV: the account was created. Sent whatever the browser's consent is; the visitor id goes along only when the
   // request carries pvuv's own cookie (it exists only while consent is live). Repeats share one dedupe id.
   reportSignup: protectedProcedure.input(z.object({ method: z.enum(['google', 'phone', 'email']) }).strict()).mutation(async ({ ctx, input }) => {
-    await dispatchPvuv(() => sendPvuvEvent(signupEvent(ctx.profileId, input.method, pvuvVisitorId(ctx.headers))), ctx.scheduleAfter);
+    dispatchPvuv(() => sendPvuvEvent(signupEvent(ctx.profileId, input.method, pvuvVisitorId(ctx.headers))), ctx.scheduleAfter);
     return { ok: true as const };
   }),
   signupSources: adminProcedure.input(z.object({ days: z.number().int().min(1).max(400) }).strict()).query(async ({ ctx, input }) => {

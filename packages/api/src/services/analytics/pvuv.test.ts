@@ -1,12 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { dispatchPvuv, orderEvent, pvuvEventId, pvuvServerConfig, pvuvVisitorId, reportOrderEvent, sendPvuvEvent, signupEvent } from './pvuv';
+import { dispatchPvuv, PVUV_TASK_LIMIT_MS, registerPvuvScheduler, snapshotCredits, orderEvent, pvuvEventId, pvuvServerConfig, pvuvVisitorId, reportOrderEvent, sendPvuvEvent, signupEvent } from './pvuv';
 
 const env = { PVUV_SITE: 'site_abc123', PVUV_INGEST_TOKEN: 'token-value-123' };
 const ORDER_ID = '00000000-0000-4000-8000-0000000000aa';
 const USER_ID = '00000000-0000-4000-8000-0000000000bb';
 const order = { id: ORDER_ID, user_id: USER_ID, item_id: 'plan-1', item_type: 'membership_plan', billing_cycle: 'monthly',
-  amount_total: 1990, offer_kind: 'founder', payment_channel: 'stripe', payment_method: 'card', method_transition: null };
+  amount_total: 1990, offer_kind: 'founder', payment_channel: 'stripe', payment_method: 'card', method_transition: null,
+  purchase_snapshot: snapshot({ credits: 1500, bonus_credits: 300 }) };
+
+function snapshot(credits: { credits: number; bonus_credits: number }) {
+  return { version: 1, item_type: 'membership_plan', item_id: '00000000-0000-4000-8000-0000000000cc', item_updated_at: '2026-11-01T00:00:00.000Z',
+    billing_cycle: 'monthly', currency: 'usd', unit: 'major', price: '19.90', discount: '0', tax_behavior: 'exclusive', ...credits };
+}
 
 /** A minimal Supabase stand-in: every table answers the row given for it. */
 function db(rows: Record<string, unknown>) {
@@ -85,7 +91,7 @@ describe('event content', () => {
     const event = await orderEvent(client, order, 'purchase', 'pi_3Abc', null);
     expect(event).toEqual({
       name: 'purchase', user_id: USER_ID, id: 'purchase-pi_3Abc', revenue: 19.9, currency: 'USD',
-      props: { product: 'membership_plan', interval: 'monthly', channel: 'stripe', method: 'card', discount: 'founder', tier: 'gold', credits: 1500 },
+      props: { product: 'membership_plan', interval: 'monthly', channel: 'stripe', method: 'card', discount: 'founder', tier: 'gold', credits: 1800 },
     });
     expect(JSON.stringify(event)).not.toMatch(/@/);
   });
@@ -100,10 +106,15 @@ describe('event content', () => {
     expect(start!.props).not.toHaveProperty('credits');
   });
 
-  it('a credit pack reports its credits', async () => {
-    const client = db({ credit_packages: { credits_amount: 1000, bonus_credits: 100 } });
-    const event = await orderEvent(client, { ...order, item_type: 'credit_package', billing_cycle: 'one_time', offer_kind: null }, 'purchase', 'pi_1', null);
-    expect(event!.props).toMatchObject({ product: 'credit_package', credits: 1100, discount: 'none' });
+  it('credits come from the order\'s frozen purchase snapshot, never from the current catalog', async () => {
+    // The catalog row now says something else (changed after the sale); the report must still say what was sold.
+    const client = db({ membership_plans: { level: 'gold', monthly_credits: 99999 }, credit_packages: { credits_amount: 99999, bonus_credits: 99999 } });
+    const event = await orderEvent(client, order, 'purchase', 'pi_1', null);
+    expect(event!.props).toMatchObject({ credits: 1800 });
+    expect(snapshotCredits(snapshot({ credits: 1000, bonus_credits: 100 }))).toBe(1100);
+    expect(snapshotCredits({ credits: 5 })).toBeUndefined();
+    const noSnapshot = await orderEvent(client, { ...order, purchase_snapshot: null }, 'purchase', 'pi_1', null);
+    expect(noSnapshot!.props).not.toHaveProperty('credits');
   });
 
   it('an order without an owner reports nothing', async () => {
@@ -112,42 +123,75 @@ describe('event content', () => {
 });
 
 describe('fire-and-forget', () => {
-  it('hands the work to scheduleAfter and returns before it runs', async () => {
+  beforeEach(() => {
     vi.stubEnv('PVUV_SITE', 'site_abc123');
     vi.stubEnv('PVUV_INGEST_TOKEN', 'token-value-123');
+    registerPvuvScheduler(null);
+  });
+
+  it('hands the work to scheduleAfter and returns before it runs', async () => {
     let scheduled: (() => Promise<unknown>) | null = null;
     const task = vi.fn().mockResolvedValue(undefined);
-    await dispatchPvuv(task, fn => { scheduled = fn; });
+    expect(dispatchPvuv(task, fn => { scheduled = fn; })).toBeUndefined();
     expect(task).not.toHaveBeenCalled();
     await scheduled!();
     expect(task).toHaveBeenCalledTimes(1);
   });
 
-  it('swallows a failing task', async () => {
-    vi.stubEnv('PVUV_SITE', 'site_abc123');
-    vi.stubEnv('PVUV_INGEST_TOKEN', 'token-value-123');
-    await expect(dispatchPvuv(() => Promise.reject(new Error('down')))).resolves.toBeUndefined();
+  it('uses the registered scheduler, so payment code need not pass one', async () => {
+    let scheduled: (() => Promise<unknown>) | null = null;
+    registerPvuvScheduler(fn => { scheduled = fn; });
+    const task = vi.fn().mockResolvedValue(undefined);
+    dispatchPvuv(task);
+    expect(task).not.toHaveBeenCalled();
+    await scheduled!();
+    expect(task).toHaveBeenCalledTimes(1);
+    registerPvuvScheduler(null);
   });
 
-  it('does nothing at all when pvuv is not configured', async () => {
+  it('a slow task never delays the caller and is cut off at the limit (database reads included)', async () => {
+    vi.useFakeTimers();
+    let scheduled: (() => Promise<unknown>) | null = null;
+    const slowDb = { from: () => ({ select: () => ({ eq: () => ({ maybeSingle: () => new Promise(() => undefined) }) }) }) } as unknown as SupabaseClient;
+    // The caller gets control back at once even though the order read never answers.
+    reportOrderEvent(slowDb, ORDER_ID, 'purchase', 'pi_slow', { scheduleAfter: fn => { scheduled = fn; } });
+    expect(scheduled).not.toBeNull();
+    const finished = vi.fn();
+    const running = scheduled!().then(finished);
+    await vi.advanceTimersByTimeAsync(PVUV_TASK_LIMIT_MS - 1);
+    expect(finished).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(2);
+    await running;
+    expect(finished).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
+  });
+
+  it('swallows a failing task', async () => {
+    let scheduled: (() => Promise<unknown>) | null = null;
+    dispatchPvuv(() => Promise.reject(new Error('down')), fn => { scheduled = fn; });
+    await expect(scheduled!()).resolves.toBeUndefined();
+  });
+
+  it('does nothing at all when pvuv is not configured', () => {
+    vi.unstubAllEnvs();
     const task = vi.fn();
-    await dispatchPvuv(task);
+    dispatchPvuv(task);
     expect(task).not.toHaveBeenCalled();
   });
 
   it('reportOrderEvent never throws, even when the order cannot be read', async () => {
-    vi.stubEnv('PVUV_SITE', 'site_abc123');
-    vi.stubEnv('PVUV_INGEST_TOKEN', 'token-value-123');
+    let scheduled: (() => Promise<unknown>) | null = null;
     const broken = { from: () => { throw new Error('db down'); } } as unknown as SupabaseClient;
-    await expect(reportOrderEvent(broken, ORDER_ID, 'purchase', 'pi_1')).resolves.toBeUndefined();
+    expect(() => reportOrderEvent(broken, ORDER_ID, 'purchase', 'pi_1', { scheduleAfter: fn => { scheduled = fn; } })).not.toThrow();
+    await expect(scheduled!()).resolves.toBeUndefined();
   });
 
   it('reports a purchase with the order given, sending the dedupe id', async () => {
-    vi.stubEnv('PVUV_SITE', 'site_abc123');
-    vi.stubEnv('PVUV_INGEST_TOKEN', 'token-value-123');
     const fetch = fakeFetch();
     vi.stubGlobal('fetch', fetch);
-    await reportOrderEvent(db({ membership_plans: { level: 'pro', monthly_credits: 1, yearly_credits: 2 } }), ORDER_ID, 'purchase', 'pi_9', { order });
+    let scheduled: (() => Promise<unknown>) | null = null;
+    reportOrderEvent(db({ membership_plans: { level: 'pro' } }), ORDER_ID, 'purchase', 'pi_9', { order, scheduleAfter: fn => { scheduled = fn; } });
+    await scheduled!();
     vi.unstubAllGlobals();
     expect(JSON.parse(fetch.mock.calls[0][1].body).events[0].id).toBe('purchase-pi_9');
   });

@@ -15,6 +15,14 @@ describe('crawler detection', () => {
     expect(isCrawlerPageHit('GET', '/pricing', ua)).toBe(true);
   });
 
+  it('never reports logged-in, sensitive, email-like or token-like paths (decoded before checking)', () => {
+    for (const path of ['/app', '/app/positioning/abc', '/admin/users', '/auth/callback', '/reset-password', '/verify-email',
+      '/%61pp/positioning', '/blog/me%40example.com', '/blog/me@example.com', '/share/0123456789abcdef0123456789abcdef0123', '/bad%']) {
+      expect(isCrawlerPageHit('GET', path, GPT), path).toBe(false);
+    }
+    expect(crawlerHitRequest({ method: 'GET', pathname: '/app/x', userAgent: GPT, ip: null }, env)).toBeNull();
+  });
+
   it('ignores ordinary browsers, non-page paths and other methods', () => {
     expect(isCrawlerPageHit('GET', '/pricing', 'Mozilla/5.0 (Macintosh) Safari/605.1.15')).toBe(false);
     expect(isCrawlerPageHit('GET', '/pricing', null)).toBe(false);

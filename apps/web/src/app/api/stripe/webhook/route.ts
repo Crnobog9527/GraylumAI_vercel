@@ -4,6 +4,7 @@
  * This code is proprietary and confidential.
  */
 
+import '@/lib/analytics/pvuv-scheduler';
 import { createServiceRoleSupabaseClient, getStripeClient, getStripeWebhookSecret } from '@repo/api/src/services/stripe';
 import { reconcileSubscriptionRefundFromStripeWebhook } from '@repo/api/src/services/stripeFulfillment';
 import { reportPaymentEvidenceConflict } from '@/lib/payment-alert.mjs';

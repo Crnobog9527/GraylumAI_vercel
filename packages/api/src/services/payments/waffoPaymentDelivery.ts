@@ -61,7 +61,7 @@ async function firstPayment(db: Db, provider: Provider, facts: PaymentFacts): Pr
     p_start: facts.periodStart, p_end: facts.periodEnd,
   });
   // ANALYTICS-PVUV: a delivered payment, once per payment id (statistics only; never throws or changes the decision).
-  if (decision.state === 'applied') await reportOrderEvent(db as SupabaseClient, order.id, 'purchase', facts.paymentId);
+  if (decision.state === 'applied') reportOrderEvent(db as SupabaseClient, order.id, 'purchase', facts.paymentId);
   return decision;
 }
 

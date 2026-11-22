@@ -2,6 +2,7 @@
 import { createHash } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { logger } from '../../lib/logger';
+import { purchaseSnapshotSchema } from '../payments/contracts';
 import { centsToMajor } from '../payments/purchaseFacts';
 
 /**
@@ -71,16 +72,42 @@ export async function sendPvuvEvent(event: PvuvEvent, deps: SendDeps = {}): Prom
   }
 }
 
-/** Runs `task` after the response when the caller has a way to (tRPC `scheduleAfter`), else right here, time-boxed and swallowed. */
-export async function dispatchPvuv(task: () => Promise<unknown>, scheduleAfter?: (task: () => Promise<unknown>) => void): Promise<void> {
-  const safe = async () => { try { await task(); } catch (error) {
-    logger.warn('system', 'pvuv_event_failed', { reason: error instanceof Error ? error.name : 'unknown' });
-  } };
+type Scheduler = (task: () => Promise<unknown>) => void;
+let registered: Scheduler | null = null;
+
+/** The web app registers Next's `after` here, so payment code can queue statistics without ever awaiting them. */
+export function registerPvuvScheduler(scheduler: Scheduler | null): void {
+  registered = scheduler;
+}
+
+/** The whole statistics task (database reads and the send) is cut off after this long. */
+export const PVUV_TASK_LIMIT_MS = 2500;
+
+/**
+ * Queues `task` and returns at once; it is never awaited by the caller, so a slow database or a slow pvuv.ai can never delay
+ * a payment, a webhook receipt or a sign-up. It runs after the response when a scheduler exists (the caller's `scheduleAfter`,
+ * or the registered one), else detached. The whole task, reads included, is limited to PVUV_TASK_LIMIT_MS; errors are logged.
+ */
+export function dispatchPvuv(task: () => Promise<unknown>, scheduleAfter?: Scheduler): void {
   if (!pvuvServerConfig()) return;
-  if (scheduleAfter) {
-    try { scheduleAfter(safe); return; } catch { /* no after(): run it here */ }
+  const safe = async () => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        task(),
+        new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('PVUV_TASK_TIMEOUT')), PVUV_TASK_LIMIT_MS); }),
+      ]);
+    } catch (error) {
+      logger.warn('system', 'pvuv_event_failed', { reason: error instanceof Error ? error.message.slice(0, 40) : 'unknown' });
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  };
+  const scheduler = scheduleAfter ?? registered;
+  if (scheduler) {
+    try { scheduler(safe); return; } catch { /* not inside a request: run detached */ }
   }
-  await safe();
+  void safe();
 }
 
 export type SignupMethod = 'google' | 'phone' | 'email';
@@ -93,24 +120,26 @@ export function signupEvent(userId: string, method: SignupMethod, visitorId: str
 type OrderRow = {
   id: string; user_id: string | null; item_id: string; item_type: string; billing_cycle: string; amount_total: number | null;
   offer_kind?: string | null; payment_channel?: string | null; payment_method?: string | null; method_transition?: string | null;
+  purchase_snapshot?: unknown;
 };
 
-export const ORDER_COLUMNS = 'id,user_id,item_id,item_type,billing_cycle,amount_total,offer_kind,payment_channel,payment_method,method_transition';
+export const ORDER_COLUMNS = ['id', 'user_id', 'item_id', 'item_type', 'billing_cycle', 'amount_total', 'offer_kind', 'payment_channel',
+  'payment_method', 'method_transition', 'purchase_snapshot'].join(',');
 
-/** Product facts for an order: the plan's tier and credits per cycle, or the pack's credits. Unreadable = omitted. */
-async function productFacts(db: SupabaseClient, order: OrderRow): Promise<{ tier?: string; credits?: number }> {
+/** The credits the buyer was sold, from the order's frozen purchase snapshot (never today's catalog); omitted when unreadable. */
+export function snapshotCredits(snapshot: unknown): number | undefined {
+  const parsed = purchaseSnapshotSchema.safeParse(snapshot);
+  return parsed.success ? parsed.data.credits + parsed.data.bonus_credits : undefined;
+}
+
+/** The plan's tier (a label only; unreadable = omitted). */
+async function planTier(db: SupabaseClient, order: OrderRow): Promise<string | undefined> {
+  if (order.item_type !== 'membership_plan') return undefined;
   try {
-    if (order.item_type === 'membership_plan') {
-      const plan = await db.from('membership_plans').select('level,monthly_credits,yearly_credits').eq('id', order.item_id).maybeSingle();
-      if (plan.error || !plan.data) return {};
-      const credits = order.billing_cycle === 'yearly' ? plan.data.yearly_credits : plan.data.monthly_credits;
-      return { tier: String(plan.data.level), ...(typeof credits === 'number' ? { credits } : {}) };
-    }
-    const pack = await db.from('credit_packages').select('credits_amount,bonus_credits').eq('id', order.item_id).maybeSingle();
-    if (pack.error || !pack.data) return {};
-    return { credits: Number(pack.data.credits_amount ?? 0) + Number(pack.data.bonus_credits ?? 0) };
+    const plan = await db.from('membership_plans').select('level').eq('id', order.item_id).maybeSingle();
+    return plan.error || !plan.data ? undefined : String(plan.data.level);
   } catch {
-    return {};
+    return undefined;
   }
 }
 
@@ -123,13 +152,14 @@ export type OrderEventKind = 'checkout_start' | 'checkout_cancel' | 'purchase';
 export async function orderEvent(db: SupabaseClient, order: OrderRow, kind: OrderEventKind, dedupeSource: string,
   visitorId: string | null): Promise<PvuvEvent | null> {
   if (!order.user_id) return null;
-  const facts = await productFacts(db, order);
+  const tier = await planTier(db, order);
+  const credits = snapshotCredits(order.purchase_snapshot);
   const renewal = order.method_transition === 'founder_renewal' || order.method_transition === 'wallet_renewal';
   const props: Record<string, string | number | boolean> = {
     product: order.item_type, interval: order.billing_cycle, channel: order.payment_channel ?? 'stripe',
     method: order.payment_method ?? 'unknown', discount: order.offer_kind ?? 'none',
-    ...(facts.tier ? { tier: facts.tier } : {}), ...(renewal ? { renewal: true } : {}),
-    ...(kind === 'purchase' && facts.credits !== undefined ? { credits: facts.credits } : {}),
+    ...(tier ? { tier } : {}), ...(renewal ? { renewal: true } : {}),
+    ...(kind === 'purchase' && credits !== undefined ? { credits } : {}),
   };
   return {
     name: kind, user_id: order.user_id, ...(visitorId ? { visitor_id: visitorId } : {}),
@@ -140,9 +170,9 @@ export async function orderEvent(db: SupabaseClient, order: OrderRow, kind: Orde
 }
 
 /** Loads an order by id (and owner when given) and reports `kind` for it. Never throws. */
-export async function reportOrderEvent(db: SupabaseClient, orderId: string, kind: OrderEventKind, dedupeSource: string,
-  options: { userId?: string; visitorId?: string | null; scheduleAfter?: (task: () => Promise<unknown>) => void; order?: OrderRow } = {}): Promise<void> {
-  await dispatchPvuv(async () => {
+export function reportOrderEvent(db: SupabaseClient, orderId: string, kind: OrderEventKind, dedupeSource: string,
+  options: { userId?: string; visitorId?: string | null; scheduleAfter?: (task: () => Promise<unknown>) => void; order?: OrderRow } = {}): void {
+  dispatchPvuv(async () => {
     let order = options.order ?? null;
     if (!order) {
       let query = db.from('payment_orders').select(ORDER_COLUMNS).eq('id', orderId);

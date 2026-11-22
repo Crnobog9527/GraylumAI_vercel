@@ -1,5 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 
+import { isPvuvPath } from './pvuv-scrub';
+
 /**
  * ANALYTICS-PVUV: AI assistants and search engines fetch the HTML and leave without running scripts, so the browser script
  * never sees them. The proxy reports each such page fetch to pvuv.ai (`POST /v1/sites/<site>/crawler_hits`, ingest-only
@@ -20,7 +22,10 @@ export function isCrawlerPageHit(method: string, pathname: string, userAgent: st
   if (method !== 'GET' && method !== 'HEAD') return false;
   if (!userAgent || !CRAWLER_UA.test(userAgent)) return false;
   if (pathname.startsWith('/api/') || pathname === '/api' || pathname.startsWith('/_') || ASSET.test(pathname)) return false;
-  return true;
+  // The same page filter as the browser channel, on the decoded path: logged-in, sensitive, email- or token-like paths never leave.
+  let decoded = pathname;
+  try { decoded = decodeURIComponent(pathname); } catch { return false; }
+  return isPvuvPath(decoded);
 }
 
 type HitInput = { method: string; pathname: string; userAgent: string | null; ip: string | null };

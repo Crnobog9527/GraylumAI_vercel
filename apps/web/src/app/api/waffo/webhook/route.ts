@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import '@/lib/analytics/pvuv-scheduler';
 import { createServiceRoleSupabaseClient } from '@repo/api/src/services/stripe';
 import { handleWaffoWebhookHttp } from '@repo/api/src/services/payments/waffoWebhookHttp';
 import { processWaffoReceipt } from '@repo/api/src/services/payments/waffoPaymentDelivery';
