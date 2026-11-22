@@ -12,6 +12,6 @@ import { useSignupReporting } from './use-signup-reporting';
  */
 export function AccountConsentSync({ consent, reportable }: { consent: ConsentSnapshot; reportable: boolean }) {
   useConsentWithdrawalSync(consent, true);
-  useSignupReporting(consent.analytics && reportable);
+  useSignupReporting(consent.analytics && reportable, reportable);
   return null;
 }

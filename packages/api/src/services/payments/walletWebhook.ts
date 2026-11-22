@@ -13,6 +13,7 @@ import { resumeOrderDisputes, type DisputeAlert } from './disputes';
 import { observeStripeTestClock } from './stripeTestClock';
 import { closeRefundedTestClockCheckout } from './stripeTestClockClose';
 import { reportGaPurchase } from '../analytics/gaPurchase';
+import { reportOrderEvent } from '../analytics/pvuv';
 
 const isCard = (method: string) => method === 'card' || method === 'card_cn';
 
@@ -106,7 +107,8 @@ export async function recoverMethodCheckout(db: SupabaseClient, stripe: Stripe, 
         p_state: validated.status === 'complete' && !isCard(order.payment_method) ? 'failed_unpaid' : 'closed_unpaid',
         p_payment: null, p_amount: 0, p_currency: 'usd', p_paid_at: null });
       if (closed.error) throw new Error('PAY_WAFFO_CHECKOUT_UNAVAILABLE');
-
+      // ANALYTICS-PVUV: the buyer left without paying (statistics only; never throws, repeats are ignored by its dedupe id).
+      await reportOrderEvent(db, order.id, 'checkout_cancel', sessionId, { order });
     }
     // The session as this recovery validated it (newer than the caller's copy): a browser return reports it.
     return { orderId: order.id, checkoutStatus: validated?.status ?? null, paymentStatus: validated?.payment_status ?? null };
@@ -165,7 +167,11 @@ export async function recoverMethodCheckout(db: SupabaseClient, stripe: Stripe, 
   if ('tax' in cash) await attempt(() => recordCardPaymentTax(db, scope.merchant, order.id, cash));
   // ANALYTICS: only the call that newly delivered the order (duplicate false) reports, whichever caller wins
   // (webhook, browser return, reconciliation). Statistics only: it never throws and never blocks delivery.
-  if (delivered && (applied.data as { duplicate?: unknown }).duplicate === false) await reportGaPurchase(db, order);
+  if (delivered && (applied.data as { duplicate?: unknown }).duplicate === false) {
+    await reportGaPurchase(db, order);
+    // ANALYTICS-PVUV: the same newly delivered payment, once per payment id (statistics only; never throws).
+    await reportOrderEvent(db, order.id, 'purchase', cash.paymentId, { order });
+  }
   if (failures.length) throw failures[0];
   return { orderId: order.id, checkoutStatus: validated?.status ?? null, paymentStatus: 'paid' as const };
 }

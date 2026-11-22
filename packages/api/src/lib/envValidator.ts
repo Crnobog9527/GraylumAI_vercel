@@ -107,6 +107,11 @@ const envSchema = z.object({
   ALIYUN_SMS_SIGN_NAME: optionalString,
   ALIYUN_SMS_TEMPLATE_CODE: optionalString,
 
+  // ANALYTICS-PVUV: server events and AI-crawler hits go to pvuv.ai only when both are set. PVUV_INGEST_TOKEN is a secret
+  // (ingest-only: it can report events and read nothing); it never gets a NEXT_PUBLIC_ prefix.
+  PVUV_SITE: optionalString,
+  PVUV_INGEST_TOKEN: optionalString,
+
   SENTRY_AUTH_TOKEN: rejectDuplicatedEnvPrefix('SENTRY_AUTH_TOKEN')
     .regex(/^sntrys_/, 'SENTRY_AUTH_TOKEN 必须以 sntrys_ 开头')
     .optional(),

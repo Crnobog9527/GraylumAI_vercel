@@ -3,6 +3,7 @@ import { observeFailoverUpgrade } from '../services/payments/failoverAfterFulfil
 import { assertCheckoutRateLimit, getStripeAppUrl, getStripeClient } from '../services/stripe';
 import { methodCheckoutInputSchema } from '../services/payments/methodPurchase';
 import { checkoutValue, storeGaCheckoutIds } from '../services/analytics/gaPurchase';
+import { pvuvVisitorId, reportOrderEvent } from '../services/analytics/pvuv';
 import { createWalletCheckout } from '../services/payments/walletCheckout';
 import { createStripeCardCheckout } from '../services/payments/stripeMethodCheckout';
 import { readPaymentMethodRoutes, assertPaymentMethodRoute, isCardMethod } from '../services/payments/methodRouting';
@@ -84,6 +85,9 @@ export const methodPaymentProcedures = {
           : createWalletCheckout({ ...common, stripe: getStripeClient() }));
       if (result.state !== 'open') return result;
       if (analytics !== undefined) await storeGaCheckoutIds(ctx.supabaseAdmin, ctx.profileId, result.orderId, analytics, requestedAt);
+      // ANALYTICS-PVUV: checkout_start, once per order, after the response when the host allows (statistics only; never throws).
+      await reportOrderEvent(ctx.supabaseAdmin, result.orderId, 'checkout_start', result.orderId, {
+        userId: ctx.profileId, visitorId: pvuvVisitorId(ctx.headers), scheduleAfter: ctx.scheduleAfter });
       // The order's pre-tax amount for the browser's begin_checkout (statistics only; null when unreadable).
       return { ...result, checkoutValue: await checkoutValue(ctx.supabaseAdmin, ctx.profileId, result.orderId) };
     } catch (error) {
