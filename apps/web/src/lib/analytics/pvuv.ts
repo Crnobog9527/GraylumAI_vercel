@@ -185,6 +185,11 @@ export function identifyPvuv(userId: string | null | undefined): void {
 /** Sign-out: the script's stored account id goes (the visitor id stays; that is the same browser). */
 export function forgetPvuvUser(): void {
   pendingUser = null;
+  // An identify queued before f.js loaded would be replayed by the script for the signed-out account: take it out.
+  const queue = typeof window === 'undefined' ? undefined : window.pvuv?.q;
+  if (Array.isArray(queue)) {
+    for (let i = queue.length - 1; i >= 0; i -= 1) if (queue[i]?.[0] === 'identify') queue.splice(i, 1);
+  }
   clearPvuvStorage(['_pv_uid']);
 }
 
