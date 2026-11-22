@@ -53,11 +53,10 @@ describe('organizer complete-value context',()=>{
     expect(ORGANIZER_INSTRUCTIONS).not.toContain('combine its existing supported content with the relevant user answer and the primary mentor reply');
   });
   it('bounds every complete value and preserves qualifications when condensing',()=>{
-    expect(ORGANIZER_INSTRUCTIONS).toContain('Each field value must be at most 400 characters');
-    expect(ORGANIZER_INSTRUCTIONS).toContain('condense it into concise key points within that limit');
+    expect(ORGANIZER_INSTRUCTIONS).toContain('Each field value has a hard limit of 400 characters');
+    expect(ORGANIZER_INSTRUCTIONS).toContain('condense it into concise key points');
     expect(ORGANIZER_INSTRUCTIONS).toContain('preserving key facts, decisions, negation, constraints and uncertainty');
-    expect(ORGANIZER_INSTRUCTIONS).toContain('Do not emit an overlong value that the host would discard');
-    expect(ORGANIZER_INSTRUCTIONS).toContain('or drop important qualifications merely to shorten it');
+    expect(ORGANIZER_INSTRUCTIONS).toContain('Do not drop important qualifications merely to shorten it');
   });
 
 });
@@ -78,4 +77,15 @@ it('accepts explicit user plans in proposal fields without relaxing source or ev
  expect(ORGANIZER_INSTRUCTIONS).toContain('Do not redirect a later-step plan into a current-step field');
  expect(ORGANIZER_INSTRUCTIONS).toContain('Never extract user_fact fields, user_statement patches or the host marker for that event');
  expect(ORGANIZER_INSTRUCTIONS).not.toContain('only a relevant concrete mentor recommendation can update that field');
+});
+
+// Staging turn 6829: a 416-character profile_kit proposal exceeded the 400 hard limit and was discarded whole as
+// invalid_patch, so the field stayed empty. The prompt must leave the model a margin below the limit it is checked against.
+it('asks for field values well inside the capture length limit and says an overlong value is discarded',async()=>{
+ const {CAPTURE_VALUE_LIMIT,CAPTURE_VALUE_TARGET}=await import('../../shared/conversationCapture');
+ expect(CAPTURE_VALUE_LIMIT).toBe(400);
+ expect(CAPTURE_VALUE_TARGET).toBeLessThanOrEqual(CAPTURE_VALUE_LIMIT*0.8);
+ expect(ORGANIZER_INSTRUCTIONS).toContain(`hard limit of ${CAPTURE_VALUE_LIMIT} characters`);
+ expect(ORGANIZER_INSTRUCTIONS).toContain(`at most about ${CAPTURE_VALUE_TARGET} characters`);
+ expect(ORGANIZER_INSTRUCTIONS).toContain('discarded entirely');
 });
