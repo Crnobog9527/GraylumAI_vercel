@@ -262,6 +262,45 @@ for (const width of [375, 1440]) {
   }, 30000);
 }
 
+// Batch 11-23-2 (#2039): the history lists a turn once its reply is saved, a moment before the turn's account fetch commits its
+// benchmark row and shortfall card. The one read at that signal found neither, and nothing re-read until a page reload.
+it("shows the shortfall card and the new benchmark row that were committed just after the turn settled, without a reload", async () => {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+  const errors: string[] = [];
+  let committed = false;
+  page.on("pageerror", error => errors.push(error.message));
+  try {
+    await page.route("**/*", async route => {
+      const url = new URL(route.request().url());
+      if (url.pathname === "/") return route.fulfill({ contentType: "text/html", body: '<div id="root"></div>' });
+      let data: unknown = {};
+      if (url.pathname.endsWith("/research.cards")) data = { items: [] };
+      else if (url.pathname.endsWith("/research.benchmarks"))
+        data = { items: committed ? [benchmark("sample_1"), benchmark("sample_2")] : [benchmark("sample_1")] };
+      else if (url.pathname.endsWith("/research.shortfall")) data = { rounds: 2, qualified: committed ? 2 : 1,
+        card: committed ? { cardId: SHORTFALL_CARD, required: 3, offeredQualified: 2, offeredRounds: 2, choice: null,
+          confirmationId: null, chosenQualified: null, chosenRounds: null, chosenAt: null } : null };
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify({ result: { data } }) });
+    });
+    await page.goto("http://research.test/");
+    await page.addStyleTag({ content: css });
+    await page.addScriptTag({ content: code });
+    const table = page.getByRole("region", { name: "对标表" });
+    await ui(table).toBeVisible({ timeout: 5000 });
+    await ui(page.getByRole("region", { name: "对标不足时怎么办" })).toHaveCount(0);
+    // The turn is settled in history; its rows are committed a moment later.
+    await page.evaluate(() => (window as unknown as { settle: () => void }).settle());
+    await page.waitForTimeout(300);
+    committed = true;
+    await ui(page.getByRole("region", { name: "对标不足时怎么办" })).toBeVisible({ timeout: 8000 });
+    await ui(page.getByRole("region", { name: "对标不足时怎么办" }).getByRole("radio", { name: /用现有 2 个对标先生成报告/ })).toBeVisible();
+    await ui(page.locator("main")).toContainText("sample_2");
+    expect(errors).toEqual([]);
+  } finally {
+    await page.close();
+  }
+}, 30000);
+
 it("continues an unfinished discovery once for the user, not after a stop, and never again after the panel remounts", async () => {
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
   const errors: string[] = [];
