@@ -10,11 +10,13 @@ import { ANALYTICS_CONFIG, gtagScriptUrl } from '@/lib/analytics/config';
 import { consentSnapshot, serverConsentSnapshot, subscribeConsent } from '@/lib/analytics/consent';
 import { captureFirstTouch } from '@/lib/analytics/attribution';
 import { enterPage, syncGa } from '@/lib/analytics/ga';
+import { syncPvuv } from '@/lib/analytics/pvuv';
 import { isSensitivePath } from '@/lib/analytics/routes';
 import { cleanVercelEvent } from '@/lib/analytics/vercel';
 import type { SiteLocale } from '@/lib/seo/site';
 import { AccountConsentSync } from './AccountConsentSync';
 import { ConsentBar } from './ConsentBar';
+import { usePvuvIdentity } from './use-pvuv-identity';
 
 /**
  * Consent bar and statistics for every page (ANALYTICS plan §3, ANALYTICS-CONSENT). Our own consent module decides from
@@ -24,7 +26,7 @@ import { ConsentBar } from './ConsentBar';
  * scripts need no tRPC; only AccountConsentSync does.
  */
 export function SiteAnalytics({ onVercel, locale }: { onVercel: boolean; locale: SiteLocale }) {
-  const { gaMeasurementId, vercelCategory } = ANALYTICS_CONFIG;
+  const { gaMeasurementId, pvuvSite, vercelCategory } = ANALYTICS_CONFIG;
   const pathname = usePathname();
   const consent = useSyncExternalStore(subscribeConsent, consentSnapshot, serverConsentSnapshot);
   const previous = useRef<string | null>(null);
@@ -43,6 +45,12 @@ export function SiteAnalytics({ onVercel, locale }: { onVercel: boolean; locale:
     // Consent given on this page: its address is the first touch we may keep.
     if (consent.analytics) captureFirstTouch(window.location.href, document.referrer);
   }, [consent.analytics, gaMeasurementId]);
+
+  // pvuv.ai (ANALYTICS-PVUV): the script is added on a public page once consent allows; a refusal removes it (page reload).
+  useEffect(() => {
+    syncPvuv(pvuvSite, window.location.pathname);
+  }, [pathname, consent.analytics, pvuvSite]);
+  usePvuvIdentity(Boolean(pvuvSite) && consent.analytics);
 
   const reportable = !isSensitivePath(pathname ?? '/');
 

@@ -120,6 +120,12 @@ export function analyticsAllowed(): boolean {
   return snapshot.analytics;
 }
 
+/** A refusal that a reload will still see: stored in this browser, or sent by the browser itself (GPC). */
+export function refusalPersisted(): boolean {
+  ensureLoaded();
+  return readGpc() || readStoredChoice() === 'denied';
+}
+
 export function consentSnapshot(): ConsentSnapshot {
   ensureLoaded();
   return snapshot;
@@ -134,17 +140,19 @@ export function subscribeConsent(listener: () => void): () => void {
   return () => { listeners.delete(listener); };
 }
 
-/** GA's own cookies (`_ga`, `_ga_<id>`, legacy `_gid`) are removed on refusal, on this host and its parent domains. */
+/** GA's own cookies (`_ga`, `_ga_<id>`, legacy `_gid`) and pvuv.ai's (`_pv_*`) are removed on refusal, on this host and its parent domains. */
 function expireAnalyticsCookies() {
   try {
     const names = document.cookie.split(';').map(part => part.trim().split('=')[0])
-      .filter(name => name === '_ga' || name.startsWith('_ga_') || name === '_gid');
+      .filter(name => name === '_ga' || name.startsWith('_ga_') || name === '_gid' || name.startsWith('_pv_'));
     const parts = window.location.hostname.split('.');
     const domains = [''];
     for (let i = 0; i < parts.length - 1; i += 1) domains.push(`; domain=.${parts.slice(i).join('.')}`);
     for (const name of names) {
       for (const domain of domains) document.cookie = `${name}=; Max-Age=0; path=/${domain}`;
     }
+    // pvuv.ai (ANALYTICS-PVUV) also keeps its visitor id in local storage.
+    for (const key of Object.keys(window.localStorage)) if (key.startsWith('_pv')) window.localStorage.removeItem(key);
   } catch {
     // No document (tests, workers): nothing to remove.
   }

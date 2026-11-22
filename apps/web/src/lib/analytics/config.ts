@@ -11,15 +11,20 @@ export type VercelAnalyticsCategory = 'essential' | 'analytics';
 export type AnalyticsConfig = {
   /** GA4 measurement ID, `G-…`; staging and production use different properties. */
   gaMeasurementId: string | null;
+  /** pvuv.ai site id (ANALYTICS-PVUV); null = no pvuv script. Public (it is in the page source). */
+  pvuvSite: string | null;
   /** Whether Speed Insights waits for statistics consent (plan O5). Default: analytics (it waits). Web Analytics never waits. */
   vercelCategory: VercelAnalyticsCategory;
 };
 
 const GA_MEASUREMENT_ID = /^G-[A-Z0-9]{4,16}$/;
+const PVUV_SITE = /^[A-Za-z0-9_-]{4,64}$/;
 
 export function parseAnalyticsConfig(env: Record<string, string | undefined>): AnalyticsConfig {
   const ga = env.NEXT_PUBLIC_GA4_MEASUREMENT_ID?.trim() ?? '';
+  const pvuv = env.NEXT_PUBLIC_PVUV_SITE?.trim() ?? '';
   return {
+    pvuvSite: PVUV_SITE.test(pvuv) ? pvuv : null,
     gaMeasurementId: GA_MEASUREMENT_ID.test(ga) ? ga : null,
     vercelCategory: env.NEXT_PUBLIC_VERCEL_ANALYTICS_CATEGORY?.trim() === 'essential' ? 'essential' : 'analytics',
   };
@@ -33,6 +38,7 @@ const fromEnv = (read: () => string | undefined) => {
 // Written out one by one so Next.js inlines each NEXT_PUBLIC_ value into the client bundle.
 export const ANALYTICS_CONFIG: AnalyticsConfig = parseAnalyticsConfig({
   NEXT_PUBLIC_GA4_MEASUREMENT_ID: fromEnv(() => process.env.NEXT_PUBLIC_GA4_MEASUREMENT_ID),
+  NEXT_PUBLIC_PVUV_SITE: fromEnv(() => process.env.NEXT_PUBLIC_PVUV_SITE),
   NEXT_PUBLIC_VERCEL_ANALYTICS_CATEGORY: fromEnv(() => process.env.NEXT_PUBLIC_VERCEL_ANALYTICS_CATEGORY),
 });
 
