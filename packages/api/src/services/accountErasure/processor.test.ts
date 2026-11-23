@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from 'vitest';
-import { processAccountErasure, type ErasureStorageAdapter } from './processor';
+import { LOCAL_CLEANUP_TIMEOUT_MS, processAccountErasure, type ErasureStorageAdapter } from './processor';
 import type { BillingRpc } from '../turn/provider/frozenRun';
 
 const actor = '00000000-0000-4000-8000-000000000001';
@@ -201,6 +201,33 @@ describe('unwired account erasure processor', () => {
     expect(await processAccountErasure({ ...f.input, budget: { now: () => now, deadline: 10000 } }))
       .toMatchObject({ stage: 'completed', retry: false });
     expect(f.authAdapter.remove).toHaveBeenCalledOnce();
+  });
+  // Staging 11-23: local cleanup committed in about 3 s, but the 2 s window reported it uncertain on every pass.
+  it('waits for a slow but bounded local cleanup and reaches Auth deletion in the same pass', async () => {
+    vi.useFakeTimers();
+    try {
+      const f = setup({ account_erasure_local_cleanup: () => new Promise(resolve => {
+        setTimeout(() => resolve({ remaining: 0, manualReview: 0, errors: [] }), 3_000);
+      }) });
+      const pending = processAccountErasure(f.input);
+      await vi.advanceTimersByTimeAsync(3_100);
+      const result = await pending;
+      expect(result.errorCodes).not.toContain('ERASURE_RPC_LOCAL_CLEANUP_TIMEOUT_UNKNOWN');
+      expect(result).toMatchObject({ stage: 'completed', retry: false });
+      expect(f.authAdapter.remove).toHaveBeenCalledOnce();
+    } finally { vi.useRealTimers(); }
+  });
+  it('still treats a local cleanup past its own window as uncertain and never deletes Auth', async () => {
+    vi.useFakeTimers();
+    try {
+      const f = setup({ account_erasure_local_cleanup: () => new Promise(() => {}) });
+      const pending = processAccountErasure(f.input);
+      await vi.advanceTimersByTimeAsync(LOCAL_CLEANUP_TIMEOUT_MS + 100);
+      const result = await pending;
+      expect(result.errorCodes).toContain('ERASURE_RPC_LOCAL_CLEANUP_TIMEOUT_UNKNOWN');
+      expect(f.events.at(-1)).toBe('account_erasure_local_cleanup');
+      expect(f.authAdapter.remove).not.toHaveBeenCalled();
+    } finally { vi.useRealTimers(); }
   });
   it('never starts another RPC after a transaction timeout with uncertain completion', async () => {
     const f = setup({ account_erasure_scrub_content: () => new Promise(() => {}) });

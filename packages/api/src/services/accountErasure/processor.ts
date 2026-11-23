@@ -24,6 +24,12 @@ type Input = {
   budget?: { now?: () => number; deadline?: number; maxPages?: number; operationTimeoutMs?: number; storagePassTimeoutMs?: number };
 };
 class ProcessorFault extends Error {}
+/** Local cleanup is one bounded transaction, but its business prune still visits every listed leaf table
+ * (cost follows the whole database, not this account): on staging's Micro DB it takes about 3 s cold, so the
+ * generic 2 s window timed out on every pass after the transaction had committed and Auth was never reached.
+ * The server role's statement_timeout (8 s) still bounds it; waiting slightly longer lets a server cancel
+ * arrive as a definite error instead of an uncertain timeout. */
+export const LOCAL_CLEANUP_TIMEOUT_MS = 8_500;
 
 /** One closed subject, separate RPC transactions, bounded pages. Injected adapters own their actual I/O. */
 export async function processAccountErasure(input: Input): Promise<ErasureProcessResult> {
@@ -51,14 +57,14 @@ export async function processAccountErasure(input: Input): Promise<ErasureProces
       })]);
     } finally { if (timer) clearTimeout(timer); }
   };
-  const rpc = async (name: string, args: Record<string, unknown>) => {
+  const rpc = async (name: string, args: Record<string, unknown>, operationBudget = timeout) => {
     if (databaseUncertain) throw new ProcessorFault('ERASURE_RPC_UNCERTAIN');
     // Do not send a mutation whose response window is already shorter than its contract.
     // Otherwise an expected pass boundary is misreported as an uncertain committed write.
     if (deadline - now() < timeout) throw new ProcessorFault('ERASURE_BUDGET_EXHAUSTED');
     let sent = false;
     try {
-      const response = await bounded(() => { sent = true; return input.database.rpc(name, args); });
+      const response = await bounded(() => { sent = true; return input.database.rpc(name, args); }, operationBudget);
       if (!response || response.error) {
         error(erasureRpcDiagnostic(name, response?.error));
         throw new ProcessorFault('ERASURE_RPC_FAILED');
@@ -136,7 +142,8 @@ export async function processAccountErasure(input: Input): Promise<ErasureProces
         if (storage.errorCode) error(storage.errorCode);
       }
     });
-    const local = localSchema.parse(await rpc('account_erasure_local_cleanup', { ...actor, p_storage_verified: storageVerified }));
+    const local = localSchema.parse(await rpc('account_erasure_local_cleanup', { ...actor, p_storage_verified: storageVerified },
+      Math.max(timeout, LOCAL_CLEANUP_TIMEOUT_MS)));
     report.remaining += local.remaining; report.manualReview += local.manualReview;
     if (report.manualReview) report.stage = 'billing_pending';
     if (local.errors.length) { error('ERASURE_LOCAL_PENDING'); report.remaining = Math.max(1, report.remaining); }
