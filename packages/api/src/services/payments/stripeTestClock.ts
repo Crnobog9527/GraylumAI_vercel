@@ -28,13 +28,26 @@ export function testClockCustomerForOrder(order: TestClockOrder, scope: StripeSc
   const customer = order.checkout_request?.providerRequest?.customer;
   return typeof customer === 'string' && /^cus_[A-Za-z0-9]{6,128}$/.test(customer) ? customer : null;
 }
+const STRIPE_TEST_CLOCK_GONE = 'PAY_STRIPE_TEST_CLOCK_GONE';
+/** Stripe deletes a test clock and its customers (~30 days). Only the entitlement refresh may skip such a source. */
+export function stripeTestClockGone(error: unknown) {
+  const entry = error as { message?: unknown; cause?: { message?: unknown } } | null;
+  return entry?.message === STRIPE_TEST_CLOCK_GONE || entry?.cause?.message === STRIPE_TEST_CLOCK_GONE;
+}
 export async function readStripeTestClock(stripe: Stripe, customerId: string, userId: string) {
   const customer = await stripe.customers.retrieve(customerId);
+  // Other callers still see the same conflict; the cause only marks the provider-side deletion.
+  if (customer.deleted === true && customer.id === customerId) {
+    throw new Error(PAYMENT_EVIDENCE_CONFLICT, { cause: new Error(STRIPE_TEST_CLOCK_GONE) });
+  }
   if (customer.deleted || customer.id !== customerId || customer.livemode !== false
     || customer.metadata?.graylum_user_id !== userId) throw new Error(PAYMENT_EVIDENCE_CONFLICT);
   const clockId = typeof customer.test_clock === 'string' ? customer.test_clock : customer.test_clock?.id;
   if (!clockId) throw new Error(PAYMENT_EVIDENCE_CONFLICT);
-  const clock = await stripe.testHelpers.testClocks.retrieve(clockId);
+  const clock = await stripe.testHelpers.testClocks.retrieve(clockId).catch((error: { code?: unknown; statusCode?: unknown }) => {
+    if (error?.code === 'resource_missing' && error?.statusCode === 404) throw new Error(STRIPE_TEST_CLOCK_GONE, { cause: error });
+    throw error;
+  });
   if (clock.object !== 'test_helpers.test_clock' || clock.id !== clockId || clock.livemode !== false
     || (clock.status !== 'ready' && clock.status !== 'advancing')
     || !Number.isSafeInteger(clock.frozen_time) || clock.frozen_time <= 0
@@ -83,7 +96,11 @@ export async function refreshStripeTestClockUser(db: SupabaseClient, userId: str
   const provider = stripe ?? (await import('../stripe')).getStripeClient();
   const scope = await resolveStripeScope(provider);
   if (scope.mode !== 'test') return times;
-  for (const source of sources.data) await observeStripeTestClock(db, provider, scope, source, env);
+  for (const source of sources.data) {
+    // A clock Stripe already deleted has nothing left to observe; every other failure stays fail-closed.
+    try { await observeStripeTestClock(db, provider, scope, source, env); }
+    catch (error) { if (!stripeTestClockGone(error)) throw error; }
+  }
   const result = await db.rpc('pay_stripe_test_clock_times', { p_user: userId });
   if (result.error || !Array.isArray(result.data)) throw new Error('PAY_STRIPE_TEST_CLOCK_UNAVAILABLE');
   for (const row of result.data) {
