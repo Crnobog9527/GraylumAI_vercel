@@ -210,4 +210,32 @@ describe('authoritative narrow Stripe test-clock context', () => {
       ? [{ orderId: 'order', now: 'not-a-date' }] : null, error: null }));
     await expect(refreshStripeTestClockUser(f.db, 'owner', env, f.stripe)).rejects.toThrow('PAY_STRIPE_TEST_CLOCK_UNAVAILABLE');
   });
+  it.each(['customer', 'clock'])('skips a source whose test %s Stripe already deleted, keeping the entitlement read available', async gone => {
+    const f = fixture();
+    // Stripe returns `{ id, object, deleted: true }` once a test clock and its customers are purged (~30 days).
+    if (gone === 'customer') f.customers.retrieve.mockResolvedValue({ id: 'cus_clockfixture', object: 'customer', deleted: true });
+    else f.clocks.retrieve.mockRejectedValue(Object.assign(new Error('No such test_clock'), { code: 'resource_missing', statusCode: 404 }));
+    f.rpc.mockImplementation(async (name: string) => ({ data: name === 'pay_stripe_test_clock_times' ? [] : null, error: null }));
+    await expect(refreshStripeTestClockUser(f.db, 'owner', env, f.stripe)).resolves.toEqual(new Map());
+    expect(f.rpc.mock.calls.map(call => call[0])).toEqual(['pay_stripe_test_clock_times']);
+  });
+  it('keeps the deleted-customer observation a payment-evidence conflict for webhook callers', async () => {
+    const f = fixture(); f.customers.retrieve.mockResolvedValue({ id: 'cus_clockfixture', object: 'customer', deleted: true });
+    const observed = observeStripeTestClock(f.db, f.stripe, scope, order, env);
+    await expect(observed).rejects.toThrow('PAY_COMMON_PAYMENT_EVIDENCE_CONFLICT');
+    expect(stripeWebhookErrorCode(await observed.catch(error => error))).toBe('PAY_COMMON_PAYMENT_EVIDENCE_CONFLICT');
+  });
+  it.each([
+    { patch: { metadata: { graylum_user_id: 'another-user' } }, code: 'PAY_COMMON_PAYMENT_EVIDENCE_CONFLICT' },
+    { patch: { deleted: true, id: 'cus_other' }, code: 'PAY_COMMON_PAYMENT_EVIDENCE_CONFLICT' },
+    { patch: { livemode: true }, code: 'PAY_COMMON_PAYMENT_EVIDENCE_CONFLICT' },
+  ])('still fails the entitlement refresh closed on a genuine conflict: %j', async ({ patch, code }) => {
+    const f = fixture(); Object.assign(f.customer, patch);
+    await expect(refreshStripeTestClockUser(f.db, 'owner', env, f.stripe)).rejects.toThrow(code);
+    expect(f.rpc).not.toHaveBeenCalled();
+  });
+  it('still fails the entitlement refresh closed when Stripe is unreachable', async () => {
+    const f = fixture(); f.clocks.retrieve.mockRejectedValue(Object.assign(new Error('timeout'), { code: 'ETIMEDOUT' }));
+    await expect(refreshStripeTestClockUser(f.db, 'owner', env, f.stripe)).rejects.toThrow('timeout');
+  });
 });
