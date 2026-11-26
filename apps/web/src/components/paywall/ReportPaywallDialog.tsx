@@ -69,6 +69,12 @@ export function ReportPaywallView({ checkout: fullCheckout, onClose, scene = 're
   const [selected, setSelected] = useState<PaywallLevel>(goldOnly ? 'gold' : 'pro');
   const dialog = useRef<HTMLDivElement>(null);
   useEffect(() => { dialog.current?.focus(); }, []);
+  // A press that starts and ends on the dimmed area around the panel closes it, as the close button does (on a phone the strip
+  // above the sheet). A drag that starts inside the panel and ends outside does not; nor does a press inside a dialog opened on top.
+  const pressedBackdrop = useRef(false);
+  // While the catalog is out, the tool's plan is not known yet: show a placeholder instead of the "更高级别会员" words, which are
+  // only for a catalog that could not be read or names no such plan.
+  const planPending = tool !== null && checkout.loading;
 
   const plan = checkout.plans.find(item => item.level === selected) ?? checkout.plans[0];
   const quote = plan ? paywallQuote(plan, billing, checkout.quoteOptions) : null;
@@ -88,8 +94,12 @@ export function ReportPaywallView({ checkout: fullCheckout, onClose, scene = 're
     // The light signed-in dialog (DESIGN.md "Dialog", the same tone as the checkout dialog): it carries its own tokens, so it is light
     // wherever it is opened. Touch widths get 44px targets.
     // On a phone it rises from the bottom edge (bottom-sheet.module.css); the content is the same.
-    <div className={cn('fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4', lightOverlayClass, sheet.host)}>
-      <div ref={dialog} role="dialog" aria-modal="true" aria-labelledby="report-paywall-title" tabIndex={-1}
+    <div className={cn('fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4', lightOverlayClass, sheet.host)}
+      data-testid="report-paywall-backdrop"
+      onPointerDown={event => { pressedBackdrop.current = event.target === event.currentTarget; }}
+      onClick={event => { if (pressedBackdrop.current && event.target === event.currentTarget) onClose(); pressedBackdrop.current = false; }}>
+      <div ref={dialog} role="dialog" aria-modal="true" tabIndex={-1}
+        aria-labelledby={planPending ? undefined : 'report-paywall-title'} aria-label={planPending ? (tool === 'jury' ? '评审团' : '多模型对比') : undefined}
         data-testid="report-paywall" onKeyDown={event => { if (event.key === 'Escape') onClose(); }}
         className={cn('relative grid max-h-[94dvh] w-full max-w-5xl overflow-y-auto border md:grid-cols-[1fr_1.15fr]', lightPortalClass, sheet.panel)}
         style={lightDialogStyle}>
@@ -97,6 +107,8 @@ export function ReportPaywallView({ checkout: fullCheckout, onClose, scene = 're
           onClick={onClose}>
           <X className="h-4 w-4" aria-hidden="true" />
         </Button>
+
+        {planPending ? <div className="p-5 md:col-span-2 md:p-6"><PageSkeleton compact rows={4} label="会员方案读取中"/></div> : <>
 
         <aside aria-label={goldOnly ? '功能介绍' : '报告预览'} className="grid content-start gap-4 p-5 md:p-6" style={{ background: 'var(--bg-secondary)' }}>
           <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{COPY.eyebrow}</p>
@@ -188,6 +200,7 @@ export function ReportPaywallView({ checkout: fullCheckout, onClose, scene = 're
             <small style={{ color: 'var(--text-tertiary)' }}>{COPY.laterNote}</small>
           </div>
         </section>
+        </>}
       </div>
     </div>
   );

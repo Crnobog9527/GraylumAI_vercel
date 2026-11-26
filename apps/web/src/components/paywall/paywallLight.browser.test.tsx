@@ -67,7 +67,7 @@ beforeAll(async () => {
         const views = {
           report: () => React.createElement(ReportPaywallDialog, { onClose() {} }),
           coach: () => React.createElement(ReportPaywallDialog, { scene: 'coach', minLevel: 'pro', onClose() {} }),
-          jury: () => React.createElement(ReportPaywallDialog, { scene: 'jury', onClose() {} }),
+          jury: () => React.createElement(ReportPaywallDialog, { scene: 'jury', onClose() { window.__closes = (window.__closes ?? 0) + 1; } }),
           'compare-pro': () => React.createElement(ReportPaywallDialog, { scene: 'compare', onClose() {} }),
           checkout: () => React.createElement(Checkout),
           // The profile center's phone menu (app/profile/page.tsx), same props.
@@ -213,6 +213,33 @@ describe('paywall dialogs are the light signed-in dialog on a phone', () => {
       // The 16px icon keeps its place: 16px inside the right and the top edge (right-4 top-4 before).
       expect(Math.round(measured.iconRight)).toBe(16);
       expect(Math.round(measured.iconTop)).toBe(16);
+      expect(errors).toEqual([]);
+    } finally { await page.close(); }
+  }, 30000);
+
+  // Batch 11-24-2R: at 390px a tap on the dimmed strip above the sheet did nothing; only the close button closed it.
+  for (const width of [390, 1280]) it(`at ${width}px a press outside the paywall closes it, a press inside does not, and Escape closes it`, async () => {
+    const { page, errors } = await open('jury', width);
+    try {
+      const panel = page.getByTestId('report-paywall');
+      await browserExpect(panel).toContainText('Gold');
+      await page.waitForFunction(() => document.querySelector('[data-testid="report-paywall"]')!.getAnimations()
+        .every(animation => animation.playState === 'finished'));
+      const closes = () => page.evaluate(() => (window as unknown as { __closes?: number }).__closes ?? 0);
+      await panel.getByRole('heading', { level: 2 }).click();
+      expect(await closes(), 'a press inside the panel').toBe(0);
+      // Starting inside the panel and letting go outside is a drag, not a tap on the backdrop.
+      const box = (await panel.boundingBox())!;
+      await page.mouse.move(box.x + box.width / 2, box.y + 40);
+      await page.mouse.down();
+      await page.mouse.move(width / 2, 6);
+      await page.mouse.up();
+      expect(await closes(), 'a drag that ends outside').toBe(0);
+      await page.mouse.click(width / 2, Math.max(1, Math.floor(box.y / 2)));
+      expect(await closes(), 'a press on the backdrop').toBe(1);
+      await panel.focus();
+      await page.keyboard.press('Escape');
+      expect(await closes(), 'Escape').toBe(2);
       expect(errors).toEqual([]);
     } finally { await page.close(); }
   }, 30000);
