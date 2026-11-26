@@ -710,21 +710,18 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                     recovery: recoveryNeedsUser[0] && !busy
                       ? { readable: recoveryNeedsUser[0].readable, onClick: () => void recoverPendingStep(recoveryNeedsUser[0]!.step) } : null })]}/>
                   </MentorChatLog>
-                  {/* The step's confirmation and summary share one bounded tray: the conversation above always keeps room to read. */}
-                  {snap.state === "draft" && !s.valid && <div className={resultStyles.chatTray} data-chat-tray="">
-                  <StepConfirmCard stays={!!d.accountRevision || index === steps.length - 1}
+                  {snap.state === "draft" && !s.valid && <div className={resultStyles.chatTray} data-chat-tray=""><StepConfirmCard
                     title={step.title} info={d.information[step.id]} edits={infoEdits[step.id]} resuming={confirmation.displayState(step.id) === "valid"}
                     stepId={step.id} canConfirm={confirmableStep(step)} disabled={busy || hasPendingStepRequest} signal={d.stepConfirmation?.[step.id]}
                     onConfirm={settled => confirmation.confirmNow(step.id, d.information[step.id], infoEdits[step.id], snap.steps, settled)}
-                    onEdit={highlightFields(step.id)} onReview={() => openReview(step.id)}/>
+                    onEdit={highlightFields(step.id)} onReview={() => openReview(step.id)} stays={!!d.accountRevision || index === steps.length - 1}/>
                   {offersStepSummary(mentorExecutions.filter(execution => {
                     const turn = mentorTurns.get(execution.executionId);
                     return turn?.stepId === step.id && (!Object.hasOwn(turn, "roundId") || turn.roundId === d.roundId);
                   })) && <div className="flex flex-wrap items-center gap-2">
                     <Button variant="outline" size="sm" disabled={sendLocked} onClick={() => void ask(step, STEP_SUMMARY_INPUT)}>{STEP_SUMMARY_LABEL}</Button>
                     <span className="text-xs text-[var(--text-secondary)]">让 AI 教练先整理这一步的小结，还缺什么会如实列出；确认仍由你来点。</span>
-                  </div>}
-                  </div>}
+                  </div>}</div>}
                   <WorkComposer references={false} value={mentorInput} onChange={setMentorInput} label="给 AI 教练的回复" placeholder={OTHER_PLACEHOLDER} attachment={dock} maxLength={8000} disabled={snap.state!=="draft"} sendDisabled={sendLocked} onSend={skill=>{if(skill)void free.send(mentorInput,skill);else void ask(step);}}/>
                   <p className="text-xs text-[var(--text-secondary)]">
                     同一账号的步骤共用这条对话，未确认内容保留在草稿中。{d?.runtimeMode==='staging_test'||d?.runtimeMode==='production'?'当前使用真实模型，仅处理你提供的资料。':'当前为隔离模拟，不调用真实模型。'}

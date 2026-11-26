@@ -171,3 +171,17 @@ it('the confirmation card\'s "暂时无法确定，写原因暂缓" opens the st
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 60000);
+
+it('360x640 with both cards (a short phone): the step scrolls as a whole, so the box and send are reachable, and the list keeps 120px', async () => {
+  const { page, errors } = await open(360, 640, { values: ready, withCard: true });
+  try {
+    const box = page.getByRole('textbox', { name: '给 AI 教练的回复' });
+    // The step scrolls as a whole: bring the foot of the box (the send button) into view.
+    await page.getByRole('button', { name: '发送', exact: true }).scrollIntoViewIfNeeded();
+    expect(await reachable(box), 'message box').toBe(true);
+    expect(await reachable(page.getByRole('button', { name: '发送', exact: true })), 'send').toBe(true);
+    await page.getByRole('log', { name: '完整 AI 教练消息' }).scrollIntoViewIfNeeded();
+    expect((await logRoom(page)).visible).toBeGreaterThanOrEqual(120);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 60000);

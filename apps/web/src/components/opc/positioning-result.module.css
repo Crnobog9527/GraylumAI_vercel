@@ -133,7 +133,9 @@
    message list and the box (the step's confirmation, the summary offer) shares one bounded tray that scrolls on its own, with
    its buttons pinned to the tray's foot so they are always on screen. A docked question card scrolls inside its own frame;
    when both are shown, each takes a smaller share, so the list, the tray's buttons and the box all fit. The box never shrinks. */
-.conversationPage .mentorChat [role=log]{flex:1 1 0;min-height:clamp(180px,24dvh,300px)}
+.conversationPage .mentorChat [role=log]{flex:1 1 0;min-height:clamp(120px,24dvh,300px)}
+/* A short screen where even the floors do not fit (360x640 with both cards): the step scrolls as a whole, so the box is reachable. */
+.conversationPage .workspaceContent>section[aria-label="当前定位步骤"]{overflow-y:auto;overscroll-behavior:contain}
 .conversationPage .mentorChat>.chatTray{flex:0 1 auto;min-height:min(92px,12dvh);max-height:clamp(110px,22dvh,220px);overflow-y:auto;overscroll-behavior:contain;margin-top:6px;scrollbar-width:thin}
 .chatTray:empty{display:none}
 .chatTray>section[aria-label="本步确认"]{margin-top:0}
