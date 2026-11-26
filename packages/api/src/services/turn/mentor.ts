@@ -23,7 +23,7 @@ import type { PricingDeps } from './admission/pricingAdmission';
 import { modelCall, TurnStop } from './call';
 import { CLOSES, GATE_CODES, noteUnsavedAnswer, type ChatDeps } from './chat';
 import { turnDatabase, TurnDatabaseError, type CloseKind, type TurnClients } from './db';
-import { projectHistory, trimHistory, turnSession } from './history';
+import { projectHistory, trimKeepingUserWords, turnSession } from './history';
 import type { CounterStore } from './limiter';
 import { mentorCatalog, MentorCatalogError, mentorPolicy } from './mentorCatalog';
 import { TurnReplay, type ResumeRead } from './resume';
@@ -244,7 +244,8 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
     if (research && !researchFits && (benchmarkStep || linkTurn || input.researchRefreshId))
       throw new TurnStop(benchmarkStep ? 'RESEARCH_TOOLS_CONTEXT_CAPACITY' : 'RESEARCH_TOOLS_LINK_CONTEXT_CAPACITY');
     const left = mentor.inputLimit - required - (researchFits ? researchBytes : 0);
-    const history = trimHistory(projectHistory(projectMentorHistory(opened.history)), Math.max(left, 0));
+    // The user's own words are kept longest: older coach replies are cut to their ending before any answer drops out (history.ts).
+    const history = trimKeepingUserWords(projectHistory(projectMentorHistory(opened.history)), Math.max(left, 0));
     const promptCache = system.prefixChars > 0 ? freezeSharedPromptCache({ real: true, model: mentor.model,
       cacheWriteUsdPerMillion: mentor.providerLimits.cacheWriteUsdPerMillion, instructions: system.instructions,
       prefixChars: system.prefixChars, historyMarker: !opening }) : undefined;

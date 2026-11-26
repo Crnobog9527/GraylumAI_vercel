@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { historyRoom, projectHistory, trimHistory, turnSession } from './history';
+import { EARLIER_REPLY_MARK, historyRoom, projectHistory, trimHistory, trimKeepingUserWords, turnSession } from './history';
 import { fitToolTurn } from './tools/capacity';
 
 const message = (seq: number, role: 'user' | 'assistant', content: string) =>
@@ -88,5 +88,63 @@ describe('history next to a real strategy read stays inside the 150 kB ceiling (
     expect(Buffer.byteLength(instructions) + definitionBytes + Buffer.byteLength(JSON.stringify(kept))).toBeLessThanOrEqual(inputLimit - 8192);
     // Without the eviction the same request would have gone over the budget.
     expect(Buffer.byteLength(instructions) + definitionBytes + Buffer.byteLength(JSON.stringify(items))).toBeGreaterThan(inputLimit - 8192);
+  });
+});
+
+describe('the positioning mentor keeps the user\'s own words longest (Owner\'s new-account run, 2026-11-26: questions asked again)', () => {
+  // The shape of a staging positioning conversation: short answers, long coach replies; about 11 kB of room after the Skill,
+  // the checklist, the rules and the Skill-file reserve (estimated from the prompt sizes of staging sessions, turns 7 to 13).
+  const room = 11_000;
+  const answers = Array.from({ length: 13 }, (_, i) => `回答 ${i + 1}：` + '我在美国上班，每周能发 3 条，暂不变现。'.repeat(3));
+  const replies = Array.from({ length: 13 }, (_, i) => `回复 ${i + 1}。` + '我们先把这一步需要的信息说清楚，再看下一步。'.repeat(18) +
+    ` 问题 ${i + 1}：你最想让这个账号带来什么？`);
+  const chat = (turns: number) => projectHistory(Array.from({ length: turns }, (_, i) => [
+    message(i * 2 + 1, 'user', answers[i]!), message(i * 2 + 2, 'assistant', replies[i]!)]).flat());
+  const text = (item: ReturnType<typeof projectHistory>[number]) =>
+    item.role === 'user' ? item.content : item.content.map(part => part.text).join('');
+
+  it('before: trimHistory drops the earliest answers once the conversation outgrows the room', () => {
+    const kept = trimHistory(chat(13), room).map(text);
+    expect(kept.some(item => item.startsWith('回答 1：'))).toBe(false);
+  });
+
+  it('every answer is still there verbatim; the newest replies stay whole, older ones keep their ending (where the question is)', () => {
+    const all = chat(13), kept = trimKeepingUserWords(all, room);
+    expect(Buffer.byteLength(JSON.stringify(kept))).toBeLessThanOrEqual(room);
+    expect(kept[0]!.role).toBe('user');
+    expect(kept.filter(item => item.role === 'user').map(text)).toEqual(answers);
+    expect(text(kept.at(-1)!)).toBe(replies[12]);
+    const older = kept.filter(item => item.role === 'assistant' && text(item).startsWith(EARLIER_REPLY_MARK)).map(text);
+    expect(older.length).toBeGreaterThan(0);
+    for (const reply of older) expect(replies.some(original => original.endsWith(reply.slice(EARLIER_REPLY_MARK.length)))).toBe(true);
+    expect(older.every(reply => reply.includes('你最想让这个账号带来什么？'))).toBe(true);
+  });
+
+  it('a history that fits is unchanged, and an older reply is the same bytes in every later turn', () => {
+    const small = chat(2);
+    expect(trimKeepingUserWords(small, room)).toEqual(small);
+    // A reply shortened in an earlier turn is shortened to exactly the same bytes in a later one.
+    const shortenedBy = (items: ReturnType<typeof projectHistory>) => new Map(items.map(text)
+      .filter(item => item.startsWith(EARLIER_REPLY_MARK)).map(item => [/问题 (\d+)：/.exec(item)![1], item]));
+    const earlier = shortenedBy(trimKeepingUserWords(chat(10), room)), later = shortenedBy(trimKeepingUserWords(chat(13), room));
+    const both = [...earlier.keys()].filter(key => later.has(key));
+    expect(both.length).toBeGreaterThan(0);
+    for (const key of both) expect(later.get(key)).toBe(earlier.get(key));
+  });
+
+  it('when even the shortened history does not fit, the oldest replies go before any answer', () => {
+    const kept = trimKeepingUserWords(chat(13), 7_000);
+    expect(Buffer.byteLength(JSON.stringify(kept))).toBeLessThanOrEqual(7_000);
+    expect(kept.filter(item => item.role === 'user').map(text)).toEqual(answers);
+    expect(text(kept.at(-1)!)).toBe(replies[12]);
+  });
+
+  it('when even the answers alone do not fit, the oldest messages go first and nothing exceeds the room', () => {
+    const tight = 2_000, kept = trimKeepingUserWords(chat(13), tight);
+    expect(Buffer.byteLength(JSON.stringify(kept))).toBeLessThanOrEqual(tight);
+    expect(kept.length).toBeGreaterThan(0);
+    expect(kept[0]!.role).toBe('user');
+    expect(text(kept.at(-1)!).endsWith('你最想让这个账号带来什么？')).toBe(true);
+    expect(trimKeepingUserWords(chat(3), 0)).toEqual([]);
   });
 });
