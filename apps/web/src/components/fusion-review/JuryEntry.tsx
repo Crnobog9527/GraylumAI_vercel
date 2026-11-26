@@ -113,7 +113,8 @@ function ReportJury({ draftId, sourceVersionId, busy }: { draftId: string; sourc
     return <>
       <Button variant="outline" disabled={busy} onClick={() => setPaywall(true)}>
         请评审团审阅报告{/* No tag while the catalog is out: "更高级别会员专享" is only for a catalog that cannot be read. */}
-        {plans.data || plans.isError ? <span className={styles.gold}>{planOnlyTag(fusionPlanLevel(pickPaywallPlans(plans.data), 'jury'))}</span> : null}</Button>
+        {plans.data || plans.isError
+          ? <span className={styles.gold}>{planOnlyTag(fusionPlanLevel(pickPaywallPlans(plans.data), 'jury'))}</span> : null}</Button>
       {paywall && <ReportPaywallDialog scene="jury" onClose={() => setPaywall(false)} />}
       {latest ? <Link className={styles.link} href={reviewHref(draftId, latest.reviewId)}>
         {ACTIVE.has(latest.state) ? '评审团正在审阅，去看看 →' : latest.awaitingChoice ? '评审完成，去逐章选择 →' : '查看上次评审 →'}</Link> : null}
