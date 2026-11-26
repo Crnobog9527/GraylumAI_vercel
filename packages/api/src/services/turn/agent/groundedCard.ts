@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {z} from 'zod';
-import {AGENT_TURN_MESSAGE_LIMIT, ASK_QUESTION_TOOL, agentTurnBody, questionToolCardSchema, OPTION_MAX_CHARS, type QuestionCard} from '../../../shared/agentTurn';
+import {AGENT_TURN_MESSAGE_LIMIT, ASK_QUESTION_TOOL, agentTurnBody, questionToolCardSchema, OPTION_MAX_CHARS,
+  type QuestionCard} from '../../../shared/agentTurn';
 import type {RuntimeTool} from './runner';
 import {INVALID_CARD_RESULT, questionCardFromResult} from './agentTools';
 import {agentTurnResult} from './agentTurnResult';

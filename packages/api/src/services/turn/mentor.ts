@@ -257,7 +257,8 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
       callGate: async subcalls => { const gate = await deps.newWork.calls(input.actorId, subcalls, 'bill2.v2');
         if (!gate.ok) throw new TurnStop(GATE_CODES[gate.reason]); }, onStop: stop => { stopped = stop; } }) : undefined;
     // Each tool but the question card tells the page when it starts and ends (a `step` event); the benchmark tools keep their own stop handling.
-    const tools = withStepEvents([...(summary ? [] : [groundedCardTool(() => sources, { opening })]), mentorSkillFileTool(prepared, binding), ...benchmark?.tools ?? []],
+    const cardTools = summary ? [] : [groundedCardTool(() => sources, { opening })];
+    const tools = withStepEvents([...cardTools, mentorSkillFileTool(prepared, binding), ...benchmark?.tools ?? []],
       emitStep, new Map(), undefined, methodName, METHOD_STEP_ID);
     const context: RequestContext = { providerRequestFormat: AGENT_TURN_REQUEST_FORMAT, tools: tools.map(t => t.name), network: 'deny',
       reasoning: mentor.reasoning, hostTurnContext: { opening }, ...(promptCache ? { promptCache } : {}),
