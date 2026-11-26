@@ -3,7 +3,9 @@ import {expect,it} from 'vitest';
 import {cardSources,groundedCardFallback,groundedCardParameters,groundedCardResult,groundedCardTool,groundedCardToolBytes,groundedTurn,rejectSeparateCardProse} from './groundedCard';
 import {INVALID_CARD_RESULT,questionCardFromResult,askQuestionTool} from './agentTools';
 import {agentTurnResult} from './agentTurnResult';
-import {INVALID_REPLY_NOTICE} from '../../../shared/agentTurn';
+import {INVALID_REPLY_NOTICE,readAgentTurnBody} from '../../../shared/agentTurn';
+import {projectMentorHistory} from '../mentorPrompt';
+import {mentorReplyBody} from '../mentorInput';
 import {hostTurnContextSchema} from './hostTurn';
 const sources={current:'我考虑甲或乙，还不确定，帮我比较。',user:['每周共四小时。']};
 const choice={intent:'grounded_comparison',requestQuote:'甲或乙',basisQuotes:['每周共四小时。'],
@@ -60,6 +62,10 @@ it('a neutral card keeps the coach\'s acknowledgement before it; a comparison ca
  expect(neutralTurn.card?.options).toHaveLength(3);
  expect(neutralTurn.message).toBe('明白了，你想通过账号获客。');
  expect(JSON.parse(neutralTurn.body)).toMatchObject({message:'明白了，你想通过账号获客。',card:{recommended:null}});
+ // Review (P2): a reload and the next turn's history read the card's own message; both must keep the coach's words.
+ expect(readAgentTurnBody(neutralTurn.body)).toMatchObject({message:'明白了，你想通过账号获客。',card:{options:['3 小时以内','3 到 6 小时','6 小时以上']}});
+ expect(projectMentorHistory([{seq:2,role:'assistant',content:mentorReplyBody(neutralTurn.body,'s','r'),contentHash:'h'}])[0]!.content)
+  .toBe('明白了，你想通过账号获客。');
  const alone=groundedTurn('',groundedCardResult(neutral,sources),true,null);
  expect(alone.card).not.toBeNull();expect(alone.message).toBe('下面是中性的范围或类别，请按实际情况选择。');
  const comparison=groundedTurn('另一套安排。',groundedCardResult(choice,sources),true,null);

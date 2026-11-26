@@ -132,8 +132,9 @@ export function groundedTurn(text: string, output: string, toolCalled: boolean, 
   const card = toolCalled ? questionCardFromResult(output) : null;
   if (card && card.recommended === null && text.trim()) {
     // The coach's own words in the reply's language; the card carries the question and the options.
-    const raw = text.trim(), message = raw.slice(0, AGENT_TURN_MESSAGE_LIMIT);
-    return {body: agentTurnBody(message, card), message, card, truncated: raw.length > AGENT_TURN_MESSAGE_LIMIT};
+    // The card's own message is what a reload and the next turn's history read (readAgentTurnBody), so it is the same prose.
+    const raw = text.trim(), message = raw.slice(0, AGENT_TURN_MESSAGE_LIMIT), shown = {...card, message};
+    return {body: agentTurnBody(message, shown), message, card: shown, truncated: raw.length > AGENT_TURN_MESSAGE_LIMIT};
   }
   return rejectSeparateCardProse(text, agentTurnResult(text, output, toolCalled, text.trim() ? undefined : cardMessage));
 }
