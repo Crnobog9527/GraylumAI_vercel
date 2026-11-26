@@ -6,7 +6,7 @@ import { effectiveReplyLocale } from '../../shared/replyLanguage';
 import { openRouterAdapter } from './provider/openRouterAdapter';
 import { agentTurnResult } from './agent/agentTurnResult';
 import { assertRuntimeRequestCapacity } from './agent/context';
-import { cardSources, groundedCardFallback, groundedCardTool, groundedCardToolBytes, rejectSeparateCardProse,
+import { cardSources, groundedCardFallback, groundedCardTool, groundedCardToolBytes, groundedTurn,
   type CardSources } from './agent/groundedCard';
 import { AGENT_TURN_REQUEST_FORMAT, openRouterRequestBody, type RequestContext } from './provider/providerRequest';
 import { freezeSharedPromptCache } from './provider/promptCache';
@@ -257,7 +257,7 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
       callGate: async subcalls => { const gate = await deps.newWork.calls(input.actorId, subcalls, 'bill2.v2');
         if (!gate.ok) throw new TurnStop(GATE_CODES[gate.reason]); }, onStop: stop => { stopped = stop; } }) : undefined;
     // Each tool but the question card tells the page when it starts and ends (a `step` event); the benchmark tools keep their own stop handling.
-    const tools = withStepEvents([...(summary ? [] : [groundedCardTool(() => sources)]), mentorSkillFileTool(prepared, binding), ...benchmark?.tools ?? []],
+    const tools = withStepEvents([...(summary ? [] : [groundedCardTool(() => sources, { opening })]), mentorSkillFileTool(prepared, binding), ...benchmark?.tools ?? []],
       emitStep, new Map(), undefined, methodName, METHOD_STEP_ID);
     const context: RequestContext = { providerRequestFormat: AGENT_TURN_REQUEST_FORMAT, tools: tools.map(t => t.name), network: 'deny',
       reasoning: mentor.reasoning, hostTurnContext: { opening }, ...(promptCache ? { promptCache } : {}),
@@ -296,7 +296,8 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
         }, keep);
       },
     });
-    const turn = rejectSeparateCardProse(text, agentTurnResult(text, output, toolCalled, text.trim() ? undefined : cardMessage));
+    // A neutral card keeps the coach's short prose before it; a comparison card with separate prose is refused (groundedCard.ts).
+    const turn = groundedTurn(text, output, toolCalled, cardMessage);
     // Nothing to show (no prose, no card): nothing was delivered, the user pays nothing.
     if (!turn.card && turn.message === INVALID_REPLY_NOTICE) throw new TurnStop('TURN_CALL_DENIED');
 
