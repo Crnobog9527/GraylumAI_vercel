@@ -129,3 +129,18 @@
  :root[data-keyboard] .conversationPage .publishBar,:root[data-keyboard] .conversationPage .mentorChat>p:last-child{display:none}
  :root[data-keyboard] .conversationPage .workspaceContent>section[aria-label="当前定位步骤"]{overflow-y:auto;overscroll-behavior:contain}
 }
+/* POSITIONING-UX (Owner's new-account run, 2026-11-26): the conversation always keeps room to read. Everything between the
+   message list and the box (the step's confirmation, the summary offer) shares one bounded tray that scrolls on its own, with
+   its buttons pinned to the tray's foot so they are always on screen. A docked question card scrolls inside its own frame;
+   when both are shown, each takes a smaller share, so the list, the tray's buttons and the box all fit. The box never shrinks. */
+.conversationPage .mentorChat [role=log]{flex:1 1 0;min-height:clamp(180px,24dvh,300px)}
+.conversationPage .mentorChat>.chatTray{flex:0 1 auto;min-height:min(92px,12dvh);max-height:clamp(110px,22dvh,220px);overflow-y:auto;overscroll-behavior:contain;margin-top:6px;scrollbar-width:thin}
+.chatTray:empty{display:none}
+.chatTray>section[aria-label="本步确认"]{margin-top:0}
+.chatTray>section[aria-label="本步确认"] ul{max-height:none;overflow:visible}
+.chatTray>section[aria-label="本步确认"]>div:last-child{position:sticky;bottom:-14px;z-index:1;margin:0 -16px -14px;padding:8px 16px 10px;background:inherit;border-top:1px solid #ececec}
+.chatTray>div:not(:first-child){margin-top:6px}
+.conversationPage .mentorChat>div:has([role=textbox]){flex:none}
+.conversationPage .mentorChat>div:has([role=textbox])>div>div:has(>[data-question-card]){max-height:clamp(110px,24dvh,280px)}
+.conversationPage .mentorChat:has(>.chatTray:not(:empty))>div:has([role=textbox])>div>div:has(>[data-question-card]){max-height:clamp(96px,13dvh,170px)}
+.conversationPage .mentorChat:has([data-question-card])>.chatTray{max-height:clamp(96px,13dvh,170px)}
