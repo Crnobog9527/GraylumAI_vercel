@@ -72,6 +72,26 @@ it('names the plan that carries the tool, by the catalog', () => {
   expect(jury).not.toContain('value="pro"');
 });
 
+// Batch 11-24-2R: the rail's 评审团 entry already knows the member is Pro, so the "upgrade on the subscription page" box showed at once
+// while the plan catalog was still out, worded "更高级别会员专享". While the catalog is out the paywall names no plan and says none.
+it('a Pro member opening the jury paywall before the catalog arrives sees no "更高级别会员" words, then Gold once it arrives', () => {
+  const pending = { ...checkout, plans: [], loading: true } as unknown as PaywallCheckout;
+  for (const scene of ['compare', 'jury'] as const) {
+    const html = renderToStaticMarkup(<ReportPaywallView checkout={pending} onClose={() => {}} scene={scene} memberLevel="pro" />);
+    expect(html).not.toContain('更高级别会员');
+    expect(html).toContain('会员方案读取中');
+    expect(html).toContain('aria-label="关闭"');
+  }
+  const html = renderToStaticMarkup(<ReportPaywallView checkout={checkout} onClose={() => {}} scene="jury" memberLevel="pro" />);
+  expect(html).toContain('评审团 · Gold 专享');
+  expect(html).toContain('去订阅页升级到 Gold');
+  expect(html).not.toContain('更高级别会员');
+  // A catalog that could not be read keeps the words that name no plan.
+  const failed = { ...checkout, plans: [], catalogFailed: true } as unknown as PaywallCheckout;
+  expect(renderToStaticMarkup(<ReportPaywallView checkout={failed} onClose={() => {}} scene="jury" memberLevel="pro" />))
+    .toContain('评审团 · 更高级别会员专享');
+});
+
 it('names no plan while the catalog does not say which one carries the tool', () => {
   const silent = { ...checkout, plans: checkout.plans.map(item => ({ ...item, allowFusionReview: undefined, allowFusionCompare: undefined })) } as unknown as PaywallCheckout;
   expect(fusionPlanLevel(silent.plans, 'compare')).toBeNull();
