@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { useId } from "react";
+import { useEffect, useId, useRef } from "react";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { QuestionCard } from "@repo/api/src/shared/agentTurn";
@@ -27,6 +27,7 @@ export function QuestionCardView({
   onAnswer,
   onOther,
   docked = false,
+  reveal = false,
   onDismiss,
 }: {
   card: QuestionCard;
@@ -37,13 +38,24 @@ export function QuestionCardView({
   onOther?: () => void;
   /** Shown attached above the message box. */
   docked?: boolean;
+  /**
+   * Scrolls a newly docked card into view when the page scrolls as a whole on a screen too short for the conversation, the card
+   * and the box together (360x640), so every option is seen without looking for it (defect E, Owner 2026-11-27). Only the
+   * conversation page; a demo on a public page never moves the page.
+   */
+  reveal?: boolean;
   /** Folds a docked card away; a one-line placeholder in the conversation shows it again. */
   onDismiss?: () => void;
 }) {
   const reasonId = useId();
   const reasonIndex = card.recommendationReason ? card.recommended : null;
+  const ref = useRef<HTMLElement>(null);
+  // Once per card: the page parses the card again on every render (typing included), so the effect keys on what the card says,
+  // not on the object; a card shown again after being folded mounts anew and is revealed once more (review of #2061).
+  const identity = card.question + "\n" + card.options.join("\n");
+  useEffect(() => { if (docked && reveal) ref.current?.scrollIntoView?.({ block: "nearest" }); }, [docked, reveal, identity]);
   return (
-    <section aria-label="AI 教练提问" data-question-card="open" className={cn(styles.card, docked && styles.docked)}>
+    <section ref={ref} aria-label="AI 教练提问" data-question-card="open" className={cn(styles.card, docked && styles.docked)}>
       <p className={styles.head}>AI 教练提问</p>
       <p className={styles.question}>{card.question}</p>
       <div role="group" aria-label="建议选项" className={styles.options}>

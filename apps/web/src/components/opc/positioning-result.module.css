@@ -143,9 +143,14 @@
 .chatTray>section[aria-label="本步确认"]:not([data-folded])>div:last-child{position:sticky;bottom:-14px;z-index:1;margin:0 -16px -14px;padding:8px 16px 10px;background:inherit;border-top:1px solid #ececec}
 .chatTray>div:not(:first-child){margin-top:6px}
 .conversationPage .mentorChat>div:has([role=textbox]){flex:none}
-.conversationPage .mentorChat>div:has([role=textbox])>div>div:has(>[data-question-card]){max-height:clamp(110px,24dvh,280px)}
-.conversationPage .mentorChat:has(>.chatTray:not(:empty))>div:has([role=textbox])>div>div:has(>[data-question-card]){max-height:clamp(84px,11dvh,170px)}
-.conversationPage .mentorChat:has([data-question-card])>.chatTray{max-height:clamp(96px,13dvh,170px)}
+/* Defect E (Owner 2026-11-27): the docked card shows whole (its options wrap as chips, question-card.module.css) and never shrinks
+   for the tray; while it is open the tray gives way instead, keeping its pinned buttons and scrolling the rest. Only a card taller
+   than its frame's cap (work-composer.module.css) scrolls, with a shadow at the edge that has more. */
+.conversationPage .mentorChat>div:has([role=textbox])>div>div:has(>[data-question-card]){flex:none;
+  background:linear-gradient(#fff 30%,#fff0) top/100% 24px no-repeat local,linear-gradient(#fff0,#fff 70%) bottom/100% 24px no-repeat local,
+  radial-gradient(farthest-side at 50% 0,#0000001f,#0000) top/100% 8px no-repeat scroll,
+  radial-gradient(farthest-side at 50% 100%,#0000001f,#0000) bottom/100% 8px no-repeat scroll}
+.conversationPage .mentorChat:has([data-question-card="open"])>.chatTray{min-height:min(60px,8dvh);max-height:clamp(60px,10dvh,120px)}
 /* Folded, the card and the step-summary button share one row; the summary's explanation waits for the card to open. */
 .conversationPage .mentorChat>.chatTray:has(>[data-folded]){flex:none;min-height:0;overflow:visible;display:flex;flex-wrap:wrap;align-items:center;gap:6px}
 .chatTray>[data-folded]{flex:1 1 260px;min-width:0}

@@ -56,6 +56,10 @@ export const hostTurnContextSchema = z.object({
   confirmationAsked: z.literal(true).optional(),
   /** Owner 2026-11-27 option C: the host's fixed question of this turn (fixedQuestions.ts); the host shows its card. Mentor only. */
   fixedQuestion: z.object({question: z.string().min(1).max(500), note: z.string().min(1).max(1000)}).strict().optional(),
+  /** The fixed questions of the step's later empty list fields, asked word for word when the coach gets to them. Mentor only. */
+  laterQuestions: z.object({note: z.string().min(1).max(1000),
+    questions: z.array(z.object({field: z.string().min(1).max(256), question: z.string().min(1).max(500)}).strict()).min(1).max(8),
+  }).strict().optional(),
   stepSummary: stepSummaryNoticeSchema.optional(),
   updatedFieldIds: z.array(z.string().min(1).max(64)).max(100).optional(),
   researchRefresh: z.object({refreshId: z.string().uuid(), platform: z.enum(SOCIAL_PLATFORMS),
