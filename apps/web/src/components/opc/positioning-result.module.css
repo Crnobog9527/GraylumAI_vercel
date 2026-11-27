@@ -151,3 +151,8 @@
 .chatTray>[data-folded]{flex:1 1 260px;min-width:0}
 .chatTray:has(>[data-folded])>div:not(:first-child){margin-top:0;flex:none}
 .chatTray:has(>[data-folded])>div:not(:first-child)>span{display:none}
+/* Typing on a phone (the keyboard is up): the box being typed in comes first, so the list gives up its reading floor (and shrinks
+   first) while the keyboard is shown (390x780 with a 300px keyboard leaves 432px for the page's own rows); the floor returns with the keyboard. */
+/* The step's card steps aside while typing too, as the final actions do; it is back when the keyboard goes. */
+@media(max-width:639px){:root[data-keyboard] .conversationPage .mentorChat [role=log]{min-height:0}
+ :root[data-keyboard] .conversationPage .mentorChat>.chatTray{display:none}}
