@@ -7,6 +7,7 @@ import { positioningMentorInstructions } from '../opc/existingPositioning';
 import { ORGANIZER_INSTRUCTIONS } from '../opc/organizerPrompt';
 import { STEP_SUMMARY_INSTRUCTIONS } from '../opc/stepSummary';
 import { hostTurnInput, type HostTurnContext } from './agent/hostTurn';
+import { ORGANIZER_CARD_RULE } from './agent/organizerCard';
 import type { HistoryItem } from './db';
 
 /*
@@ -50,9 +51,13 @@ export function projectMentorHistory(history: readonly HistoryItem[]): HistoryIt
   return history.map(m => m.role === 'assistant' ? { ...m, content: readAgentTurnBody(m.content).message || m.content } : m);
 }
 
-/** The organizer's instructions: the Skill's template (when the package declares one) under the host extraction contract. */
-export function organizerInstructions(template: string | undefined, opening: boolean): string {
-  const host = ORGANIZER_INSTRUCTIONS + '\n' + ANSWER_CARD_RULE + (opening ? '\n' + OPENING_EXTRACTION_RULE : '');
+/**
+ * The organizer's instructions: the Skill's template (when the package declares one) under the host extraction contract.
+ * `card`: this reply may still carry a neutral question card the mentor wrote as prose (organizerCard.ts).
+ */
+export function organizerInstructions(template: string | undefined, opening: boolean, card = false): string {
+  const host = ORGANIZER_INSTRUCTIONS + '\n' + ANSWER_CARD_RULE + (opening ? '\n' + OPENING_EXTRACTION_RULE : '')
+    + (card && !opening ? '\n' + ORGANIZER_CARD_RULE : '');
   return template === undefined ? host
     : 'Skill organization template:\n' + template + '\nHost extraction and write-safety contract (takes precedence):\n' + host;
 }

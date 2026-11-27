@@ -284,6 +284,32 @@ it('RUNTIME: CORE-PATH-V2 V2-5: a grounded choice card ends the reply and is sav
   expect(t.bodies.map(b => b.model)).toEqual([MENTOR, ORGANIZER]);
 });
 
+it('RUNTIME: Owner 2026-11-26 option A: a neutral question written as prose gets its card from the organizer, saved under the same prose', async () => {
+  const f = await setup();
+  const reply = 'Noted.\n\n**How will you charge for it: by the hour, by the room, or for the whole home?**\n\nTell me your leaning.';
+  const card = { question: 'How will you charge for it: by the hour, by the room, or for the whole home?',
+    options: ['By the hour', 'By the room', 'Whole home'] };
+  const t = transport((body, n) => body.model === ORGANIZER
+    ? organized('gen-org-' + n, JSON.stringify({ inputKind: 'answer', patches: [], notes: [], neutralCard: card }))
+    : prose('gen-reply-' + n, reply));
+  const out = await turn(f, { text: 'I have no benchmark account in mind.', transport: t.fn });
+  const result = out.events.at(-1) as Extract<TurnEvent, { type: 'result' }>;
+  expect(result.type, JSON.stringify(out.events)).toBe('result');
+  expect(JSON.parse(result.body)).toMatchObject({ message: reply, card: { ...card, recommended: null, message: reply } });
+  // The organizer was asked for it; turn_close saw only the checklist output.
+  expect(JSON.stringify(t.bodies[1]!.messages[0])).toContain('neutralCard');
+  expect(JSON.stringify(result.kindResult)).not.toContain('neutralCard');
+  const saved = (await db.query("select content from session_messages where session_id=$1 and role='assistant' order by seq desc limit 1",
+    [f.session])).rows[0].content as string;
+  expect(saved).toContain('By the room');
+  // A question the mentor did not ask is never shown.
+  const g = await setup();
+  const u = transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, JSON.stringify({ inputKind: 'answer',
+    patches: [], notes: [], neutralCard: { question: 'Which platform?', options: ['A', 'B'] } })) : prose('gen-reply-' + n, reply));
+  const other = (await turn(g, { text: 'I have no benchmark account in mind.', transport: u.fn })).events.at(-1) as Extract<TurnEvent, { type: 'result' }>;
+  expect(JSON.parse(other.body).card).toBeNull();
+});
+
 it('RUNTIME: CORE-PATH-V2 V2-5: a module the draft is not bound to is refused before anything is frozen or sent', async () => {
   const f = await setup();
   const other = randomUUID();
