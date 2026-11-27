@@ -6,7 +6,7 @@ import { exchange } from './http';
 import { keywordCursorParams, keywordNextCursor, validKeywordCursor } from './keywordPaging';
 import { hasEmptyPostList, normalizeTikhub, tikhubBodyCode, videoNextCursor, xhsNextCursor } from './tikhubShapes';
 import type {
-  ResearchCallResult, SocialKind, SocialPlatform, VendorDeps, VendorRequest,
+  ResearchCallResult, SocialKind, SocialPlatform, SupplierNote, VendorDeps, VendorRequest,
 } from './types';
 
 export const TIKHUB_BASE = 'https://api.tikhub.io/api/v1';
@@ -213,6 +213,25 @@ function requestFor(route: TikhubRoute, input: { keyword?: string; account?: str
   return { method: 'GET', url: url.toString() };
 }
 
+const NOTE_MESSAGE_MAX = 200;
+
+/**
+ * TikHub's request id and short message from a failed answer. Its error body is `{ detail: { request_id, message, params,
+ * headers, ... } }` (recorded on 2026-11-27, when every Xiaohongshu app_v2 route answered HTTP 400); only the id and the
+ * message are kept, never the echoed params or headers. Anything else gives no note.
+ */
+export function tikhubFailureNote(json: unknown): SupplierNote | undefined {
+  if (!json || typeof json !== 'object') return undefined;
+  const raw = json as Record<string, unknown>;
+  const source = raw.detail && typeof raw.detail === 'object' ? raw.detail as Record<string, unknown> : raw;
+  const requestId = typeof source.request_id === 'string' && /^[0-9A-Za-z-]{8,64}$/.test(source.request_id)
+    ? source.request_id : undefined;
+  const text = typeof source.message === 'string' ? source.message
+    : typeof raw.detail === 'string' ? raw.detail : undefined;
+  const message = text?.replace(/[\p{Cc}\p{Cf}]+/gu, ' ').trim().slice(0, NOTE_MESSAGE_MAX) || undefined;
+  return requestId || message ? { ...(requestId ? { requestId } : {}), ...(message ? { message } : {}) } : undefined;
+}
+
 /**
  * One TikHub call. Never retried or switched to another supplier here. TikHub's per-endpoint rate
  * limit (10/s by default) is shared across serverless instances, so it is enforced by the caller
@@ -234,8 +253,9 @@ export async function callTikhub(call: TikhubCall, deps: VendorDeps): Promise<Re
   }
   // TikHub documents non-200 responses as not billed; a 200 with an unreadable body may be billed.
   if (answer.status !== 200) {
+    const supplierNote = answer.kind === 'response' ? tikhubFailureNote(answer.json) : undefined;
     return { ...base, outcome: 'failed', reason: `HTTP_${answer.status}`, httpStatus: answer.status,
-      supplierMayCharge: false, usage: { unit: 'call', units: '0' } };
+      supplierMayCharge: false, usage: { unit: 'call', units: '0' }, ...(supplierNote ? { supplierNote } : {}) };
   }
   // A 200 whose body cannot be read is indeterminate: it may be a billed delivery. Never resend it.
   if (answer.kind === 'unreadable') {
@@ -244,8 +264,9 @@ export async function callTikhub(call: TikhubCall, deps: VendorDeps): Promise<Re
   }
   const code = tikhubBodyCode(answer.json);
   if (code !== 200) {
+    const supplierNote = tikhubFailureNote(answer.json);
     return { ...base, outcome: 'failed', reason: `UPSTREAM_${code ?? 'UNKNOWN'}`, httpStatus: 200,
-      supplierMayCharge: true, usage: { unit: 'call', units: '1' } };
+      supplierMayCharge: true, usage: { unit: 'call', units: '1' }, ...(supplierNote ? { supplierNote } : {}) };
   }
   const all = normalizeTikhub(answer.json, call.platform, call.kind, call.account?.trim());
   // A recognized empty post list is a real, billed "no results" answer. A missing profile or an

@@ -56,6 +56,16 @@ export interface ResearchCallResult {
   fetchedAt: string;
   /** Cursor of the next page when the supplier says more exist: an account's posts, or a keyword search (BENCHMARK-COVERAGE). */
   nextCursor?: string;
+  /**
+   * The supplier's own note on a failed answer, kept so a failure can be diagnosed later without a key: its request id
+   * (what its support asks for) and its short message. Never the echoed request parameters (they hold the user's keyword).
+   */
+  supplierNote?: SupplierNote;
+}
+
+export interface SupplierNote {
+  requestId?: string;
+  message?: string;
 }
 
 export interface VendorRequest {
