@@ -12,6 +12,8 @@ import type { HistoryItem } from './db';
  *  - only when the next empty field of the step is that field, so the coach's own order of questions is kept;
  *  - never on the conversation's first opening, a step summary, or once the step is ready or confirmed;
  *  - only in the interview (mode mentor): importing an existing positioning (mode manual) asks for the user's material instead;
+ *  - not when the user asks in this turn for no questions or options (that request overrides the question rules, agentTurnPrompt.ts;
+ *    review of #2060);
  *  - never twice in a round, and not when the user answered the field in the same turn (the organizer wrote it).
  * Cards carry no recommendation; the page adds the "Other" entry. The questions and options are copy (the decision allows edits).
  */
@@ -56,6 +58,11 @@ export const FIXED_QUESTION_NOTE = 'Host question of this turn. Unless the user\
   + 'this question as your one main question. The host shows its options on a card under your reply: never list options, examples '
   + 'or categories for it in prose, and do not call ask_question. A short acknowledgement and why you ask are fine.';
 
+/** The user asks for no questions or options in this turn ("先不要提问或给选项，只回答我的问题"). */
+const NO_QUESTIONS = new RegExp(['(不要|别|不用|先别|暂时不要|先不要)(再)?(问我|问|提问|追问|给我?选项|出选项|列选项)',
+  '只(回答|说)(我的)?(这个)?问题', '直接(回答|说结论)',
+  '\\bno (more )?(questions|options)\\b', "\\bdon'?t ask\\b", '\\bwithout (any )?(questions|options)\\b', '\\bjust answer\\b'].join('|'), 'i');
+
 export type ChosenQuestion = { fixed: FixedQuestion; question: string; options: readonly string[] };
 
 /** The question texts of the cards saved in this round (any step), from the saved replies (mentorReplyBody). */
@@ -73,9 +80,10 @@ function askedInRound(history: readonly HistoryItem[], roundId: string): Set<str
 
 /** The fixed question this turn asks, or null (see the rules above). */
 export function fixedQuestionFor(input: { host: HostTurnContext; history: readonly HistoryItem[]; roundId: string; locale: ReplyLocale;
-  firstOpening: boolean; summary: boolean; mode: unknown }): ChosenQuestion | null {
+  firstOpening: boolean; summary: boolean; mode: unknown; words: string }): ChosenQuestion | null {
   const { host } = input;
-  if (input.mode !== 'mentor' || input.summary || input.firstOpening || host.confirmation?.stepReady || host.confirmation?.stepConfirmed) return null;
+  if (input.mode !== 'mentor' || input.summary || input.firstOpening || NO_QUESTIONS.test(input.words)
+    || host.confirmation?.stepReady || host.confirmation?.stepConfirmed) return null;
   const fields = host.checklist.find(step => step.id === host.stepId)?.fields ?? [];
   const missing = fields.filter(field => field.required && field.status === 'missing');
   // The next field the user is asked about: the first empty one the user supplies; in a step of the coach's drafts only (step 2),

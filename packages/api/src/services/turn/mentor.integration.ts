@@ -338,6 +338,20 @@ it('RUNTIME: Owner 2026-11-27 option C: a list field the user answers in passing
   expect(result.kindResult).toMatchObject({ result: 'applied', fields: { 'step-0': ['goal'] } });
 });
 
+// Review of #2060: a user who asks for no questions or options in this turn gets no fixed card, and the coach is not told one.
+it('RUNTIME: Owner 2026-11-27 option C: a turn in which the user asks for no questions gets no fixed card', async () => {
+  const f = await setup();
+  const empty = JSON.stringify({ inputKind: 'answer', patches: [], notes: [] });
+  const open = transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, empty) : prose('gen-open-' + n, 'Welcome.'));
+  await turn(f, { text: 'HOST_OPEN_CURRENT_QUESTION', transport: open.fn });
+  const t = transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, empty) : prose('gen-reply-' + n, '小红书适合做本地体验课。'));
+  const out = await turn(f, { text: '先不要提问或给选项，只回答我的问题：小红书适合我吗？', transport: t.fn });
+  const result = out.events.at(-1) as Extract<TurnEvent, { type: 'result' }>;
+  expect(result.type, JSON.stringify(out.events)).toBe('result');
+  expect(JSON.parse(result.body).card).toBeNull();
+  expect(String(t.bodies.find(b => b.model === MENTOR)!.messages.at(-1)!.content)).not.toContain('fixedQuestion');
+});
+
 // Owner 2026-11-27 pay2 (second run, seq 18-22) and review of #2059: once a reply of the step asked for the confirmation card, a
 // sentence asking again is dropped from what is shown, what is saved, what a reload reads and what the organizer reads.
 it('RUNTIME: Owner 2026-11-27: a repeated request for the confirmation card is not saved, reloaded or organized', async () => {
