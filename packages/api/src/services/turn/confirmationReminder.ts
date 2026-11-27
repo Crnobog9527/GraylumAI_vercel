@@ -11,9 +11,10 @@ import type { ReplyLocale } from '../../shared/replyLocales';
 // A request names the card and asks for it: click it, go confirm, or that it is still in the chat. A sentence that only mentions
 // the card ("确认卡里的课程规模也会更新") is kept (review of #2059).
 const CARD = /确认卡|確認卡|卡片|confirmation card|the card/i;
-const ASK = new RegExp(['点', '點', '按一下', 'click', 'tap', 'press', '还在(聊天|对话)', '仍在(聊天|对话)', '在聊天里',
-  'still (in|on) (the )?(chat|screen)', '请.{0,8}确认', '去确认', 'confirm (this|the) step'].join('|'), 'i');
-const ASSENT = /^\s*(继续|下一步|没问题|好的?|可以|行|确认|ok(ay)?|next|continue|go on)[\s。.!！~～了吧啊呀]*$/i;
+// Simplified and Traditional forms both (review of #2062: a zh-Hant reply is written in Traditional characters).
+const ASK = new RegExp(['点', '點', '按一下', 'click', 'tap', 'press', '(还|還|仍)在(聊天|对话|對話)', '在聊天(里|裡)',
+  'still (in|on) (the )?(chat|screen)', '(请|請).{0,8}(确认|確認)', '去(确认|確認)', 'confirm (this|the) step'].join('|'), 'i');
+const ASSENT = /^\s*(继续|繼續|下一步|没问题|沒問題|好的?|可以|行|确认|確認|ok(ay)?|next|continue|go on)[\s。.!！~～了吧啊呀]*$/i;
 const END = '。！？!?';
 const CLOSER = '*”"’）)」』';
 
@@ -48,7 +49,7 @@ export const asksForConfirmationCard = (sentence: string) => CARD.test(sentence)
  * 2026-10-23, 3 A: the user types nothing), yet the coach told the user to reply "继续" if it did not. On a turn whose search
  * goes on, the host drops a sentence that asks the user to reply "continue"; the page itself says so past its limit.
  */
-const REPLY_CONTINUE = /(回|回复|说|发|打|输入)(我|一下|给我)?(一句|一声|个)?\s*[“"「『‘']?(继续|繼續)|\b(reply|say|type|send)\b[^.!?。！？]{0,12}\bcontinue\b/i;
+const REPLY_CONTINUE = /(回|回复|回覆|說|说|发|發|打|输入|輸入|鍵入|键入)(我|一下|给我|給我)?(一句|一声|一聲|个|個)?\s*[“"「『‘']?(继续|繼續)|\b(reply|say|type|send)\b[^.!?。！？]{0,12}\bcontinue\b/i;
 export const asksToReplyContinue = (sentence: string) => REPLY_CONTINUE.test(sentence);
 
 /** What the reply says when it was nothing but that request (review of #2062): the search goes on, the user replies nothing. */

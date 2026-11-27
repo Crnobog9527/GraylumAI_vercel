@@ -61,8 +61,9 @@ export const FIXED_QUESTION_NOTE = 'Host question of this turn. Unless the user\
   + 'or categories for it in prose, and do not call ask_question. A short acknowledgement and why you ask are fine.';
 
 /** The user asks for no questions or options in this turn ("先不要提问或给选项，只回答我的问题"). */
-const NO_QUESTIONS = new RegExp(['(不要|别|不用|先别|暂时不要|先不要)(再)?(问我|问|提问|追问|给我?选项|出选项|列选项)',
-  '只(回答|说)(我的)?(这个)?问题', '直接(回答|说结论)',
+// Simplified and Traditional forms both (a zh-Hant user writes Traditional characters).
+const NO_QUESTIONS = new RegExp(['(不要|别|別|不用|先别|先別|暂时不要|暫時不要|先不要)(再)?(问我|問我|问|問|提问|提問|追问|追問|(给|給)我?(选项|選項)|出(选项|選項)|列(选项|選項))',
+  '只(回答|说|說)(我的)?(这个|這個)?(问题|問題)', '直接(回答|(说|說)(结论|結論))',
   '\\bno (more )?(questions|options)\\b', "\\bdon'?t ask\\b", '\\bwithout (any )?(questions|options)\\b', '\\bjust answer\\b'].join('|'), 'i');
 
 export type ChosenQuestion = { fixed: FixedQuestion; question: string; options: readonly string[] };

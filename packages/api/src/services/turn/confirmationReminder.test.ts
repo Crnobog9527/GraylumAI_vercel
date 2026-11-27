@@ -64,10 +64,25 @@ describe('a search that goes on by itself: the host drops a request to reply "co
     expect(run(true, SEQ26, 5)).not.toContain('继续');
   });
   it('drops other ways of asking, in both languages, and keeps sentences that only say it goes on', () => {
-    for (const ask of ['没有自动继续的话，回复“继续”即可。', '你说一声继续就行。', 'If it stops, just reply "continue".'])
+    for (const ask of ['没有自动继续的话，回复“继续”即可。', '你说一声继续就行。', 'If it stops, just reply "continue".',
+      // Review of #2062: a zh-Hant reply.
+      '請回覆「繼續」即可接著搜尋。', '請輸入「繼續」。', '你說一聲繼續就行。', '沒有自動接著搜的話，回我一句「繼續」就好。'])
       expect(asksToReplyContinue(ask)).toBe(true);
-    for (const keep of ['我会扩大范围接着搜。', '下一条回复会自动继续搜。', 'The search will continue on its own.'])
+    for (const keep of ['我会扩大范围接着搜。', '下一条回复会自动继续搜。', 'The search will continue on its own.', '下一條回覆會自動繼續搜。'])
       expect(asksToReplyContinue(keep)).toBe(false);
   });
   it('is off on a turn whose search does not go on', () => expect(run(false, SEQ26, 4)).toBe(SEQ26));
+});
+
+// Review of #2062: the confirmation reminder in Traditional characters (reply language zh-Hant).
+describe('a repeated request for the confirmation card in Traditional characters', () => {
+  it('is dropped like the Simplified one, and a sentence that only mentions the card is kept', () => {
+    expect(dropConfirmationReminder('記下了。第一步的確認卡片還在聊天裡。請點一下卡片確認這一步。還有一個問題？')).toBe('記下了。還有一個問題？');
+    expect(dropConfirmationReminder('記下了。卡片仍在對話中，你核對完就請確認。')).toBe('記下了。');
+    const mention = '我把每場三四人記下了，確認卡裡的課程規模也會據此更新。';
+    expect(dropConfirmationReminder(mention)).toBe(mention);
+  });
+  it('a verbal go-ahead in Traditional characters is not filtered (the coach points to the card once)', () => {
+    for (const words of ['繼續', '沒問題。', '確認']) expect(dropsConfirmationReminder(true, words)).toBe(false);
+  });
 });

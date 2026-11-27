@@ -38,7 +38,8 @@ describe('Owner 2026-11-27 option C: which fixed question the host asks, and whe
     expect(pick(host('step-1', {}, { opening: true }), { firstOpening: true })).toBeNull();
     expect(pick(host('step-1'), { summary: true })).toBeNull();
     // The user asks for no questions or options in this turn (review of #2060): that request wins, the field waits.
-    for (const words of ['先不要提问或给选项，只回答我的问题。', '别再问我了，直接说结论', 'Please, no more questions, just answer.'])
+    for (const words of ['先不要提问或给选项，只回答我的问题。', '别再问我了，直接说结论', 'Please, no more questions, just answer.',
+      '先不要提問或給選項，只回答我的問題。', '別再問我了，直接說結論'])
       expect(pick(host('step-1'), { words })).toBeNull();
     expect(pick(host('step-1'), { words: '我想先问问，小红书适合我吗？' })?.fixed.id).toBe('goal');
     expect(pick(host('step-1'), { words: '我只讲皮具，不讲别的。' })?.fixed.id).toBe('goal');
