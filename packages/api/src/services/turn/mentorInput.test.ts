@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { agentTurnBody } from '../../shared/agentTurn';
 import { CHECKLIST_UPDATED_INPUT, OPENING_INPUT } from '../../shared/opcQuestions';
 import { STEP_SUMMARY_INPUT } from '../../shared/opcStepSummary';
-import { answeredText, confirmationAsked, mentorAnsweredCard, mentorReplyBody, mentorTurnInput, userHasSpoken } from './mentorInput';
+import { answeredText, confirmationAsked, mentorAnsweredCard, mentorReplyBody, mentorTurnInput, profileLinksDeclined, userHasSpoken } from './mentorInput';
 
 const card = { question: 'Which one first?', options: ['Coffee', 'Tea'], recommended: 0 };
 const item = (role: 'user' | 'assistant', content: string, seq: number) => ({ seq, role, content, contentHash: 'a'.repeat(64) });
@@ -66,5 +66,20 @@ describe('userHasSpoken: before it, an opening is the conversation\'s first and 
     expect(userHasSpoken([user(1, OPENING_INPUT), item('assistant', '你做这个账号，最希望它最后给你带来什么？', 2)])).toBe(false);
     expect(userHasSpoken([user(1, STEP_SUMMARY_INPUT), user(3, CHECKLIST_UPDATED_INPUT)])).toBe(false);
     expect(userHasSpoken([user(1, OPENING_INPUT), user(3, '我想靠周末的手工皮具体验课接到付费学员。')])).toBe(true);
+  });
+});
+
+// Owner 2026-11-27 pay2: the user's own words (seq 5 of the second run, seq 29 after the search, seq 9 of the first run).
+describe('profileLinksDeclined: the user said they have or will send no profile links', () => {
+  const link = (text: string) => text.includes('https://www.xiaohongshu.com/user/profile/');
+  it('is true after the user declines, in either language', () => {
+    expect(profileLinksDeclined(['我想在小红书做皮具手作体验课。', '没有对标账号，也没有主页链接，我也暂时不想找。'], link)).toBe(true);
+    expect(profileLinksDeclined(['我前面说过没有主页链接，也不想去找账号；这次先不换词重搜。'], link)).toBe(true);
+    expect(profileLinksDeclined(['我没想好要参考哪个账号，也没有主页链接。'], link)).toBe(true);
+    expect(profileLinksDeclined(["I don't have any profile links."], link)).toBe(true);
+  });
+  it('is false without a decline, and a later message with a profile link reopens it', () => {
+    expect(profileLinksDeclined(['可以先试“成都皮具体验课”这几个词。', '我做皮具差不多两年。'], link)).toBe(false);
+    expect(profileLinksDeclined(['没有主页链接。', '找到了一个：https://www.xiaohongshu.com/user/profile/abc'], link)).toBe(false);
   });
 });

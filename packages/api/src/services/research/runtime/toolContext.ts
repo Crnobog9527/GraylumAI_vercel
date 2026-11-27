@@ -21,6 +21,8 @@ export interface ResearchToolContext {
   lookupTime?: () => boolean;
   /** The shared profile cache (0493); without it every candidate author's profile is looked up. */
   profileCache?: ProfileCachePort;
+  /** The user said they have or will send no profile links (Owner 2026-11-27): no next step offers sending one. */
+  linksDeclined?: boolean;
 }
 /** Stable across a resumed discovery; different users/discoveries never share evidence. */
 export function stableResearchId(...parts: string[]): string {

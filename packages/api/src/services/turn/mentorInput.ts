@@ -86,3 +86,22 @@ export function userHasSpoken(history: readonly HistoryItem[]): boolean {
       && !item.content.startsWith(CHECKLIST_UPDATED_INPUT);
   });
 }
+
+const LINKS_DECLINED = [
+  /(没有|没|不想|不愿|不用|不会|不打算|不再|不能|不方便|不发|不给|不提供|拿不出|给不了|提供不了)[^。！？\n]{0,10}链接/,
+  /链接[^。！？\n]{0,4}(没有|不想|不给|不发|不提供|找不到)/,
+  /\b(no|don'?t have|do not have|won'?t|not (going to )?(send|share|provide|give))\b[^.!?\n]{0,30}\blinks?\b/i,
+];
+/**
+ * Owner 2026-11-27 (pay2 seq 5, 24, 28, 29): whether the user said they have no profile links or will not send any. The
+ * user's own words, oldest first; a later message carrying a profile link reopens it (only the user may). The benchmark
+ * search then never offers "send a link" as a way on (discovery.ts candidateShortage).
+ */
+export function profileLinksDeclined(userTexts: readonly string[], carriesLink: (text: string) => boolean): boolean {
+  let declined = false;
+  for (const text of userTexts) {
+    if (carriesLink(text)) declined = false;
+    else if (LINKS_DECLINED.some(pattern => pattern.test(text))) declined = true;
+  }
+  return declined;
+}

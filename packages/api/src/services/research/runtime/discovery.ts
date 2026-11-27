@@ -78,11 +78,18 @@ export const SUPPLIER_UNAVAILABLE_NEXT_STEP = '对标数据供应商暂时不可
 export const supplierDownRound = (round: { supplierDown: boolean; stopped: boolean; shown: boolean; gotData: boolean }) =>
   round.supplierDown && !round.stopped && !round.shown && !round.gotData;
 
-/** A round searched to the end without one selectable account (with any, the card is shown: Owner 2026-10-23). */
-export function candidateShortage() {
+/** The next step when the user has said they have or will send no profile links (Owner 2026-11-27, pay2 seq 28). */
+export const LINKS_DECLINED_NEXT_STEP = '告诉用户可以换一组关键词再搜一轮，或先按现有结果继续。用户说过没有或不想发账号主页链接：'
+  + '不要提发链接、贴链接或以后补链接，也不要建议找别人要。';
+/**
+ * A round searched to the end without one selectable account (with any, the card is shown: Owner 2026-10-23). The way of
+ * sending profile links is offered only to a user who has not declined them (Owner 2026-11-27).
+ */
+export function candidateShortage(linksDeclined = false) {
   return {
     message: '这一轮已经搜完，没有找到可选的对标账号。',
-    nextStep: '告诉用户两条出路：换一组关键词再搜一轮，或直接发来想对标的账号主页链接（按链接取数核对，'
+    nextStep: linksDeclined ? LINKS_DECLINED_NEXT_STEP
+      : '告诉用户两条出路：换一组关键词再搜一轮，或直接发来想对标的账号主页链接（按链接取数核对，'
       + '核对合格的账号同样算对标）。搜过两轮仍找不到时，主要建议发链接，不要只让用户再搜。',
     availableCandidates: 0,
   };
@@ -377,7 +384,7 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
     reason: stopped ? stopReason : down ? SUPPLIER_UNAVAILABLE_REASON : shown ? (complete ? null : 'DISCOVERY_PARTIAL')
       : complete ? 'NOT_ENOUGH_CANDIDATES' : 'DISCOVERY_PARTIAL',
     ...(down ? { message: '对标数据供应商暂时不可用。', nextStep: SUPPLIER_UNAVAILABLE_NEXT_STEP, availableCandidates: 0 }
-      : insufficient ? candidateShortage() : {}),
+      : insufficient ? candidateShortage(ctx.linksDeclined) : {}),
     // The host shows the card, not the model's text: say so, or the model may deny a card the user can see.
     ...(shown ? { candidateCard: { shown: true, selectable: onCard }, nextStep: CARD_SHOWN_NEXT_STEP }
       : { candidateCard: { shown: false } }),
