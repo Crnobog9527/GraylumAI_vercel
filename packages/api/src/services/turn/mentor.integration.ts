@@ -93,7 +93,7 @@ async function model(id: string, name: string) {
   [id, 'Mentor fixture ' + name, name, JSON.stringify(config)]);
 }
 
-async function setup(input: { benchmarkStep?: boolean } = {}) {
+async function setup(input: { benchmarkStep?: boolean; fields?: Array<{ id: string; title: string }> } = {}) {
   clearCatalogCache();
   const owner = randomUUID(), mentorId = randomUUID(), organizerId = randomUUID(), moduleId = randomUUID();
   const email = randomUUID() + '@example.test', password = 'Local-' + randomUUID() + '!';
@@ -106,8 +106,10 @@ async function setup(input: { benchmarkStep?: boolean } = {}) {
     values($1,1000,'addition','grant','opening_grant','system',$2,0,1000)`, [actor, 'opening_grant:' + actor]);
   await model(mentorId, MENTOR); await model(organizerId, ORGANIZER);
   const pack = makePackage(), registration = 'mentor-' + randomUUID(), flow = makeWorkflow(3);
-  flow.steps.forEach((s, i) => { s.information = [{ id: i === 0 && input.benchmarkStep ? 'benchmark_findings' : 'goal', title: 'Goal', required: true, profileKey: 'goal_' + i },
-    { id: 'other', title: 'Other', required: false }]; });
+  flow.steps.forEach((s, i) => { s.information = i === 0 && input.fields
+    ? input.fields.map(field => ({ ...field, required: true, profileKey: field.id + '_' + i }))
+    : [{ id: i === 0 && input.benchmarkStep ? 'benchmark_findings' : 'goal', title: 'Goal', required: true, profileKey: 'goal_' + i },
+      { id: 'other', title: 'Other', required: false }]; });
   await db.query('insert into skills(id,skill_key,created_by) values($1,$2,$3)', [pack.id, registration, owner]);
   await db.query('insert into modules(id,title,skill_id,model_id,active) values($1,$2,$3,$4,true)', [moduleId, registration, pack.id, mentorId]);
   await publishSkillPackage(admin, owner, pack);
@@ -350,6 +352,29 @@ it('RUNTIME: Owner 2026-11-27 option C: a turn in which the user asks for no que
   expect(result.type, JSON.stringify(out.events)).toBe('result');
   expect(JSON.parse(result.body).card).toBeNull();
   expect(String(t.bodies.find(b => b.model === MENTOR)!.messages.at(-1)!.content)).not.toContain('fixedQuestion');
+});
+
+// Owner 2026-11-27 pay2 (third run, seq 9-10, summarised): the user answered the content direction (a personal field the host had
+// as next), and the coach went on to ask the platform in prose, with no card: the host had chosen before the organizer wrote the
+// answer. The coach now gets the later list questions, and the host shows the card of the one the reply asks word for word.
+it('RUNTIME: Owner 2026-11-27 option C: the coach goes on to a later list field in this turn and its card is shown', async () => {
+  const f = await setup({ fields: [{ id: 'track', title: '内容方向' }, { id: 'platforms', title: '想做的平台' }] });
+  const empty = JSON.stringify({ inputKind: 'answer', patches: [], notes: [] });
+  const open = transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, empty) : prose('gen-open-' + n, '你好。'));
+  await turn(f, { text: 'HOST_OPEN_CURRENT_QUESTION', transport: open.fn });
+  const platform = '你打算先在哪个平台做？', words = '这些内容很贴合你的目标。接下来想了解平台。\n\n**' + platform + '**';
+  const t = transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, JSON.stringify({ inputKind: 'answer', notes: [],
+    patches: [{ stepId: 'step-0', fieldId: 'track', value: '手工制作过程和成品', status: 'provisional', nature: 'fact', basis: 'user_statement' }] }))
+    : prose('gen-reply-' + n, words));
+  const out = await turn(f, { text: '我会拍手工制作过程和最终成品，先做图文和短视频都可以。', transport: t.fn });
+  const result = out.events.at(-1) as Extract<TurnEvent, { type: 'result' }>;
+  expect(result.type, JSON.stringify(out.events)).toBe('result');
+  const told = String(t.bodies.find(b => b.model === MENTOR)!.messages.at(-1)!.content);
+  expect(told).not.toContain('fixedQuestion');
+  expect(told).toContain('laterQuestions');
+  expect(told).toContain(platform);
+  expect(JSON.parse(result.body).card).toMatchObject({ question: platform, options: ['小红书', '抖音', '视频号', 'B站'], recommended: null });
+  expect(result.kindResult).toMatchObject({ result: 'applied', fields: { 'step-0': ['track'] } });
 });
 
 // Owner 2026-11-27 pay2 (second run, seq 18-22) and review of #2059: once a reply of the step asked for the confirmation card, a

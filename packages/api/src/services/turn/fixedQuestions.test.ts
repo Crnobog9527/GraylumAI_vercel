@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { agentTurnBody } from '../../shared/agentTurn';
 import { captureHostContext, type CaptureState } from '../opc/captureContext';
-import { FIXED_QUESTIONS, fixedQuestionCard, fixedQuestionFor, organizerWrote } from './fixedQuestions';
+import { FIXED_QUESTIONS, fixedCardChoice, fixedQuestionCard, fixedQuestionFor, laterFixedQuestions, organizerWrote } from './fixedQuestions';
 import { mentorReplyBody } from './mentorInput';
 import type { HistoryItem } from './db';
 
@@ -81,5 +81,39 @@ describe('Owner 2026-11-27 option C: which fixed question the host asks, and whe
     expect(organizerWrote(out, 'step-1', 'resources')).toBe(true);
     expect(organizerWrote(out, 'step-1', 'platforms')).toBe(false);
     expect(organizerWrote(null, 'step-1', 'resources')).toBe(false);
+  });
+  // pay2 2026-11-27 (seq 9-12, summarised): the user had given the goal, the customers and what they already run; this turn
+  // answers the content direction (track), so the host's next field was track (personal, no card) and the coach went on to ask
+  // the platform in prose with examples. The host now hands the coach the later list questions and shows the card it asks.
+  it('a later list field the coach gets to in this turn gets its card when the coach asks its question exactly', () => {
+    const atSeq9 = host('step-1', { goal: '给生意带客户', audience: '附近喜欢 DIY 的年轻女性', assets: '杭州周末皮具手作体验课' });
+    const words = '我会拍手工制作过程和最终成品，也想记录学员亲手做出卡包的体验过程。先做图文和短视频都可以。';
+    expect(pick(atSeq9, { words })).toBeNull();
+    const later = laterFixedQuestions({ host: atSeq9, history: [], roundId: 'r1', locale: 'zh-Hans', firstOpening: false, summary: false,
+      mode: 'mentor', words });
+    expect(later.map(q => q.fixed.id)).toEqual(['platform', 'weekly_time']);
+    const wrote = (ids: string[]) => (fieldId: string) => ids.includes(fieldId);
+    const reply = '这些内容很贴合你的目标。接下来想了解平台。\n\n**你打算先在哪个平台做？**';
+    expect(fixedCardChoice({ chosen: null, later, reply, written: wrote(['track']) })?.fixed.id).toBe('platform');
+    // The reply of the real run asked in its own words: no card (exact text only, no fuzzy matching).
+    expect(fixedCardChoice({ chosen: null, later, reply: '**你有没有特别想做的平台？或者你自己平时最常刷哪个？**', written: wrote(['track']) }))
+      .toBeNull();
+    // The user answered the platform in passing (the organizer wrote it): no card even when the question is quoted.
+    expect(fixedCardChoice({ chosen: null, later, reply, written: wrote(['track', 'platforms']) })).toBeNull();
+    // Seq 11-12: the host's question (platform) was answered in this turn and the coach went on to the time question.
+    const atSeq11 = host('step-1', { ...before('platforms'), assets: '体验课' });
+    const chosen = pick(atSeq11, { words: '我想先从小红书开始。' });
+    const later11 = laterFixedQuestions({ host: atSeq11, history: [], roundId: 'r1', locale: 'zh-Hans', firstOpening: false,
+      summary: false, mode: 'mentor', words: '我想先从小红书开始。' });
+    expect(chosen?.fixed.id).toBe('platform');
+    expect(later11.map(q => q.fixed.id)).toEqual(['weekly_time']);
+    expect(fixedCardChoice({ chosen, later: later11, reply: '记下了。**你每周大概能拿出多少时间做账号？**', written: wrote(['platforms']) })
+      ?.fixed.id).toBe('weekly_time');
+    // Without a quoted question the host's own question keeps its card, unless the user answered it.
+    expect(fixedCardChoice({ chosen, later: later11, reply: '好的。', written: wrote([]) })?.fixed.id).toBe('platform');
+    expect(fixedCardChoice({ chosen, later: later11, reply: '好的。', written: wrote(['platforms']) })).toBeNull();
+    // The rules that give no question give no later questions either.
+    expect(laterFixedQuestions({ host: atSeq9, history: [], roundId: 'r1', locale: 'zh-Hans', firstOpening: true, summary: false,
+      mode: 'mentor', words: '' })).toEqual([]);
   });
 });

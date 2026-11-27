@@ -9,7 +9,8 @@ import type { HistoryItem } from './db';
  * The host, not the model, decides when one is asked and shows its card, so a list question always gets its card:
  *  - only a field that has a fixed question gets one; personal fields (experience, strengths, stories, customers, what the user
  *    already has) stay prose, as everything outside the list does;
- *  - only when the next empty field of the step is that field, so the coach's own order of questions is kept;
+ *  - only when the next empty field of the step is that field, so the coach's own order of questions is kept, or when the coach
+ *    asks a later list field's question word for word (laterFixedQuestions);
  *  - never on the conversation's first opening, a step summary, or once the step is ready or confirmed;
  *  - only in the interview (mode mentor): importing an existing positioning (mode manual) asks for the user's material instead;
  *  - not when the user asks in this turn for no questions or options (that request overrides the question rules, agentTurnPrompt.ts;
@@ -78,9 +79,11 @@ function askedInRound(history: readonly HistoryItem[], roundId: string): Set<str
   return asked;
 }
 
-/** The fixed question this turn asks, or null (see the rules above). */
-export function fixedQuestionFor(input: { host: HostTurnContext; history: readonly HistoryItem[]; roundId: string; locale: ReplyLocale;
-  firstOpening: boolean; summary: boolean; mode: unknown; words: string }): ChosenQuestion | null {
+type Pick = { host: HostTurnContext; history: readonly HistoryItem[]; roundId: string; locale: ReplyLocale;
+  firstOpening: boolean; summary: boolean; mode: unknown; words: string };
+
+/** The step's empty list fields in order, the next field the user is asked about, and the question of each list field. */
+function plan(input: Pick): { next: string | null; questions: Map<string, ChosenQuestion> } | null {
   const { host } = input;
   if (input.mode !== 'mentor' || input.summary || input.firstOpening || NO_QUESTIONS.test(input.words)
     || host.confirmation?.stepReady || host.confirmation?.stepConfirmed) return null;
@@ -90,16 +93,56 @@ export function fixedQuestionFor(input: { host: HostTurnContext; history: readon
   // the first empty one with a fixed question.
   const next = missing.find(field => field.role === 'user_fact')
     ?? missing.find(field => FIXED_QUESTIONS.some(fixed => fixed.fieldId === field.id));
-  if (!next) return null;
   const research = host.research;
   const researchStarted = Boolean(research && (research.cards.length > 0 || research.benchmarks.qualified > 0));
   const asked = askedInRound(input.history, input.roundId);
-  for (const fixed of FIXED_QUESTIONS) {
-    if (fixed.fieldId !== next.id || (fixed.beforeResearch && researchStarted)) continue;
-    if (Object.values(fixed.question).some(text => asked.has(text))) continue;
-    return { fixed, question: fixed.question[input.locale], options: fixed.options[input.locale] };
+  const questions = new Map<string, ChosenQuestion>();
+  for (const field of missing) {
+    const fixed = FIXED_QUESTIONS.find(q => q.fieldId === field.id && !(q.beforeResearch && researchStarted)
+      && !Object.values(q.question).some(text => asked.has(text)));
+    if (fixed) questions.set(field.id, { fixed, question: fixed.question[input.locale], options: fixed.options[input.locale] });
   }
-  return null;
+  return { next: next?.id ?? null, questions };
+}
+
+/** The fixed question this turn asks, or null (see the rules above). */
+export function fixedQuestionFor(input: Pick): ChosenQuestion | null {
+  const found = plan(input);
+  return found?.next ? found.questions.get(found.next) ?? null : null;
+}
+
+/*
+ * The list questions of the step's later empty fields (pay2 2026-11-27, seq 10). The host picks before the organizer writes this
+ * turn's answer: when the user answers the field the host expected next (or answers it in passing), the coach goes on to the
+ * field after it, which the host did not know. The coach therefore gets each later list field's question to ask word for word
+ * when its question is about that field, and the host shows that card when the reply contains the question exactly.
+ */
+export function laterFixedQuestions(input: Pick): ChosenQuestion[] {
+  const found = plan(input);
+  return found ? [...found.questions].filter(([fieldId]) => fieldId !== found.next).map(([, chosen]) => chosen) : [];
+}
+
+/** Fixed host text that comes with the later questions (per-turn data in the current message). */
+export const LATER_QUESTIONS_NOTE = 'Questions of later fields of this step. When your one main question is about one of these fields '
+  + '(for example because the user\'s message answers the field you asked about), ask exactly its question as written here and end '
+  + 'your reply with it. The host shows its options on a card: never list options, examples or categories for it in prose, and do '
+  + 'not call ask_question.';
+
+// Exact containment after removing Markdown emphasis and spaces only ("**你打算先在哪个平台做？**"): no fuzzy matching.
+const plain = (text: string) => text.replace(/[*_\s]/g, '');
+
+/**
+ * The card the host shows under the reply, or null: of the host's question and the later ones, the one whose exact question the
+ * reply ends with last; without one, the host's question of this turn. Never a question whose field the organizer wrote this
+ * turn (the user answered it).
+ */
+export function fixedCardChoice(input: { chosen: ChosenQuestion | null; later: readonly ChosenQuestion[]; reply: string;
+  written: (fieldId: string) => boolean }): ChosenQuestion | null {
+  const reply = plain(input.reply);
+  const open = [...(input.chosen ? [input.chosen] : []), ...input.later].filter(q => !input.written(q.fixed.fieldId));
+  const quoted = open.map(q => ({ q, at: reply.lastIndexOf(plain(q.question)) })).filter(x => x.at >= 0).sort((a, b) => b.at - a.at);
+  if (quoted[0]) return quoted[0].q;
+  return input.chosen && !input.written(input.chosen.fixed.fieldId) ? input.chosen : null;
 }
 
 /** Whether the organizer wrote the question's field this turn (the user answered it in passing: no card). */

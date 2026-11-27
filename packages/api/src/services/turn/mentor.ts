@@ -39,7 +39,8 @@ import { savedSteps } from './tools/toolStage';
 import { createRuntimeBudget } from './settings/budget';
 import { REPLY_CUT, REPLY_CUT_FAILURE, shownSoFar } from './shownReply';
 import { confirmationReminderFilter, dropsConfirmationReminder } from './confirmationReminder';
-import { FIXED_QUESTION_NOTE, fixedQuestionCard, fixedQuestionFor, organizerWrote } from './fixedQuestions';
+import { FIXED_QUESTION_NOTE, LATER_QUESTIONS_NOTE, fixedCardChoice, fixedQuestionCard, fixedQuestionFor, laterFixedQuestions,
+  organizerWrote } from './fixedQuestions';
 import { benchmarkReady, benchmarkToolBytes, turnBenchmarkTools, type BenchmarkDeps } from './tools/benchmark';
 import { preparedResearch, type PreparedResearch } from './tools/benchmarkStore';
 import { logSwallowed, swallow } from '../../lib/swallow';
@@ -239,10 +240,14 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
     // The conversation's first opening (the user has said nothing yet) shows no card (MASTER_PLAN §3 item 1).
     const firstOpening = opening && !userHasSpoken(opened.history);
     // Owner 2026-11-27 option C: the host's fixed question of this turn, whose card the host shows (fixedQuestions.ts).
-    const chosen = fixedQuestionFor({ host, history: opened.history, roundId: ctx.roundId,
-      locale: effectiveReplyLocale(opened.replyLanguage), firstOpening, summary, mode: ctx.mode, words: opening ? '' : words });
+    const pick = { host, history: opened.history, roundId: ctx.roundId, locale: effectiveReplyLocale(opened.replyLanguage), firstOpening,
+      summary, mode: ctx.mode, words: opening ? '' : words };
+    const chosen = fixedQuestionFor(pick), later = laterFixedQuestions(pick);
+    const title = (fieldId: string) => host.checklist.find(step => step.id === host.stepId)?.fields.find(f => f.id === fieldId)?.title;
     const userMessage = mentorUserMessage(words, state.scopeMaterial, { ...host, ...(asked ? { confirmationAsked: true } : {}),
-      ...(chosen ? { fixedQuestion: { question: chosen.question, note: FIXED_QUESTION_NOTE } } : {}) });
+      ...(chosen ? { fixedQuestion: { question: chosen.question, note: FIXED_QUESTION_NOTE } } : {}),
+      ...(later.length ? { laterQuestions: { note: LATER_QUESTIONS_NOTE,
+        questions: later.map(q => ({ field: title(q.fixed.fieldId) || q.fixed.fieldId, question: q.question })) } } : {}) });
 
     // 4. History: newest that fits what the budget leaves after the system message, the tools, the current message and the
     // continuation reserve. The three cache breakpoints (mentorPrompt.ts): SKILL.md end, system end, last plain history.
@@ -346,10 +351,13 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
       }
     }
 
-    // The fixed question's card goes under the coach's words, unless the user answered its field in this turn (the organizer wrote
-    // it) or the coach answered with a comparison card the user asked for; the organizer read the words alone, as on any turn.
-    if (chosen && !turn.card && !(organizer && organizerWrote(organized, input.stepId, chosen.fixed.fieldId))) {
-      const card = fixedQuestionCard(chosen, turn.message);
+    // The fixed question's card goes under the coach's words (or a later field's, when the coach asked exactly its question),
+    // unless the user answered its field in this turn (the organizer wrote it) or the coach answered with a comparison card the
+    // user asked for; the organizer read the words alone, as on any turn.
+    const shown = turn.card ? null : fixedCardChoice({ chosen, later, reply: turn.message,
+      written: fieldId => Boolean(organizer) && organizerWrote(organized, input.stepId, fieldId) });
+    if (shown) {
+      const card = fixedQuestionCard(shown, turn.message);
       turn = { ...turn, body: agentTurnBody(turn.message, card), card };
     }
 
