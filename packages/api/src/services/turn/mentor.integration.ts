@@ -284,40 +284,58 @@ it('RUNTIME: CORE-PATH-V2 V2-5: a grounded choice card ends the reply and is sav
   expect(t.bodies.map(b => b.model)).toEqual([MENTOR, ORGANIZER]);
 });
 
-// Owner 2026-11-27 pay2: the step-2 opening asked a neutral category question in prose, as no opening could show a card, and its
-// organizer output (turn 6874) carried no inputKind, so turn_close refused it and both step-2 drafts were lost. The conversation's
-// first opening (no user message yet) still shows no card (MASTER_PLAN §2.1 2026-11-26, §3 item 1).
-it('RUNTIME: Owner 2026-11-27: only a later opening shows a neutral card; an opening output without inputKind is not refused', async () => {
+// Owner 2026-11-27 option C: the host's fixed question gets its card from code, never from the model calling the card tool. The
+// synthetic step's one required field is goal, a list field (fixedQuestions.ts). The conversation's first opening (MASTER_PLAN §3
+// item 1) shows none; an answered question is not asked again; a field the user answers in passing gets no card. An opening's
+// organizer output without inputKind (pay2 turn 6874) is still not refused.
+it('RUNTIME: Owner 2026-11-27 option C: a list question gets the host\'s card without any tool call; first opening and answers none', async () => {
   const f = await setup();
-  const card = { intent: 'neutral_categories', requestQuote: null, basisQuotes: [], question: 'Which kind of account should I look for?',
-    options: [{ text: 'Local studios', reason: null }, { text: 'Beginner tutors elsewhere', reason: null }], recommended: null };
-  const opener = () => transport((body, n) => body.model === ORGANIZER
-    ? organized('gen-org-' + n, JSON.stringify({ format: 'v2', patches: [], notes: [] }))
-    : toolCall('gen-open-' + n, 'ask_question', card));
+  const goal = '你做这个账号，最希望它最后带来什么？';
+  const empty = JSON.stringify({ inputKind: 'answer', patches: [], notes: [] });
   const resultOf = (out: { events: TurnEvent[] }) => {
     const result = out.events.at(-1) as Extract<TurnEvent, { type: 'result' }>;
     expect(result.type, JSON.stringify(out.events)).toBe('result');
     return result;
   };
-  // 1. The first opening: tool_choice none, and a card the model sends anyway is refused by the host.
-  const first = opener();
+  const userMessage = (b: { messages: Array<{ role: string; content: unknown }> }) => String(b.messages.at(-1)!.content);
+  // 1. The first opening: tool_choice none, no card, though goal is empty; its organizer output lacks inputKind.
+  const first = transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, JSON.stringify({ format: 'v2', patches: [], notes: [] }))
+    : prose('gen-open-' + n, 'Welcome. ' + goal));
   const one = resultOf(await turn(f, { text: 'HOST_OPEN_CURRENT_QUESTION', transport: first.fn }));
   expect(first.bodies[0]!.tool_choice).toBe('none');
+  expect(userMessage(first.bodies[0]!)).not.toContain('fixedQuestion');
   expect(JSON.parse(one.body).card).toBeNull();
-  // 2. The user speaks.
-  const said = transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, JSON.stringify({ inputKind: 'answer', patches: [], notes: [] }))
-    : prose('gen-reply-' + n, 'Noted.'));
-  resultOf(await turn(f, { text: 'I teach leather craft on weekends', transport: said.fn }));
-  // 3. A later opening: tools callable, the neutral card shown, and its organizer output kept though it lacks inputKind.
-  const later = opener();
-  const three = resultOf(await turn(f, { text: 'HOST_OPEN_CURRENT_QUESTION', transport: later.fn }));
-  expect(later.bodies[0]!).not.toHaveProperty('tool_choice');
-  expect(JSON.parse(three.body).card).toMatchObject({ question: card.question,
-    options: ['Local studios', 'Beginner tutors elsewhere'], recommended: null });
-  expect(later.bodies.map(b => b.model)).toEqual([MENTOR, ORGANIZER]);
-  expect(['applied', 'suggested']).toContain((three.kindResult as { result?: string }).result);
-  expect((await db.query("select close_kind from turns where actor_id=$1 order by id", [f.actor])).rows.map(r => r.close_kind))
-    .toEqual(['completed', 'completed', 'completed']);
+  expect(['applied', 'suggested']).toContain((one.kindResult as { result?: string }).result);
+  // 2. The user speaks without answering it: the coach is told the question, writes prose only, and the host shows the card.
+  const asked = transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, empty)
+    : prose('gen-reply-' + n, '记下了，你在周末教皮具。' + goal));
+  const two = resultOf(await turn(f, { text: 'I teach leather craft on weekends', transport: asked.fn }));
+  expect(asked.bodies.filter(b => b.model === MENTOR).map(userMessage).join('')).toContain('fixedQuestion');
+  expect(JSON.parse(two.body).card).toEqual({ question: goal, options: ['每月多份零花钱', '给生意带客户', '慢慢做成主业', '卖课程或产品', '先试试适不适合'],
+    recommended: null, message: '记下了，你在周末教皮具。' + goal, recommendationReason: null });
+  // 3. The user picks an option: those are the words of the turn, and the question is not asked again.
+  const cardSeq = (await db.query("select seq from session_messages where session_id=$1 and role='assistant' order by seq desc limit 1",
+    [f.session])).rows[0].seq;
+  const answer = transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, empty) : prose('gen-reply-' + n, '好的，给生意带客户。'));
+  const three = resultOf(await turn(f, { text: '给生意带客户', transport: answer.fn, answer: { sourceSeq: cardSeq, optionIndex: 1 } }));
+  expect((await db.query("select content from session_messages where session_id=$1 and role='user' order by seq desc limit 1",
+    [f.session])).rows[0].content).toBe('给生意带客户');
+  expect(answer.bodies.filter(b => b.model === MENTOR).map(userMessage).join('')).not.toContain('fixedQuestion');
+  expect(JSON.parse(three.body).card).toBeNull();
+});
+
+it('RUNTIME: Owner 2026-11-27 option C: a list field the user answers in passing in the same turn gets no card', async () => {
+  const f = await setup();
+  const open = transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, JSON.stringify({ inputKind: 'answer', patches: [], notes: [] }))
+    : prose('gen-open-' + n, 'Welcome.'));
+  await turn(f, { text: 'HOST_OPEN_CURRENT_QUESTION', transport: open.fn });
+  const t = transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, patch('Customers for my studio'))
+    : prose('gen-reply-' + n, 'Noted: customers for your studio.'));
+  const out = await turn(f, { text: 'I want customers for my studio', transport: t.fn });
+  const result = out.events.at(-1) as Extract<TurnEvent, { type: 'result' }>;
+  expect(result.type, JSON.stringify(out.events)).toBe('result');
+  expect(JSON.parse(result.body).card).toBeNull();
+  expect(result.kindResult).toMatchObject({ result: 'applied', fields: { 'step-0': ['goal'] } });
 });
 
 // Owner 2026-11-27 pay2 (second run, seq 18-22) and review of #2059: once a reply of the step asked for the confirmation card, a

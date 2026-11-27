@@ -27,15 +27,12 @@ describe('conversation checklist mentor prompt',()=>{
   expect(prompt).not.toContain('most turns need no card');
   expect(prompt).toContain('you MUST call ask_question');
   expect(prompt).toContain('including when they explicitly ask for options');
-  expect(prompt).toContain('Never ask a case 1 or 2 question in prose only; call ask_question.');
-  expect(prompt).toContain('Set recommended to null. Options must not assert facts about the user.');
+  expect(prompt).toContain('Never ask a case 1 question in prose only; call ask_question.');
+  expect(prompt).toContain('2. Neutral ranges or categories: the host shows its card for hostTurnContext.fixedQuestion');
   expect(prompt).toContain('insufficient information for a professional judgement, ask one open question');
   expect(prompt).toContain('For open personal content (experience, strengths, stories, customers or goals), NEVER issue a card');
   expect(prompt).toContain('4. Clear answer: no card');
-  expect(prompt).toContain("5. Host opening: only case 2, and no card before the user's first message.");
-  // The Skill keeps its examples in prose and gives a card short labels (Skill E13); the host no longer forbids that.
-  expect(prompt).not.toContain('Do not repeat the list of card options in prose');
-  expect(prompt).toContain("With a neutral card, keep the Skill's examples in prose; card options are short labels for them.");
+  expect(prompt).toContain('5. Host opening: no ask_question.');
   expect(prompt).toContain('Recommend one with a reason');
   expect(prompt).toContain('The host adds an Other entry; never add other, not-sure, skip, defer or continue options');
   expect(prompt).toContain('NEVER issue a card, even when the user explicitly requests options');
@@ -46,7 +43,7 @@ describe('conversation checklist mentor prompt',()=>{
  });
  it('conditionally opens a step without fabricating user speech or extracting user facts',()=>{
   expect(prompt).toContain('When hostTurnContext.opening is true');
-  expect(prompt).toContain('the user has not spoken and only a neutral card is available');
+  expect(prompt).toContain('the user has not spoken and ask_question is not available');
   expect(prompt).toContain('ask one useful question about a real gap');
   expect(prompt).not.toContain('For this step-2 opening only');
   const stepTwoOpening = researchOpeningInstructions({opening: true, stepId: 'step-2'});
@@ -81,25 +78,21 @@ it('confirmation gate overrides opening and question rules without turning assen
  expect(prompt).not.toContain('confirm this step in the right panel');
 });
 
-describe('Owner 2026-11-26: neutral cards without a request, and no question asked twice', () => {
-  it('the mentor is told to use a neutral card for any general range or category it asks about', () => {
-    expect(AGENT_TURN_STABLE_PREFIX).not.toContain('Neutral cards require an explicit current request');
-    expect(AGENT_TURN_STABLE_PREFIX).toContain('Neutral cards need no user request.');
-    expect(AGENT_TURN_STABLE_PREFIX).toContain('Neutral card: use ask_question for general ranges or categories');
-    // An opening may carry only a neutral card (pay2 seq 20), and open personal content stays prose.
-    expect(AGENT_TURN_STABLE_PREFIX).toContain("Host opening: only case 2, and no card before the user's first message.");
+describe('Owner 2026-11-27 option C: neutral cards come only from the host\'s fixed questions', () => {
+  it('the mentor never sends a neutral card; with a fixed question it asks exactly that and lists no options', () => {
+    expect(AGENT_TURN_STABLE_PREFIX).not.toContain('Neutral cards need no user request.');
+    expect(AGENT_TURN_STABLE_PREFIX).toContain("Neutral cards come only from the host's fixed questions.");
+    expect(AGENT_TURN_STABLE_PREFIX).toContain('ask any other in prose, never with ask_question');
+    expect(AGENT_TURN_STABLE_PREFIX).toContain('ask exactly that question unless the user already answered it');
+    expect(AGENT_TURN_STABLE_PREFIX).toContain('never list its options, examples or categories in prose');
     expect(AGENT_TURN_STABLE_PREFIX).toContain('NEVER issue a card');
+    const description = groundedCardTool(() => ({current: '', user: []})).description!;
+    expect(description).toContain('Show a question card only for a grounded comparison');
+    expect(description).toContain('hostTurnContext.fixedQuestion');
+    expect(description).not.toContain('neutral_categories: you ask the user');
   });
   it('the mentor never asks again what the user already answered', () => {
     expect(AGENT_TURN_STABLE_PREFIX).toContain('Never re-ask an answered question');
-  });
-  it('how a service is charged is a neutral category; the card tool no longer calls every offer question personal', () => {
-    expect(AGENT_TURN_STABLE_PREFIX).toContain('how a service is charged');
-    const description = groundedCardTool(() => ({current: '', user: []})).description;
-    expect(description).toContain('how the service is charged');
-    expect(description).toContain('offer content');
-    expect(description).not.toMatch(/customers, offers\)/);
-    expect(description).not.toContain('do not repeat the options');
   });
 });
 

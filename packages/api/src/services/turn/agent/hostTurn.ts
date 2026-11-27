@@ -54,6 +54,8 @@ export const hostTurnContextSchema = z.object({
   confirmation: stepConfirmationSchema.optional(),
   /** Set by the host (mentor turns only) when an earlier reply of this step already asked for the confirmation card. */
   confirmationAsked: z.literal(true).optional(),
+  /** Owner 2026-11-27 option C: the host's fixed question of this turn (fixedQuestions.ts); the host shows its card. Mentor only. */
+  fixedQuestion: z.object({question: z.string().min(1).max(500), note: z.string().min(1).max(1000)}).strict().optional(),
   stepSummary: stepSummaryNoticeSchema.optional(),
   updatedFieldIds: z.array(z.string().min(1).max(64)).max(100).optional(),
   researchRefresh: z.object({refreshId: z.string().uuid(), platform: z.enum(SOCIAL_PLATFORMS),

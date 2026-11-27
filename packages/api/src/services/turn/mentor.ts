@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
-import { ASK_QUESTION_TOOL, INVALID_REPLY_NOTICE } from '../../shared/agentTurn';
+import { agentTurnBody, ASK_QUESTION_TOOL, INVALID_REPLY_NOTICE } from '../../shared/agentTurn';
 import { effectiveReplyLocale } from '../../shared/replyLanguage';
 import { openRouterAdapter } from './provider/openRouterAdapter';
 import { agentTurnResult } from './agent/agentTurnResult';
@@ -39,6 +39,7 @@ import { savedSteps } from './tools/toolStage';
 import { createRuntimeBudget } from './settings/budget';
 import { REPLY_CUT, REPLY_CUT_FAILURE, shownSoFar } from './shownReply';
 import { confirmationReminderFilter, dropsConfirmationReminder } from './confirmationReminder';
+import { FIXED_QUESTION_NOTE, fixedQuestionCard, fixedQuestionFor, organizerWrote } from './fixedQuestions';
 import { benchmarkReady, benchmarkToolBytes, turnBenchmarkTools, type BenchmarkDeps } from './tools/benchmark';
 import { preparedResearch, type PreparedResearch } from './tools/benchmarkStore';
 import { logSwallowed, swallow } from '../../lib/swallow';
@@ -235,7 +236,13 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
       replyRule: replySettingInstructions(effectiveReplyLocale(opened.replyLanguage)) });
     // The coach alone learns that this step's confirmation card was already asked for (the organizer reads the plain host).
     const asked = !summary && host.confirmation?.stepReady === true && confirmationAsked(opened.history, input.stepId, ctx.roundId);
-    const userMessage = mentorUserMessage(words, state.scopeMaterial, asked ? { ...host, confirmationAsked: true } : host);
+    // The conversation's first opening (the user has said nothing yet) shows no card (MASTER_PLAN §3 item 1).
+    const firstOpening = opening && !userHasSpoken(opened.history);
+    // Owner 2026-11-27 option C: the host's fixed question of this turn, whose card the host shows (fixedQuestions.ts).
+    const chosen = fixedQuestionFor({ host, history: opened.history, roundId: ctx.roundId,
+      locale: effectiveReplyLocale(opened.replyLanguage), firstOpening, summary });
+    const userMessage = mentorUserMessage(words, state.scopeMaterial, { ...host, ...(asked ? { confirmationAsked: true } : {}),
+      ...(chosen ? { fixedQuestion: { question: chosen.question, note: FIXED_QUESTION_NOTE } } : {}) });
 
     // 4. History: newest that fits what the budget leaves after the system message, the tools, the current message and the
     // continuation reserve. The three cache breakpoints (mentorPrompt.ts): SKILL.md end, system end, last plain history.
@@ -264,14 +271,11 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
       callGate: async subcalls => { const gate = await deps.newWork.calls(input.actorId, subcalls, 'bill2.v2');
         if (!gate.ok) throw new TurnStop(GATE_CODES[gate.reason]); }, onStop: stop => { stopped = stop; } }) : undefined;
     // Each tool but the question card tells the page when it starts and ends (a `step` event); the benchmark tools keep their own stop handling.
-    // The conversation's first opening (the user has said nothing yet) shows no card and may call no tool (MASTER_PLAN §3 item 1);
-    // a later step's opening may show a neutral card (Owner 2026-11-27, pay2 seq 20).
-    const firstOpening = opening && !userHasSpoken(opened.history);
     const cardTools = summary ? [] : [groundedCardTool(() => sources, { opening, firstOpening })];
     const tools = withStepEvents([...cardTools, mentorSkillFileTool(prepared, binding), ...benchmark?.tools ?? []],
       emitStep, new Map(), undefined, methodName, METHOD_STEP_ID);
     const context: RequestContext = { providerRequestFormat: AGENT_TURN_REQUEST_FORMAT, tools: tools.map(t => t.name), network: 'deny',
-      reasoning: mentor.reasoning, hostTurnContext: { opening: firstOpening }, ...(promptCache ? { promptCache } : {}),
+      reasoning: mentor.reasoning, hostTurnContext: { opening }, ...(promptCache ? { promptCache } : {}),
       ...(organizer ? { attachedOrganizer: { reasoning: organizer.reasoning } } : {}) };
 
     // 5. The mentor's reply (and its continuation after one Skill file). A choice card ends the turn.
@@ -292,7 +296,7 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
     };
     const output = await runRuntime({
       model: mentor.model, instructions: system.instructions, input: userMessage, session: turnSession(history),
-      maxOutputTokens: mentor.outputLimit, maxTurns: benchmark ? 3 : 2, reasoning: mentor.reasoning, tools, stream: true,
+      maxOutputTokens: mentor.outputLimit, maxTurns: opening ? 1 : benchmark ? 3 : 2, reasoning: mentor.reasoning, tools, stream: true,
       allowEmptyResult: true, firstToolCallOnly: true, stopAtToolNames: [ASK_QUESTION_TOOL],
       selectHistory: async (items, incoming) => { sources = cardSources(words, items); return [...items, ...incoming]; },
       onText: delta => { text += delta; const show = reminder.push(delta); shownText += show; if (show) emit({ type: 'text', delta: show }); },
@@ -320,7 +324,7 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
     const filtered = dropping && shownText.trim() ? shownText : null;
     if (filtered) text = filtered;
     // A neutral card keeps the coach's short prose before it; a comparison card with separate prose is refused (groundedCard.ts).
-    const turn = groundedTurn(text, filtered && !toolCalled ? filtered : output, toolCalled, cardMessage);
+    let turn = groundedTurn(text, filtered && !toolCalled ? filtered : output, toolCalled, cardMessage);
     // Nothing to show (no prose, no card): nothing was delivered, the user pays nothing.
     if (!turn.card && turn.message === INVALID_REPLY_NOTICE) throw new TurnStop('TURN_CALL_DENIED');
 
@@ -340,6 +344,13 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
           || error.code === 'STOP_LOSS_REACHED')) throw error;
         logSwallowed('turn_mentor_organizer_failed', error, { category: 'ai' });
       }
+    }
+
+    // The fixed question's card goes under the coach's words, unless the user answered its field in this turn (the organizer wrote
+    // it) or the coach answered with a comparison card the user asked for; the organizer read the words alone, as on any turn.
+    if (chosen && !turn.card && !(organizer && organizerWrote(organized, input.stepId, chosen.fixed.fieldId))) {
+      const card = fixedQuestionCard(chosen, turn.message);
+      turn = { ...turn, body: agentTurnBody(turn.message, card), card };
     }
 
     // 7. Close: settle once, save both messages, apply the checklist patches in the same transaction. A source withdrawn during

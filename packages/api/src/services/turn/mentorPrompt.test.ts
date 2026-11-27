@@ -10,7 +10,7 @@ import { AGENT_TURN_REQUEST_FORMAT, openRouterRequestBody, type RequestContext }
 import { freezeSharedPromptCache } from './provider/promptCache';
 import { replySettingInstructions } from './agent/replyLanguage';
 import { openRouterBound } from './provider/openRouterPolicy';
-import { mentorSystem, mentorUserMessage, NEUTRAL_CARD_CHECK, projectMentorHistory, SKILL_FILE_INSTRUCTIONS } from './mentorPrompt';
+import { mentorSystem, mentorUserMessage, projectMentorHistory, SKILL_FILE_INSTRUCTIONS } from './mentorPrompt';
 import { loadMentorSkill, mentorSkillFileTool, mentorSkillSource, prepareMentorFiles, skillEntryChars, skillFileReserveBytes } from './mentorSkill';
 
 /*
@@ -67,21 +67,13 @@ const markers = (value: unknown) => (JSON.stringify(value).match(/cache_control/
 
 beforeEach(() => { clearSkillResourceCache(); rpc.mockClear(); });
 
-describe('a neutral range/category question ends with its card (Owner 2026-11-26 option A; 11-27 real-model run)', () => {
+describe('Owner 2026-11-27 option C: neutral cards are the host\'s, so the model is not told to send one', () => {
   const system = (opening: boolean, summary = false) => mentorSystem({ skillText: 'SKILL', skillEntryChars: 0, brandIdentity: false,
     mode: 'mentor', host: host('step-1', opening), skillFile: true, summary, replyRule: 'REPLY' }).instructions;
-  it('an ordinary turn is told, last before the reply language, to call ask_question for such a question', () => {
-    const text = system(false);
-    expect(text).toContain(NEUTRAL_CARD_CHECK);
-    expect(text.indexOf(NEUTRAL_CARD_CHECK)).toBeGreaterThan(text.indexOf(SKILL_FILE_INSTRUCTIONS));
-    expect(text.endsWith(NEUTRAL_CARD_CHECK + '\nREPLY')).toBe(true);
-    expect(NEUTRAL_CARD_CHECK).toContain('call ask_question with intent neutral_categories');
-    expect(NEUTRAL_CARD_CHECK).toContain('how the service is charged');
-    expect(NEUTRAL_CARD_CHECK).toContain('Personal questions, guesses about the user and confirmation requests stay prose');
-  });
-  it('an opening is told too (pay2 seq 20 asked a neutral category question in prose); a step summary, with no card, is not', () => {
-    expect(system(true).endsWith(NEUTRAL_CARD_CHECK + '\nREPLY')).toBe(true);
-    expect(system(false, true)).not.toContain(NEUTRAL_CARD_CHECK);
+  it('no turn is told to call ask_question for a neutral question; an opening and an ordinary turn share the system text', () => {
+    for (const text of [system(false), system(true), system(false, true)]) expect(text).not.toContain('intent neutral_categories');
+    expect(system(true)).toBe(system(false));
+    expect(system(false).endsWith(SKILL_FILE_INSTRUCTIONS + '\nREPLY')).toBe(true);
   });
 });
 
