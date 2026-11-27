@@ -15,7 +15,8 @@ import type { HistoryItem } from './db';
  *  - only in the interview (mode mentor): importing an existing positioning (mode manual) asks for the user's material instead;
  *  - not when the user asks in this turn for no questions or options (that request overrides the question rules, agentTurnPrompt.ts;
  *    review of #2060);
- *  - never twice in a round, and not when the user answered the field in the same turn (the organizer wrote it).
+ *  - never twice in a round, and not when the user answered the field in the same turn (the organizer wrote it);
+ *  - never about the field whose card the user is answering in this turn: the next question waits for the organizer's write.
  * Cards carry no recommendation; the page adds the "Other" entry. The questions and options are copy (the decision allows edits).
  */
 type Localized = Record<ReplyLocale, string>;
@@ -60,8 +61,9 @@ export const FIXED_QUESTION_NOTE = 'Host question of this turn. Unless the user\
   + 'or categories for it in prose, and do not call ask_question. A short acknowledgement and why you ask are fine.';
 
 /** The user asks for no questions or options in this turn ("先不要提问或给选项，只回答我的问题"). */
-const NO_QUESTIONS = new RegExp(['(不要|别|不用|先别|暂时不要|先不要)(再)?(问我|问|提问|追问|给我?选项|出选项|列选项)',
-  '只(回答|说)(我的)?(这个)?问题', '直接(回答|说结论)',
+// Simplified and Traditional forms both (a zh-Hant user writes Traditional characters).
+const NO_QUESTIONS = new RegExp(['(不要|别|別|不用|先别|先別|暂时不要|暫時不要|先不要)(再)?(问我|問我|问|問|提问|提問|追问|追問|(给|給)我?(选项|選項)|出(选项|選項)|列(选项|選項))',
+  '只(回答|说|說)(我的)?(这个|這個)?(问题|問題)', '直接(回答|(说|說)(结论|結論))',
   '\\bno (more )?(questions|options)\\b', "\\bdon'?t ask\\b", '\\bwithout (any )?(questions|options)\\b', '\\bjust answer\\b'].join('|'), 'i');
 
 export type ChosenQuestion = { fixed: FixedQuestion; question: string; options: readonly string[] };
@@ -79,6 +81,17 @@ function askedInRound(history: readonly HistoryItem[], roundId: string): Set<str
   return asked;
 }
 
+/*
+ * The field of the fixed card under the coach's latest reply: the user's message of this turn answers it (an option, "Other",
+ * or words). Read from the saved card's question text, exactly as the host wrote it; any other card or no card gives null.
+ */
+function answeredField(history: readonly HistoryItem[]): string | null {
+  const last = [...history].reverse().find(item => item.role === 'assistant');
+  const question = last ? readAgentTurnBody(last.content).card?.question.trim() : undefined;
+  if (!question) return null;
+  return FIXED_QUESTIONS.find(q => Object.values(q.question).includes(question))?.fieldId ?? null;
+}
+
 type Pick = { host: HostTurnContext; history: readonly HistoryItem[]; roundId: string; locale: ReplyLocale;
   firstOpening: boolean; summary: boolean; mode: unknown; words: string };
 
@@ -88,7 +101,10 @@ function plan(input: Pick): { next: string | null; questions: Map<string, Chosen
   if (input.mode !== 'mentor' || input.summary || input.firstOpening || NO_QUESTIONS.test(input.words)
     || host.confirmation?.stepReady || host.confirmation?.stepConfirmed) return null;
   const fields = host.checklist.find(step => step.id === host.stepId)?.fields ?? [];
-  const missing = fields.filter(field => field.required && field.status === 'missing');
+  // The field the user is answering in this turn is not asked about again in it (pay4 2026-11-27, seq 13-14): the organizer
+  // writes this turn's answer only after the coach's reply, so before it the field still reads empty.
+  const answering = input.words.trim() ? answeredField(input.history) : null;
+  const missing = fields.filter(field => field.required && field.status === 'missing' && field.id !== answering);
   // The next field the user is asked about: the first empty one the user supplies; in a step of the coach's drafts only (step 2),
   // the first empty one with a fixed question.
   const next = missing.find(field => field.role === 'user_fact')

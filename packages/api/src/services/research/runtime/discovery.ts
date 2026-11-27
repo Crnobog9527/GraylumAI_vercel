@@ -95,9 +95,12 @@ export function candidateShortage(linksDeclined = false) {
   };
 }
 
-/** A round stopped before its end (this reply's lookups ran out): it is not a round yet and continues on the next reply. */
-export const ROUND_UNFINISHED_NEXT_STEP = '这一轮搜索还没搜完，不算一轮。用一句话告诉用户正在扩大搜索、会自动接着搜'
-  + '（没有自动继续时回复"继续"即可）；已经取过的数据不会重复取、不重复收费。不要说已经搜完，也不要建议换关键词。';
+/**
+ * A round stopped before its end (this reply's lookups ran out): it is not a round yet and continues on the next reply, which
+ * the page sends by itself (Owner 2026-10-23, 3 A); past its limit the page itself asks the user to reply.
+ */
+export const ROUND_UNFINISHED_NEXT_STEP = '这一轮搜索还没搜完，不算一轮。用一句话告诉用户正在扩大搜索、下一条回复会自动接着搜，'
+  + '用户不用回复任何话；已经取过的数据不会重复取、不重复收费。不要让用户回复"继续"或别的话来催，不要说已经搜完，也不要建议换关键词。';
 
 /** Authors whose profiles one scan batch reads; the first batch is read whole so the card can show up to 12. */
 const AUTHOR_BATCH = 15;

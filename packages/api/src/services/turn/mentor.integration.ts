@@ -377,6 +377,33 @@ it('RUNTIME: Owner 2026-11-27 option C: the coach goes on to a later list field 
   expect(result.kindResult).toMatchObject({ result: 'applied', fields: { 'step-0': ['track'] } });
 });
 
+// Owner 2026-11-27 pay4 (seq 12-14, the real words): the time card was under seq 12, seq 13 answered time, filming and budget at
+// once, and seq 14 asked the filming question with no card: the host had handed it over before the organizer wrote resources.
+// The field whose card the user is answering is not asked about again in that turn.
+it('RUNTIME: Owner 2026-11-27 option C: the turn that answers a fixed card is not handed another question of its field', async () => {
+  const f = await setup({ fields: [{ id: 'resources', title: '能投入的时间、精力、预算和限制' }, { id: 'assets', title: '手上已有的条件' }] });
+  const empty = JSON.stringify({ inputKind: 'answer', patches: [], notes: [] });
+  const open = transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, empty) : prose('gen-open-' + n, '你好。'));
+  await turn(f, { text: 'HOST_OPEN_CURRENT_QUESTION', transport: open.fn });
+  const time = '你每周大概能拿出多少时间做账号？';
+  const asked = transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, empty)
+    : prose('gen-reply-' + n, '选小红书，我记下了。接下来要排内容节奏，所以想问你这一项：\n\n' + time));
+  const card = (await turn(f, { text: '我先从小红书做起。', transport: asked.fn })).events.at(-1) as Extract<TurnEvent, { type: 'result' }>;
+  expect(JSON.parse(card.body).card).toMatchObject({ question: time });
+  const seq14 = '每周大概四小时，不露脸，不投广告，这三点我都记下了。\n\n接下来还差一项资源信息，我想弄清你拍内容时的实际条件：\n\n拍内容时，你能接受哪种方式？';
+  const t = transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, JSON.stringify({ inputKind: 'answer', notes: [],
+    patches: [{ stepId: 'step-0', fieldId: 'resources', value: '每周大概4小时；不露脸；不投广告。', status: 'provisional', nature: 'fact',
+      basis: 'user_statement' }] })) : prose('gen-reply-' + n, seq14));
+  const out = await turn(f, { text: '每周大概四小时，不露脸，不投广告。', transport: t.fn });
+  const result = out.events.at(-1) as Extract<TurnEvent, { type: 'result' }>;
+  expect(result.type, JSON.stringify(out.events)).toBe('result');
+  const told = String(t.bodies.find(b => b.model === MENTOR)!.messages.at(-1)!.content);
+  expect(told).not.toContain('fixedQuestion');
+  expect(told).not.toContain('laterQuestions');
+  expect(told).not.toContain('拍内容时，你能接受哪种方式？');
+  expect(result.kindResult).toMatchObject({ result: 'applied', fields: { 'step-0': ['resources'] } });
+});
+
 // Owner 2026-11-27 pay2 (second run, seq 18-22) and review of #2059: once a reply of the step asked for the confirmation card, a
 // sentence asking again is dropped from what is shown, what is saved, what a reload reads and what the organizer reads.
 it('RUNTIME: Owner 2026-11-27: a repeated request for the confirmation card is not saved, reloaded or organized', async () => {
@@ -1013,7 +1040,8 @@ it('RUNTIME: CORE-PATH-V2 V2-5c: a process killed mid-turn loses nothing receipt
   expect((await db.query('select account from research_benchmarks where session_id=$1 order by account', [f.session])).rows.map(r => r.account)).toEqual(accounts);
 }, 120000);
 
-it('RUNTIME: CORE-PATH-V2 V2-5c: a discovery round stopped by its limit is continued by the next turn without paying for its searches again', async () => {
+// A turn whose discovery round its limit stops (it goes on in the next reply); the coach's prose after the search is `said`.
+async function stoppedRound(said: string) {
   const f = await setup();
   await researchOn();
   const quiet = JSON.stringify({ inputKind: 'answer', patches: [], notes: [] });
@@ -1039,13 +1067,28 @@ it('RUNTIME: CORE-PATH-V2 V2-5c: a discovery round stopped by its limit is conti
       const qualifies = Number(/(\d+)$/.exec(String(call.account))?.[1] ?? 0) % 4 === 0;
       return { ...base, items: [{ missing: [], fields: { followers: qualifies ? 50000 : 500, postsCount: 200 } }] };
     } } as unknown as VendorCalls };
-  const discover = (args: unknown) => transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, quiet)
-    : n === 1 ? toolCall('gen-reply-1', 'benchmark_discover', args) : prose('gen-reply-' + n, 'Still searching.'));
-  const second = await turn(f, { text: 'Go on', transport: discover({ keywordConfirmationId: confirmationId, platforms: ['tiktok'], discoveryId: null }).fn,
-    research: stub });
-  expect(second.events.at(-1)?.type).toBe('result');
+  const discover = (args: unknown, reply = 'Still searching.') => transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, quiet)
+    : n === 1 ? toolCall('gen-reply-1', 'benchmark_discover', args) : prose('gen-reply-' + n, reply));
+  const second = await turn(f, { text: 'Go on', transport: discover({ keywordConfirmationId: confirmationId, platforms: ['tiktok'], discoveryId: null },
+    said).fn, research: stub });
+  return { f, second, discover, stub, calls };
+}
+
+it('RUNTIME: CORE-PATH-V2 V2-5c: a discovery round stopped by its limit is continued by the next turn without paying for its searches again', async () => {
+  // pay4 2026-11-27 seq 26 (its last two sentences): the coach told the user to reply "继续" although the page goes on by itself.
+  const said = '我会扩大范围接着搜，已经取过的数据不会重复取。\n\n如果下一条消息没有自动接着搜，你回我一句"继续"就行。';
+  const { f, second, discover, stub, calls } = await stoppedRound(said);
+  const result = second.events.at(-1) as Extract<TurnEvent, { type: 'result' }>;
+  expect(result.type).toBe('result');
   const stopped = second.events.find(e => e.type === 'research_continue') as { discoveryId: string } | undefined;
   expect(stopped).toBeTruthy();
+  const shown = second.events.filter(e => e.type === 'text').map(e => (e as { delta: string }).delta).join('');
+  const saved = (await db.query("select content from session_messages where session_id=$1 and role='assistant' order by seq desc limit 1",
+    [f.session])).rows[0].content as string;
+  for (const text of [shown, JSON.parse(result.body).message, saved]) {
+    expect(text).toContain('我会扩大范围接着搜');
+    expect(text).not.toContain('继续');
+  }
   expect((await db.query('select state,turn_id is not null turn from research_discoveries where id=$1', [stopped!.discoveryId])).rows)
     .toEqual([{ state: 'running', turn: true }]);
   const unfinished = await rest().rpc('research_user_unfinished_round', { a: f.actor, s: f.session });
@@ -1058,6 +1101,25 @@ it('RUNTIME: CORE-PATH-V2 V2-5c: a discovery round stopped by its limit is conti
   // No supplier call was sent twice: the round went on from what the earlier turn paid for.
   expect(calls.slice(sent).filter(c => c.startsWith('keyword_posts'))).toEqual([]);
   expect(new Set(calls).size).toBe(calls.length);
+});
+
+// Review of #2062: a reply that is nothing but the request to reply "继续" says only that the search goes on, shown and saved.
+it('RUNTIME: CORE-PATH-V2 V2-5c: a stopped round whose reply only asks the user to reply "continue" says it goes on instead', async () => {
+  const { f, second } = await stoppedRound('这一轮还没搜完，你回复"继续"即可接着搜索。');
+  const result = second.events.at(-1) as Extract<TurnEvent, { type: 'result' }>;
+  expect(result.type, JSON.stringify(second.events)).toBe('result');
+  expect(second.events.some(e => e.type === 'research_continue')).toBe(true);
+  const shown = second.events.filter(e => e.type === 'text').map(e => (e as { delta: string }).delta).join('');
+  const saved = (await db.query("select content from session_messages where session_id=$1 and role='assistant' order by seq desc limit 1",
+    [f.session])).rows[0].content as string;
+  const reloaded = (await db.query('select turn_session_view($1,$2,0) v', [f.actor, f.session])).rows[0].v;
+  const last = JSON.stringify(reloaded.messages.filter((m: { role: string }) => m.role === 'assistant').at(-1));
+  expect(shown).toBe('还在接着搜，搜完会直接告诉你。');
+  expect(JSON.parse(result.body).message).toBe('还在接着搜，搜完会直接告诉你。');
+  for (const text of [saved, last]) {
+    expect(text).toContain('还在接着搜，搜完会直接告诉你。');
+    expect(text).not.toContain('继续');
+  }
 });
 
 it('RUNTIME: CORE-PATH-V2 V2-5c: a round that finishes makes its candidate card at close, and the next turn can follow it up', async () => {
