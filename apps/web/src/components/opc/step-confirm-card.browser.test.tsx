@@ -25,7 +25,7 @@ beforeAll(async () => {
           stepId, title:'同名步骤', info:{schema:[{id:'field',title:'字段',required:true}],
             values:{field:{value:text,status:'provisional'}},meta:{field:{suggestion}}},
           resuming:false,disabled:false,canConfirm:true,onConfirm:settled=>window.confirmed.push(settled),
-          onEdit:()=>{},onReview:()=>{}
+          onEdit:()=>{},onReview:()=>{},startOpen:window.startOpen!==false
         })));
         window.renderCard('step-1');`;
     } }],
@@ -69,5 +69,24 @@ it('requires a fresh visible interval for different step IDs even with identical
       document.querySelector('button').click()`);
     await browserExpect(page.getByText(/还有 1 条/)).toBeVisible();
     expect(await page.evaluate('window.confirmed')).toEqual([true,false,true,false,false,false]);
+  } finally { await page.close(); }
+}, 15000);
+
+it('opening the folded card restarts the wait: a click right after opening reviews instead of confirming', async () => {
+  const page = await browser.newPage();
+  try {
+    await page.route('**/*', route => route.abort());
+    await page.setContent('<div id="root"></div>');
+    await page.addScriptTag({content:'window.startOpen=false'});
+    await page.addScriptTag({content:code});
+    await page.evaluate('window.now=13000');
+    await browserExpect(page.getByRole('button', {name:'没问题，进入下一步'})).toHaveCount(0);
+    await page.getByRole('button', {name:'展开核对'}).click();
+    const confirm = page.getByRole('button', {name:'没问题，进入下一步'});
+    await confirm.click();
+    expect(await page.evaluate('window.confirmed')).toEqual([false]);
+    await page.evaluate('window.now=15000');
+    await confirm.click();
+    expect(await page.evaluate('window.confirmed')).toEqual([false,true]);
   } finally { await page.close(); }
 }, 15000);

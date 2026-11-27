@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 "use client";
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import styles from "./capture-checklist.module.css";
 import { editedLocally, fieldMeta, fieldState, hasContent, needsLook, shownValue, stepProgress, type FieldValue, type StepInformation } from "./capture-state";
@@ -79,6 +79,11 @@ export type StepConfirmCardProps = {
   onEdit: (fieldIds: string[]) => void;
   /** The full review: edit everything, or defer a required item with a written reason. Locked like the confirmation. */
   onReview: () => void;
+  /**
+   * The complete card is folded to one line until the user opens it (Owner 11-27 run: the full card left the conversation a
+   * strip). Folded, it offers no confirmation: one click confirms only what the user has opened and seen. Default folded.
+   */
+  startOpen?: boolean;
 };
 
 /**
@@ -107,21 +112,34 @@ function useShownSince(content: string) {
 }
 
 /** The one confirmation card of a step, pinned above the message box until the step is confirmed. */
-export function StepConfirmCard({ stepId, title, info, edits, signal, resuming, disabled, stays, canConfirm, onConfirm, onEdit, onReview }:
-  StepConfirmCardProps) {
+export function StepConfirmCard({ stepId, title, info, edits, signal, resuming, disabled, stays, canConfirm, onConfirm, onEdit, onReview,
+  startOpen = false }: StepConfirmCardProps) {
   const model = confirmCardModel(info, edits, readStepSignal(signal));
-  // The step is part of what is shown: switching steps restarts the wait even when the rows look the same.
-  const settled = useShownSince(JSON.stringify([stepId, title, model.rows, model.updates]));
+  const [open, setOpen] = useState<{ stepId: string; open: boolean }>({ stepId, open: startOpen });
+  // Another step starts folded again.
+  const opened = open.stepId === stepId ? open.open : startOpen;
+  // The step is part of what is shown: switching steps restarts the wait even when the rows look the same. Opening the card
+  // shows the rows for the first time, so it restarts the wait too.
+  const settled = useShownSince(JSON.stringify([stepId, title, model.rows, model.updates, opened]));
   // Never confirm from a stale signal: wait for the edit to save and the read to refresh.
   const confirmNow = canConfirm && (resuming || model.current);
   // Nothing recorded yet: the conversation has just started, no card.
   if (!model.ready && !model.rows.length && !resuming) return null;
   if (!model.ready && !resuming) return (
-    <section className={styles.confirmCard} aria-label="本步确认">
+    <section className={`${styles.confirmCard} ${styles.confirmMissing}`} aria-label="本步确认">
       <p>“{title}”还差：{model.missing.map(field => field.title).join("、")}。可以继续和 AI 教练聊，或在右侧直接填写。</p>
       <div>
         <Button variant="outline" disabled={disabled} onClick={() => onEdit(model.missing.map(field => field.id))}>去右侧补充</Button>
         <button type="button" className={styles.linkButton} disabled={disabled || !canConfirm} onClick={onReview}>暂时无法确定，写原因暂缓</button>
+      </div>
+    </section>
+  );
+  if (!resuming && !opened) return (
+    <section className={`${styles.confirmCard} ${styles.confirmFolded}`} aria-label="本步确认" data-folded="">
+      <p title={`“${title}”的信息齐了，共 ${model.rows.length} 项`}>“{title}”的信息齐了，共 {model.rows.length} 项{model.look.length
+        ? `，${model.look.length} 项请看一眼` : ""}</p>
+      <div>
+        <Button disabled={disabled} aria-expanded={false} onClick={() => setOpen({ stepId, open: true })}>展开核对</Button>
       </div>
     </section>
   );
@@ -140,6 +158,8 @@ export function StepConfirmCard({ stepId, title, info, edits, signal, resuming, 
           onClick={() => onEdit(model.look.length ? model.look : model.rows.map(row => row.id))}>我要改</Button>}
         {/* Resuming runs the retained confirmation: fields stay locked and the review would resume it too. */}
         {!resuming && <button type="button" className={styles.linkButton} disabled={disabled || !canConfirm} onClick={onReview}>逐项核对或暂缓</button>}
+        {!resuming && !startOpen && <button type="button" className={styles.linkButton} aria-expanded
+          onClick={() => setOpen({ stepId, open: false })}>收起</button>}
       </div>
     </section>
   );

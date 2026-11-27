@@ -19,6 +19,15 @@ describe("MessageMarkdown: formatting", () => {
     expect(html).toMatch(/<ol>\s*<li>先做<\/li>\s*<li>再做<\/li>\s*<\/ol>/);
   });
 
+  it("closes bold right after CJK punctuation, as a Chinese reader expects (Owner 11-27 run)", () => {
+    const html = render("**关于关键词，你平时会用哪些词去搜这类内容？**比如“搬家整理”。");
+    expect(html).toContain("<strong>关于关键词，你平时会用哪些词去搜这类内容？</strong>比如");
+    expect(html).not.toContain("**");
+    expect(render("先说结论：**这个方向很难赚钱。**原因有三。")).toContain("<strong>这个方向很难赚钱。</strong>原因");
+    // Latin text keeps CommonMark's rules.
+    expect(render("a**b**c and **bold**")).toContain("<strong>bold</strong>");
+  });
+
   it("renders GFM tables inside a horizontal scroll wrapper", () => {
     const html = render("| 平台 | 频率 |\n| --- | --- |\n| 小红书 | 每周 3 篇 |");
     expect(html).toMatch(/<div class="[^"]*tableScroll[^"]*"><table>/);

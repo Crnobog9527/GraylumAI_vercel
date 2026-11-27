@@ -82,7 +82,7 @@ function clickables(node: ReactNode): Array<{ label: string; click: () => void; 
 }
 function props(extra: Partial<StepConfirmCardProps> = {}): StepConfirmCardProps {
   return { stepId: "step-1", title: "了解你", info: info(), resuming: false, disabled: false, canConfirm: true,
-    onConfirm: vi.fn(), onEdit: vi.fn(), onReview: vi.fn(), ...extra };
+    onConfirm: vi.fn(), onEdit: vi.fn(), onReview: vi.fn(), startOpen: true, ...extra };
 }
 const html = (p: StepConfirmCardProps) => renderToStaticMarkup(createElement(StepConfirmCard, p));
 /** The card's element tree, captured inside a real render so its hooks run. */
@@ -94,6 +94,18 @@ function tree(p: StepConfirmCardProps): ReactNode {
 const button = (p: StepConfirmCardProps, label: string) => clickables(tree(p)).find(item => item.label === label);
 
 describe("StepConfirmCard", () => {
+  it("is folded to one line by default and offers no confirmation until it is opened (Owner 11-27 run)", () => {
+    const p = props({ startOpen: undefined });
+    const out = html(p);
+    expect(out).toContain('data-folded=""');
+    expect(out).toContain("“了解你”的信息齐了，共 ");
+    expect(out).not.toContain("附近独自阅读的自由职业者");
+    expect(button(p, "没问题，进入下一步")).toBeUndefined();
+    expect(button(p, "展开核对")).toBeDefined();
+    // Missing items and a started confirmation are never folded.
+    expect(html(props({ startOpen: undefined, resuming: true }))).not.toContain("data-folded");
+  });
+
   it("is one card with the values, the items to look at, and one click to confirm", () => {
     const p = props();
     const out = html(p);

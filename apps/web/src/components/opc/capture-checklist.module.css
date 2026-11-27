@@ -55,3 +55,12 @@
 .linkButton{border:0;background:none;color:#666;font-size:12px;text-decoration:underline;cursor:pointer;padding:0}
 /* CHAT-UI-POLISH: long unbroken strings wrap inside the checklist column. */
 .step>summary>*,.fieldHead label,.hint,.note,.confirmCard>p,.stepFooter p,.alert{min-width:0;overflow-wrap:anywhere}
+/* Folded confirmation card: one line, the open button beside it (Owner 11-27 run). */
+.confirmFolded{display:flex;align-items:center;gap:10px;padding:6px 8px 6px 14px}
+.confirmFolded button{min-height:30px;padding:5px 12px}
+/* What is missing, and its buttons, on one row when it fits. */
+.confirmMissing{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;padding:10px 14px}
+.confirmMissing>p{flex:1 1 300px}
+.confirmMissing>div{flex:none}
+.confirmFolded>p{flex:1 1 auto;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;overflow-wrap:normal}
+.confirmFolded>div{flex:none}

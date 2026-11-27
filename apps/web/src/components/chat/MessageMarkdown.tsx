@@ -2,6 +2,7 @@
 import type { ReactNode } from "react";
 import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkCjkFriendly from "remark-cjk-friendly";
 import { DisplayHeading, type HeadingLevel } from "@/components/chat-display/display-heading";
 import { cn } from "@/lib/utils";
 import { closePartialMarkdown, isAppMessageHref, remarkSoftBreaks, safeMessageHref } from "./message-markdown-source";
@@ -33,7 +34,9 @@ const components: Components = {
   ])),
 };
 
-const plugins = [remarkGfm, remarkSoftBreaks];
+// CJK punctuation next to Chinese text: `**问题？**比如` is bold. Plain CommonMark does not close the emphasis there (a
+// closing ** after punctuation must be followed by a space or punctuation), so the stars showed (Owner 11-27 run).
+const plugins = [remarkGfm, remarkCjkFriendly, remarkSoftBreaks];
 
 /** Formatted body for an assistant/model message. User messages stay plain text. */
 export function MessageMarkdown({
