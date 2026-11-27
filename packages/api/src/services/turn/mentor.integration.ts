@@ -320,6 +320,37 @@ it('RUNTIME: Owner 2026-11-27: only a later opening shows a neutral card; an ope
     .toEqual(['completed', 'completed', 'completed']);
 });
 
+// Owner 2026-11-27 pay2 (second run, seq 18-22) and review of #2059: once a reply of the step asked for the confirmation card, a
+// sentence asking again is dropped from what is shown, what is saved, what a reload reads and what the organizer reads.
+it('RUNTIME: Owner 2026-11-27: a repeated request for the confirmation card is not saved, reloaded or organized', async () => {
+  const f = await setup();
+  const asks = '请看一下左侧内容。没问题的话，点一下聊天里的确认卡片。';
+  const first = transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, patch('Leather craft classes'))
+    : prose('gen-reply-' + n, '记下了。' + asks));
+  await turn(f, { text: 'I teach leather craft on weekends', transport: first.fn });
+  const again = '场地先看按次预约的共享空间。\n\n第一步的确认卡片还在聊天里。你核对完左侧内容，没问题的话点一下卡片就行。';
+  const second = transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, JSON.stringify({ inputKind: 'answer', patches: [], notes: [] }))
+    : prose('gen-reply-' + n, '这条补充我记下了。' + again));
+  const out = await turn(f, { text: '再补一条：场地我会先看按次预约的共享空间。', transport: second.fn });
+  const result = out.events.at(-1) as Extract<TurnEvent, { type: 'result' }>;
+  expect(result.type, JSON.stringify(out.events)).toBe('result');
+  const shown = out.events.filter(e => e.type === 'text').map(e => (e as { delta: string }).delta).join('');
+  for (const text of [shown, JSON.parse(result.body).message]) {
+    expect(text).toContain('场地先看按次预约的共享空间。');
+    expect(text).not.toContain('确认卡片');
+    expect(text).not.toContain('点一下卡片');
+  }
+  // Saved, then read back as a reload does.
+  const saved = (await db.query("select content from session_messages where session_id=$1 and role='assistant' order by seq", [f.session])).rows;
+  expect(saved[0].content).toContain('确认卡片');
+  expect(saved[1].content).not.toContain('确认卡片');
+  const reloaded = (await db.query('select turn_session_view($1,$2,0) v', [f.actor, f.session])).rows[0].v;
+  const last = reloaded.messages.filter((m: { role: string }) => m.role === 'assistant').at(-1);
+  expect(JSON.stringify(last)).toContain('场地先看按次预约的共享空间');
+  expect(JSON.stringify(last)).not.toContain('确认卡片');
+  expect(JSON.stringify(second.bodies.find(b => b.model === ORGANIZER)!.messages)).not.toContain('确认卡片');
+});
+
 it('RUNTIME: CORE-PATH-V2 V2-5: a module the draft is not bound to is refused before anything is frozen or sent', async () => {
   const f = await setup();
   const other = randomUUID();

@@ -278,7 +278,7 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
     let text = '', toolCalled = false, cardMessage: string | null | undefined;
     // Asked once already, a sentence asking again for the confirmation card is dropped before it is shown (confirmationReminder.ts):
     // `shownText` is what the user saw, and what is saved.
-    const reminder = confirmationReminderFilter(dropsConfirmationReminder(asked, words));
+    const dropping = dropsConfirmationReminder(asked, words), reminder = confirmationReminderFilter(dropping);
     let shownText = '';
     saveShown = async () => {
       // The prose of the call that was cut, in the reply's own envelope; no card (the user never saw one) and no checklist write
@@ -314,10 +314,13 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
     const tail = reminder.flush();
     shownText += tail;
     if (tail) emit({ type: 'text', delta: tail });
-    // A reply that was nothing but the request again keeps it (no empty reply); otherwise what was shown is the reply.
-    if (shownText.trim()) text = shownText;
+    // A reply that was nothing but the request again keeps it (no empty reply); otherwise what was shown is the reply. Without a
+    // tool call the saved body is read from `output` (agentTurnResult), so it is the shown text too (review of #2059: a reload and
+    // the organizer saw the dropped request again); a tool call's output is the tool's result and stays as it is.
+    const filtered = dropping && shownText.trim() ? shownText : null;
+    if (filtered) text = filtered;
     // A neutral card keeps the coach's short prose before it; a comparison card with separate prose is refused (groundedCard.ts).
-    const turn = groundedTurn(text, output, toolCalled, cardMessage);
+    const turn = groundedTurn(text, filtered && !toolCalled ? filtered : output, toolCalled, cardMessage);
     // Nothing to show (no prose, no card): nothing was delivered, the user pays nothing.
     if (!turn.card && turn.message === INVALID_REPLY_NOTICE) throw new TurnStop('TURN_CALL_DENIED');
 
