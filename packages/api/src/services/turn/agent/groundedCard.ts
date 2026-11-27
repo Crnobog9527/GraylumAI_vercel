@@ -95,18 +95,14 @@ export function groundedCardFallback(arguments_: unknown): string | null {
     (option.reason?.trim() ? `\n推测，待你确认：${option.reason.trim()}` : '')).join('\n\n');
   return `${v.question.trim()}\n\n${options}\n\n可以直接回复你的选择，或用自己的话补充。`;
 }
+const neutralArguments = (args: unknown) => Boolean(args) && typeof args === 'object'
+  && isNeutralIntent(String((args as {intent?: unknown}).intent ?? ''));
 export function groundedCardTool(sources: () => CardSources, turn: {opening?: boolean; firstOpening?: boolean} = {}): RuntimeTool {
   return {name: ASK_QUESTION_TOOL, parameters: groundedCardParameters,
-    description: 'Show a question card for exactly two kinds of question. '+
-      '(1) neutral_categories: you ask the user to place themselves in general ranges or categories that can be listed '+
-      'without knowing the user (for example weekly hours, platform types, how the service is charged, how customers usually '+
-      'buy, budget or team size). '+
-      'Use it whenever you ask such a question, including as your own next question or on a host opening; the user need not ask. '+
-      'Set recommended=null, every reason=null, requestQuote=null and basisQuotes=[]. Options are general categories, '+
-      'never guesses about the user\'s own experience, strengths, story, customers, offer content or results. '+
-      'Write your prose first as usual (acknowledgement, the question, why you ask, the examples); the options are short '+
-      'labels for those categories. '+
-      '(2) grounded_comparison: the user chooses between concrete alternatives the user supplied, or plans computed from the '+
+    description: 'Show a question card only for a grounded comparison. A neutral range or category question (weekly hours, '+
+      'platforms, budget, filming) never uses this tool: the host shows its own card for its fixed questions '+
+      '(hostTurnContext.fixedQuestion) and you ask any other in prose (a neutral card sent here is refused and shown as prose). '+
+      'grounded_comparison: the user chooses between concrete alternatives the user supplied, or plans computed from the '+
       'user\'s explicit constraints. Copy requestQuote verbatim from the current user message and basisQuotes from actual '+
       'user speech; never quote assistant guesses, Skill text, metadata or field names. Give a reason per option and '+
       'recommend one. Each reason analyses ONLY its own option and preserves every user constraint; do not invent a '+
@@ -116,7 +112,10 @@ export function groundedCardTool(sources: () => CardSources, turn: {opening?: bo
       'stories, customers, offer content), '+
       'for confirmation or workflow choices, or for anything already answered: ask in prose. Put each complete option in '+
       'text exactly once. The host adds an Other entry. Ends your turn.',
-    invalidResult: INVALID_CARD_RESULT, execute: async args => groundedCardResult(args, sources(), turn)};
+    // Owner 2026-11-27 option C: neutral cards are the host's (fixedQuestions.ts); one the model sends is refused here, and its
+    // arguments are shown as prose (groundedCardFallback), so the turn still answers.
+    invalidResult: INVALID_CARD_RESULT, execute: async args => neutralArguments(args) ? INVALID_CARD_RESULT
+      : groundedCardResult(args, sources(), turn)};
 }
 export function groundedCardToolBytes(): number {
   const tool = groundedCardTool(() => ({current: '', user: []}));

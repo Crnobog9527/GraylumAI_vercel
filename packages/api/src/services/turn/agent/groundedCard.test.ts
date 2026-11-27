@@ -59,19 +59,20 @@ const PAY2_SEQ20='下面先从关键词开始。你想让我在小红书上找�
 const seq20={intent:'neutral_categories',requestQuote:null,basisQuotes:[],question:'你想让我在小红书上找哪一类账号？',
  options:[{text:'杭州本地皮具工作室',reason:null},{text:'外地零基础皮具博主',reason:null},{text:'其他手作体验品类',reason:null}],
  recommended:null};
-it('a host opening shows a neutral card under the coach\'s prose (pay2 seq 20); a comparison card is still refused there',async()=>{
+// Owner 2026-11-27 option C: neutral cards are the host's (fixedQuestions.ts). A neutral card the model sends anyway is refused
+// on every turn, and its arguments come back as prose, so the coach's words still reach the user.
+it('the tool refuses a neutral card the model sends (pay2 seq 20 style), on an opening or not; the prose stays',async()=>{
  const opening={current:'',user:[]};
- const result=await groundedCardTool(()=>opening,{opening:true}).execute(seq20,'x');
- const turn=groundedTurn(PAY2_SEQ20,result,true,null);
- expect(turn.card).toMatchObject({question:seq20.question,options:seq20.options.map(o=>o.text),recommended:null});
- expect(turn.message).toBe(PAY2_SEQ20);
- expect(groundedCardResult(neutral,sources,{opening:true})).not.toBe(INVALID_CARD_RESULT);
- expect(groundedCardResult(choice,sources,{opening:true})).toBe(INVALID_CARD_RESULT);
- // The conversation's first opening (no user message yet) shows none, even a neutral one the model sends (MASTER_PLAN §3 item 1).
- expect(await groundedCardTool(()=>opening,{opening:true,firstOpening:true}).execute(seq20,'x')).toBe(INVALID_CARD_RESULT);
- expect(groundedTurn(PAY2_SEQ20,INVALID_CARD_RESULT,true,null).card).toBeNull();
- expect(questionCardFromResult(await groundedCardTool(()=>sources).execute(neutral,'x'))).not.toBeNull();
+ for(const turn of [{},{opening:true},{opening:true,firstOpening:true}])
+  expect(await groundedCardTool(()=>opening,turn).execute(seq20,'x')).toBe(INVALID_CARD_RESULT);
+ expect(await groundedCardTool(()=>sources).execute(neutral,'x')).toBe(INVALID_CARD_RESULT);
+ const kept=groundedTurn(PAY2_SEQ20,INVALID_CARD_RESULT,true,groundedCardFallback(JSON.stringify(seq20)));
+ expect(kept.card).toBeNull();
+ expect(kept.message).toBe(PAY2_SEQ20);
  expect(groundedCardFallback(JSON.stringify(neutral))).toContain('1. 3 小时以内');
+ // A comparison card is unaffected, and still refused on an opening.
+ expect(questionCardFromResult(await groundedCardTool(()=>sources).execute(choice,'x'))).not.toBeNull();
+ expect(groundedCardResult(choice,sources,{opening:true})).toBe(INVALID_CARD_RESULT);
 });
 it('a neutral card keeps the coach\'s acknowledgement before it; a comparison card with separate prose is still refused',()=>{
  const neutralTurn=groundedTurn('明白了，你想通过账号获客。',groundedCardResult(neutral,sources),true,null);
@@ -88,9 +89,9 @@ it('a neutral card keeps the coach\'s acknowledgement before it; a comparison ca
  expect(comparison.card).toBeNull();expect(comparison.message).toBe('另一套安排。');
  expect(groundedTurn('',groundedCardResult(choice,sources),true,null).card?.recommended).toBe(0);
 });
-it('the tool tells the model a neutral card needs no user request, and its schema allows the empty quotations',()=>{
+it('the tool tells the model neutral cards are the host\'s; its schema still reads a neutral call (refused, shown as prose)',()=>{
  const description=groundedCardTool(()=>sources).description!;
- expect(description).toContain('or on a host opening; the user need not ask');
+ expect(description).toContain('never uses this tool: the host shows its own card for its fixed questions');
  expect(description).not.toContain('explicitly requested in the current user message');
  expect(groundedCardParameters.safeParse(neutral).success).toBe(true);
 });
