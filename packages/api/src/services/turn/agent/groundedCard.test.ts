@@ -51,9 +51,22 @@ it('a comparison (with a recommendation) still needs the current request and the
  expect(groundedCardResult({...choice,basisQuotes:[]},sources)).toBe(INVALID_CARD_RESULT);
  expect(groundedCardResult({...choice,intent:'neutral_categories'},sources)).toBe(INVALID_CARD_RESULT);
 });
-it('no card on a host opening: the user has not spoken (the tool refuses it, the fallback keeps it as prose)',async()=>{
- expect(groundedCardResult(neutral,sources,{opening:true})).toBe(INVALID_CARD_RESULT);
- expect(await groundedCardTool(()=>sources,{opening:true}).execute(neutral,'x')).toBe(INVALID_CARD_RESULT);
+// Owner 2026-11-27 pay2 seq 20: the step-2 opening asked which kind of account to look for and listed four general kinds in
+// prose; the host refused every card on an opening, so the question stayed prose. The coach's own words of that reply.
+const PAY2_SEQ20='下面先从关键词开始。你想让我在小红书上找哪一类账号？可以直接说你的想法。比如：\n'+
+ '- 杭州本地的皮具工作室，开体验课的那种；\n- 外地做皮具手作、教零基础的个人博主；\n'+
+ '- 做手作体验的其他品类，比如陶艺、香薰、银饰，做法可以借鉴；\n- 都可以，由我按"皮具体验课加杭州"先找，再把相邻方向补进来。';
+const seq20={intent:'neutral_categories',requestQuote:null,basisQuotes:[],question:'你想让我在小红书上找哪一类账号？',
+ options:[{text:'杭州本地皮具工作室',reason:null},{text:'外地零基础皮具博主',reason:null},{text:'其他手作体验品类',reason:null}],
+ recommended:null};
+it('a host opening shows a neutral card under the coach\'s prose (pay2 seq 20); a comparison card is still refused there',async()=>{
+ const opening={current:'',user:[]};
+ const result=await groundedCardTool(()=>opening,{opening:true}).execute(seq20,'x');
+ const turn=groundedTurn(PAY2_SEQ20,result,true,null);
+ expect(turn.card).toMatchObject({question:seq20.question,options:seq20.options.map(o=>o.text),recommended:null});
+ expect(turn.message).toBe(PAY2_SEQ20);
+ expect(groundedCardResult(neutral,sources,{opening:true})).not.toBe(INVALID_CARD_RESULT);
+ expect(groundedCardResult(choice,sources,{opening:true})).toBe(INVALID_CARD_RESULT);
  expect(questionCardFromResult(await groundedCardTool(()=>sources).execute(neutral,'x'))).not.toBeNull();
  expect(groundedCardFallback(JSON.stringify(neutral))).toContain('1. 3 小时以内');
 });
@@ -74,7 +87,7 @@ it('a neutral card keeps the coach\'s acknowledgement before it; a comparison ca
 });
 it('the tool tells the model a neutral card needs no user request, and its schema allows the empty quotations',()=>{
  const description=groundedCardTool(()=>sources).description!;
- expect(description).toContain('the user need not ask for options');
+ expect(description).toContain('or on a host opening; the user need not ask');
  expect(description).not.toContain('explicitly requested in the current user message');
  expect(groundedCardParameters.safeParse(neutral).success).toBe(true);
 });

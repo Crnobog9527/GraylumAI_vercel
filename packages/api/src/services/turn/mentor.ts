@@ -27,8 +27,8 @@ import { projectHistory, trimKeepingUserWords, turnSession } from './history';
 import type { CounterStore } from './limiter';
 import { mentorCatalog, MentorCatalogError, mentorPolicy } from './mentorCatalog';
 import { TurnReplay, type ResumeRead } from './resume';
-import { mentorHost, mentorOrganizerInput, mentorState, resourcesOf } from './mentorContext';
-import { answeredText, mentorAnsweredCard, mentorReplyBody, mentorTurnInput, type MentorAnswer } from './mentorInput';
+import { mentorHost, mentorOrganizerInput, mentorState, openingOrganizerOutput, resourcesOf } from './mentorContext';
+import { answeredText, confirmationAsked, mentorAnsweredCard, mentorReplyBody, mentorTurnInput, type MentorAnswer } from './mentorInput';
 import { mentorSystem, mentorUserMessage, organizerInput, organizerInstructions, projectMentorHistory } from './mentorPrompt';
 import { loadMentorSkill, mentorSkillAvailable, mentorSkillFileTool, mentorSkillSource, prepareMentorFiles, skillFileReserveBytes } from './mentorSkill';
 import type { ChatQuote } from './quote';
@@ -229,14 +229,16 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
         shortfall: flowRaw.shortfall ?? null, discoveryOf: async card => known[card] ?? null }));
     }
     const system = mentorSystem({ skillText: skill.text, skillEntryChars: skill.entryChars, brandIdentity: catalog.brandIdentity,
-      mode: ctx.mode, host, skillFile: !opening, summary,
+      mode: ctx.mode, host, skillFile: true, summary,
       replyRule: replySettingInstructions(effectiveReplyLocale(opened.replyLanguage)) });
-    const userMessage = mentorUserMessage(words, state.scopeMaterial, host);
+    // The coach alone learns that this step's confirmation card was already asked for (the organizer reads the plain host).
+    const asked = !summary && host.confirmation?.stepReady === true && confirmationAsked(opened.history, input.stepId, ctx.roundId);
+    const userMessage = mentorUserMessage(words, state.scopeMaterial, asked ? { ...host, confirmationAsked: true } : host);
 
     // 4. History: newest that fits what the budget leaves after the system message, the tools, the current message and the
     // continuation reserve. The three cache breakpoints (mentorPrompt.ts): SKILL.md end, system end, last plain history.
     // The continuation reserve: the largest prepared file as the tool result is embedded in the request (twice JSON-escaped).
-    const toolBytes = (summary ? 0 : groundedCardToolBytes()) + skillFileToolBytes() + (opening ? 0 : skillFileReserveBytes(prepared, binding));
+    const toolBytes = (summary ? 0 : groundedCardToolBytes()) + skillFileToolBytes() + skillFileReserveBytes(prepared, binding);
     const required = Buffer.byteLength(system.instructions) + Buffer.byteLength(userMessage) + toolBytes + MARKER_RESERVE_BYTES + 8192;
     // The tools come with room for one result; without it a benchmark or link turn is refused, any other goes on without them.
     const researchBytes = research ? benchmarkToolBytes(research) : 0;
@@ -279,7 +281,7 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
     };
     const output = await runRuntime({
       model: mentor.model, instructions: system.instructions, input: userMessage, session: turnSession(history),
-      maxOutputTokens: mentor.outputLimit, maxTurns: opening ? 1 : benchmark ? 3 : 2, reasoning: mentor.reasoning, tools, stream: true,
+      maxOutputTokens: mentor.outputLimit, maxTurns: benchmark ? 3 : 2, reasoning: mentor.reasoning, tools, stream: true,
       allowEmptyResult: true, firstToolCallOnly: true, stopAtToolNames: [ASK_QUESTION_TOOL],
       selectHistory: async (items, incoming) => { sources = cardSources(words, items); return [...items, ...incoming]; },
       onText: delta => { text += delta; if (delta) emit({ type: 'text', delta }); },
@@ -310,7 +312,8 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
       const capture = mentorOrganizerInput(state, host, words, answered);
       captureInput = capture.value;
       try { organized = await runOrganizer({ catalog: organizer, context, deps: callDeps(organizer), gate: callGate,
-        template: prepared.organizerTemplate, opening, input: organizerInput(capture.text, turn.body) }); }
+        template: prepared.organizerTemplate, opening, input: organizerInput(capture.text, turn.body) });
+        if (opening) organized = openingOrganizerOutput(organized); }
       catch (error) {
         // A deletion ends the turn; a credit pause keeps it waiting (not closed, so a resume can still organize this reply); the
         // stop-loss closes it failed with everything refunded (ENGINEERING 5).

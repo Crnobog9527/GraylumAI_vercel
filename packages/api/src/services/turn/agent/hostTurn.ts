@@ -52,6 +52,8 @@ export const hostTurnContextSchema = z.object({
   stepId: z.string().min(1).max(128),
   opening: z.boolean(),
   confirmation: stepConfirmationSchema.optional(),
+  /** Set by the host (mentor turns only) when an earlier reply of this step already asked for the confirmation card. */
+  confirmationAsked: z.literal(true).optional(),
   stepSummary: stepSummaryNoticeSchema.optional(),
   updatedFieldIds: z.array(z.string().min(1).max(64)).max(100).optional(),
   researchRefresh: z.object({refreshId: z.string().uuid(), platform: z.enum(SOCIAL_PLATFORMS),

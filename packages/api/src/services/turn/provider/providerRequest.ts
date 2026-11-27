@@ -104,9 +104,8 @@ export function openRouterRequestBody(request:string,options:{context:RequestCon
  // keep their original bytes for replay; the runner enforces one tool/turn.
  if(format)delete original.parallel_tool_calls;
  // PROMPT-CACHE-ALL (opening alignment, 总控 2026-10-27 决定 A): a host-opened mentor turn offers the same tool list as
- // the turns after it, so its cached tools+system prefix is theirs, but may not call any (tool_choice only invalidates
- // the messages part of Anthropic's cache). An opening frozen without tools (every earlier execution) keeps its bytes.
- if(format===AGENT_TURN_REQUEST_FORMAT&&context.hostTurnContext?.opening&&requested.length)original.tool_choice='none';
+ // the turns after it, so its cached tools+system prefix is theirs. Until Owner 2026-11-27 (pay2 seq 20) it sent
+ // tool_choice none and could call none; a neutral question card is now its to show, so it calls tools as any turn does.
  if(format==='serial-tools-v2'||format==='serial-tools-v6-reasoning'||streaming)normalizeOpenRouterHistory(original,historyToolNames(format));
  if(context.promptCache&&options.primaryDialogue&&phase!=='attached_organizer')
   applyPromptCache(original,context.promptCache,policy.model,policy.providerLimits.cacheWriteUsdPerMillion);

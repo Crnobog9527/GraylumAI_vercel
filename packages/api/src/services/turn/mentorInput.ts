@@ -60,3 +60,18 @@ export function answeredText(text: string, answered: AnsweredCard | undefined): 
 export function mentorReplyBody(body: string, stepId: string, roundId: string): string {
   return JSON.stringify({ ...(JSON.parse(body) as Record<string, unknown>), stepId, roundId });
 }
+
+const CONFIRMATION_REQUEST = /确认卡|確認卡|confirmation card/i;
+/**
+ * Owner 2026-11-27 (pay2): with the step ready, four replies running asked the user again to click the confirmation card. The
+ * card stays on screen, so the host marks the turn once a saved reply of this step and round has asked for it, and the coach
+ * then records what the user adds without asking again (agentTurnPrompt.ts). Only replies of the same step and round count.
+ */
+export function confirmationAsked(history: readonly HistoryItem[], stepId: string, roundId: string): boolean {
+  return history.some(item => {
+    if (item.role !== 'assistant') return false;
+    let saved: { stepId?: unknown; roundId?: unknown };
+    try { saved = JSON.parse(item.content) as typeof saved; } catch { return false; }
+    return saved?.stepId === stepId && saved.roundId === roundId && CONFIRMATION_REQUEST.test(readAgentTurnBody(item.content).message);
+  });
+}
