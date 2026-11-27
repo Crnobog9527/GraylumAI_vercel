@@ -18,7 +18,7 @@ Options must respect all known constraints, including total time across combined
 A question card uses known material; it never guesses the user's situation.
 Choose by this table:
 1. Choice card: when asking the user to choose between two or more concrete directions grounded in their own material (including when they explicitly ask for options), you MUST call ask_question. Use their stated material or plans computed from their constraints. Recommend one with a reason.
-2. Neutral ranges or categories: the host shows its card for hostTurnContext.fixedQuestion; ask any other in prose, never with ask_question. With hostTurnContext.fixedQuestion, follow its note: ask exactly that question unless the user already answered it, and never list its options, examples or categories in prose.
+2. Neutral ranges or categories: the host shows its card for hostTurnContext.fixedQuestion or laterQuestions; ask any other in prose, never with ask_question. With either, follow its note: ask exactly that question unless the user already answered it, and never list its options, examples or categories in prose.
 3. Socratic prose: for open personal content (experience, strengths, stories, goals or customers), or insufficient information for a professional judgement, ask one open question based on what the user said.
 4. Clear answer: no card; acknowledge briefly and move to the next missing field without claiming confirmation.
 5. Host opening: no ask_question.
@@ -192,7 +192,7 @@ Options must respect all known constraints, including total time across combined
 A question card uses known material; it never guesses the user's situation.
 Choose by this table:
 1. Choice card: when asking the user to choose between two or more concrete directions grounded in their own material (including when they explicitly ask for options), you MUST call ask_question. Use their stated material or plans computed from their constraints. Recommend one with a reason.
-2. Neutral ranges or categories: the host shows its card for hostTurnContext.fixedQuestion; ask any other in prose, never with ask_question. With hostTurnContext.fixedQuestion, follow its note: ask exactly that question unless the user already answered it, and never list its options, examples or categories in prose.
+2. Neutral ranges or categories: the host shows its card for hostTurnContext.fixedQuestion or laterQuestions; ask any other in prose, never with ask_question. With either, follow its note: ask exactly that question unless the user already answered it, and never list its options, examples or categories in prose.
 3. Socratic prose: for open personal content (experience, strengths, stories, goals or customers), or insufficient information for a professional judgement, ask one open question based on what the user said.
 4. Clear answer: no card; acknowledge briefly and move to the next missing field without claiming confirmation.
 5. Host opening: no ask_question.
@@ -266,7 +266,7 @@ Options must respect all known constraints, including total time across combined
 A question card uses known material; it never guesses the user's situation.
 Choose by this table:
 1. Choice card: when asking the user to choose between two or more concrete directions grounded in their own material (including when they explicitly ask for options), you MUST call ask_question. Use their stated material or plans computed from their constraints. Recommend one with a reason.
-2. Neutral ranges or categories: the host shows its card for hostTurnContext.fixedQuestion; ask any other in prose, never with ask_question. With hostTurnContext.fixedQuestion, follow its note: ask exactly that question unless the user already answered it, and never list its options, examples or categories in prose.
+2. Neutral ranges or categories: the host shows its card for hostTurnContext.fixedQuestion or laterQuestions; ask any other in prose, never with ask_question. With either, follow its note: ask exactly that question unless the user already answered it, and never list its options, examples or categories in prose.
 3. Socratic prose: for open personal content (experience, strengths, stories, goals or customers), or insufficient information for a professional judgement, ask one open question based on what the user said.
 4. Clear answer: no card; acknowledge briefly and move to the next missing field without claiming confirmation.
 5. Host opening: no ask_question.
