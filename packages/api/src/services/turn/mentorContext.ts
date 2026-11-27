@@ -73,3 +73,14 @@ export function resourcesOf(state: MentorState, stepId: string): readonly string
   if (!s) throw new Error('TURN_MENTOR_STEP_DENIED');
   return s.resources;
 }
+
+/**
+ * inputKind classifies the user's words, and an opening has none. On openings the organizer (whose frozen prompt cannot change,
+ * CDC-WRITEBACK-V3) sometimes leaves it out, and turn_close then refused the whole reply as invalid_output: the 11-22 and
+ * 11-27 step-2 openings lost their feasibility and platform drafts that way. An opening's output with no inputKind is
+ * classified acknowledgement; every patch is still checked by turn_close as before.
+ */
+export function openingOrganizerOutput(output: unknown): unknown {
+  if (!output || typeof output !== 'object' || Array.isArray(output) || 'inputKind' in output) return output;
+  return { ...output, inputKind: 'acknowledgement' };
+}

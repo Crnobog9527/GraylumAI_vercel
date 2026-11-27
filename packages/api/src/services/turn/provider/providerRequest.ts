@@ -106,6 +106,8 @@ export function openRouterRequestBody(request:string,options:{context:RequestCon
  // PROMPT-CACHE-ALL (opening alignment, 总控 2026-10-27 决定 A): a host-opened mentor turn offers the same tool list as
  // the turns after it, so its cached tools+system prefix is theirs, but may not call any (tool_choice only invalidates
  // the messages part of Anthropic's cache). An opening frozen without tools (every earlier execution) keeps its bytes.
+ // Since Owner 2026-11-27 (pay2 seq 20) the mentor marks only the conversation's first opening (MASTER_PLAN §3 item 1: no
+ // card before the user's first message); a later step's opening calls tools as any turn, for its neutral card.
  if(format===AGENT_TURN_REQUEST_FORMAT&&context.hostTurnContext?.opening&&requested.length)original.tool_choice='none';
  if(format==='serial-tools-v2'||format==='serial-tools-v6-reasoning'||streaming)normalizeOpenRouterHistory(original,historyToolNames(format));
  if(context.promptCache&&options.primaryDialogue&&phase!=='attached_organizer')

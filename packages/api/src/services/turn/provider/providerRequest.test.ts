@@ -78,6 +78,7 @@ describe('Agent turn format',()=>{
  it('carries reasoning only on the primary dialogue call',()=>{
   expect(()=>body(request,agent(),'attached_organizer',false)).toThrow('RUNTIME_PROVIDER_BINDING_DENIED');
  });
+ // The mentor marks only the conversation's first opening (Owner 2026-11-27: a later step's opening may show its neutral card).
  it('PROMPT-CACHE-ALL: a host-opened turn that offers tools sends tool_choice none; the same bytes otherwise',()=>{
   const opening=JSON.parse(body(request,agent({hostTurnContext:{opening:true}})));
   expect(opening.tool_choice).toBe('none');

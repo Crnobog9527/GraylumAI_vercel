@@ -52,12 +52,16 @@ export const isNeutralIntent = (intent: string) => intent === 'neutral_categorie
  * exact user-source evidence. This is not a general natural-language entailment checker.
  * Owner 2026-11-26 (option A, restoring 2026-09-29 item 20): a neutral range or category card needs no request from the
  * user and no quotation, carries no recommendation and no reasons; a comparison (with a recommendation) still needs the
- * current request and the user's own alternatives, quoted verbatim. No card on a host opening (the user has not spoken). */
-export function groundedCardResult(value: unknown, sources: CardSources, turn: {opening?: boolean} = {}): string {
+ * current request and the user's own alternatives, quoted verbatim. A host opening (the user has not spoken) can carry only a
+ * neutral card: the 11-27 pay2 run opened step 2 with a neutral category question in prose, refused here as any card was.
+ * The conversation's first opening (no user message yet) still carries none (MASTER_PLAN §2.1 2026-11-26, §3 item 1). */
+export function groundedCardResult(value: unknown, sources: CardSources,
+  turn: {opening?: boolean; firstOpening?: boolean} = {}): string {
   const parsed = groundedCardParameters.safeParse(value);
-  if (!parsed.success || turn.opening) return INVALID_CARD_RESULT;
+  if (!parsed.success || turn.firstOpening) return INVALID_CARD_RESULT;
   const v = parsed.data;
   const neutral = isNeutralIntent(v.intent);
+  if (turn.opening && !neutral) return INVALID_CARD_RESULT;
   if (neutral ? v.recommended !== null || v.options.some(option => option.reason !== null)
     : v.intent !== 'grounded_comparison' || v.requestQuote === null || !contains([sources.current], v.requestQuote) ||
       !v.basisQuotes.length || !v.basisQuotes.every(quote => contains([sources.current, ...sources.user], quote)) ||
@@ -91,13 +95,13 @@ export function groundedCardFallback(arguments_: unknown): string | null {
     (option.reason?.trim() ? `\n推测，待你确认：${option.reason.trim()}` : '')).join('\n\n');
   return `${v.question.trim()}\n\n${options}\n\n可以直接回复你的选择，或用自己的话补充。`;
 }
-export function groundedCardTool(sources: () => CardSources, turn: {opening?: boolean} = {}): RuntimeTool {
+export function groundedCardTool(sources: () => CardSources, turn: {opening?: boolean; firstOpening?: boolean} = {}): RuntimeTool {
   return {name: ASK_QUESTION_TOOL, parameters: groundedCardParameters,
     description: 'Show a question card for exactly two kinds of question. '+
       '(1) neutral_categories: you ask the user to place themselves in general ranges or categories that can be listed '+
       'without knowing the user (for example weekly hours, platform types, how the service is charged, how customers usually '+
       'buy, budget or team size). '+
-      'Use it whenever you ask such a question, including as your own next question; the user need not ask for options. '+
+      'Use it whenever you ask such a question, including as your own next question or on a host opening; the user need not ask. '+
       'Set recommended=null, every reason=null, requestQuote=null and basisQuotes=[]. Options are general categories, '+
       'never guesses about the user\'s own experience, strengths, story, customers, offer content or results. '+
       'Write your prose first as usual (acknowledgement, the question, why you ask, the examples); the options are short '+
@@ -108,7 +112,8 @@ export function groundedCardTool(sources: () => CardSources, turn: {opening?: bo
       'recommend one. Each reason analyses ONLY its own option and preserves every user constraint; do not invent a '+
       'different schedule or broaden a user fact. The host labels reasons as hypotheses and renders the explanation and '+
       'recommendation from these options; send no separate prose with a comparison card (it would be refused). '+
-      'Never use a card on a host opening, for open personal questions (experience, strengths, stories, customers, offer content), '+
+      'Never use a comparison card on a host opening; never use a card for open personal questions (experience, strengths, '+
+      'stories, customers, offer content), '+
       'for confirmation or workflow choices, or for anything already answered: ask in prose. Put each complete option in '+
       'text exactly once. The host adds an Other entry. Ends your turn.',
     invalidResult: INVALID_CARD_RESULT, execute: async args => groundedCardResult(args, sources(), turn)};

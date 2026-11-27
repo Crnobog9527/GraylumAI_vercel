@@ -21,8 +21,8 @@ import { RESEARCH_INPUT_BYTES } from './tools/plan';
  * model is the draft's module model (the client names the module; turn_open refuses any other), quoted for the agent-turn
  * request format; the organizer is the summary model (v3_summary_model_id, never the dialogue model), quoted for the attached
  * organizer use with its summary output limit. Model calls (plan 2.5.3, 3.1 budget <= 11 round trips): the mentor's reply, one
- * continuation after a read_skill_file (a free tool answered from the process cache, no row), and the organizer; an opening
- * cannot call tools, so it has no continuation.
+ * continuation after a read_skill_file (a free tool answered from the process cache, no row), and the organizer. An opening
+ * calls tools as any turn since Owner 2026-11-27 (pay2 seq 20: its neutral card), so it has the continuation too.
  */
 export const MENTOR_INPUT_BYTES = 90000, ORGANIZER_INPUT_BYTES = 112000;
 export type MentorCatalog = {
@@ -92,7 +92,7 @@ export function mentorPolicy(catalog: MentorCatalog,
     left?: ResumeRead['limits']; replayedModels?: number }) {
   const { organizer, research } = catalog;
   const mentor = catalog.mentor;
-  const freeTools = input.opening ? 0 : 1, paid = research ? mentorResearchBounds(research, mentor.multiplier) : [];
+  const freeTools = 1, paid = research ? mentorResearchBounds(research, mentor.multiplier) : [];
   const full = { model: 1 + (research ? 1 : 0) + freeTools + (organizer ? 1 : 0), paidTools: research ? 1 : 0, freeTools, decisions: 0,
     ...(research ? { toolRows: BENCHMARK_ROWS } : {}) };
   // Paused at the organizer, the reply's calls are used up: the organizer is the turn's one model call left.

@@ -27,7 +27,8 @@ export const SKILL_FILE_INSTRUCTIONS = '\nYou may read at most one declared Skil
  * Owner 2026-11-26 (option A) and the 11-27 real-model run: the Skill gives every question its examples in prose, and in that
  * run (and every mentor turn of the 30 days before) the model kept the whole question in prose and never called ask_question.
  * The last word before the reply: a neutral range/category question ends with the card, the prose stays as the Skill writes it.
- * Not on an opening or a step summary (neither is offered the card).
+ * Not on a step summary (it has no card). On an opening too since the 11-27 pay2 run, whose step-2 opening asked a neutral
+ * category question in prose: an opening may carry a neutral card (groundedCard.ts).
  */
 export const NEUTRAL_CARD_CHECK = '\nBefore you finish: if your main question asks the user to place themselves in general ranges ' +
   'or categories (weekly hours, platform, how the service is charged, budget, team size, filming setup, posting frequency), ' +
@@ -46,7 +47,7 @@ export function mentorSystem(input: { skillText: string; skillEntryChars: number
   const skill = withBrandIdentity(input.skillText, input.brandIdentity);
   const instructions = skill + '\n' + positioningMentorInstructions(input.mode, input.host)
     + (input.summary ? '\n' + STEP_SUMMARY_INSTRUCTIONS : '')
-    + (input.skillFile ? SKILL_FILE_INSTRUCTIONS : '') + (input.summary || input.host.opening ? '' : NEUTRAL_CARD_CHECK)
+    + (input.skillFile ? SKILL_FILE_INSTRUCTIONS : '') + (input.summary ? '' : NEUTRAL_CARD_CHECK)
     + '\n' + input.replyRule;
   const brand = input.brandIdentity ? BRAND_IDENTITY_INSTRUCTIONS.length + 1 : 0;
   return { instructions, prefixChars: input.skillEntryChars > 0 ? brand + input.skillEntryChars : 0 };

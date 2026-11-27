@@ -44,7 +44,7 @@ async function request(input: { stepId: string; locale?: 'zh-Hans' | 'en'; openi
   const loaded = await loadMentorSkill(source, binding, [input.stepId + '.md'], 90000);
   const h = host(input.stepId, input.opening ?? false, input.value);
   const system = mentorSystem({ skillText: loaded.text, skillEntryChars: loaded.entryChars, brandIdentity: true, mode: 'mentor', host: h,
-    skillFile: !input.opening, replyRule: replySettingInstructions(input.locale ?? 'zh-Hans') });
+    skillFile: true, replyRule: replySettingInstructions(input.locale ?? 'zh-Hans') });
   const promptCache = freezeSharedPromptCache({ real: true, model: 'anthropic/claude-sonnet-5.5', cacheWriteUsdPerMillion: '3.75',
     instructions: system.instructions, prefixChars: system.prefixChars, historyMarker: !input.opening })!;
   const user = mentorUserMessage(input.opening ? 'HOST_OPEN_CURRENT_QUESTION' : 'I sell coffee', { content: {} }, h);
@@ -69,7 +69,7 @@ beforeEach(() => { clearSkillResourceCache(); rpc.mockClear(); });
 
 describe('a neutral range/category question ends with its card (Owner 2026-11-26 option A; 11-27 real-model run)', () => {
   const system = (opening: boolean, summary = false) => mentorSystem({ skillText: 'SKILL', skillEntryChars: 0, brandIdentity: false,
-    mode: 'mentor', host: host('step-1', opening), skillFile: !opening, summary, replyRule: 'REPLY' }).instructions;
+    mode: 'mentor', host: host('step-1', opening), skillFile: true, summary, replyRule: 'REPLY' }).instructions;
   it('an ordinary turn is told, last before the reply language, to call ask_question for such a question', () => {
     const text = system(false);
     expect(text).toContain(NEUTRAL_CARD_CHECK);
@@ -79,8 +79,8 @@ describe('a neutral range/category question ends with its card (Owner 2026-11-26
     expect(NEUTRAL_CARD_CHECK).toContain('how the service is charged');
     expect(NEUTRAL_CARD_CHECK).toContain('Personal questions, guesses about the user and confirmation requests stay prose');
   });
-  it('an opening and a step summary, which are offered no card, are not told to use one', () => {
-    expect(system(true)).not.toContain(NEUTRAL_CARD_CHECK);
+  it('an opening is told too (pay2 seq 20 asked a neutral category question in prose); a step summary, with no card, is not', () => {
+    expect(system(true).endsWith(NEUTRAL_CARD_CHECK + '\nREPLY')).toBe(true);
     expect(system(false, true)).not.toContain(NEUTRAL_CARD_CHECK);
   });
 });
@@ -122,10 +122,12 @@ describe('mentor prompt cache breakpoints (CORE-PATH-V2 2.9, #1502)', () => {
     expect(markers(body)).toBe(3);
     const opening = await request({ stepId: 'step-1', opening: true, history: true });
     expect(markers(opening.body)).toBe(2);
-    // An opening offers the same tools as the turns after it (same cached prefix) but may not call them.
+    // The first opening offers the same tools and the same system text as the turns after it (same cached prefix) but may
+    // not call them (MASTER_PLAN §3 item 1); the mentor marks only that opening (Owner 2026-11-27).
     expect(opening.body.tool_choice).toBe('none');
     expect(opening.body.tools.map((t: { function: { name: string } }) => t.function.name)).toEqual(['ask_question', 'read_skill_file']);
-    expect(blocks(opening.body)[1]!.text).not.toContain(SKILL_FILE_INSTRUCTIONS);
+    expect(blocks(opening.body)[1]!.text).toContain(SKILL_FILE_INSTRUCTIONS);
+    expect(blocks(opening.body)[1]!.text).toBe(blocks((await request({ stepId: 'step-1', history: true })).body)[1]!.text);
   });
 
   it('a Skill text without a SKILL.md section boundary marks nothing', () => {

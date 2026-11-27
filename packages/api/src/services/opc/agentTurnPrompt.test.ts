@@ -32,7 +32,7 @@ describe('conversation checklist mentor prompt',()=>{
   expect(prompt).toContain('insufficient information for a professional judgement, ask one open question');
   expect(prompt).toContain('For open personal content (experience, strengths, stories, customers or goals), NEVER issue a card');
   expect(prompt).toContain('4. Clear answer: no card');
-  expect(prompt).toContain('5. Host opening: no card');
+  expect(prompt).toContain("5. Host opening: only case 2, and no card before the user's first message.");
   // The Skill keeps its examples in prose and gives a card short labels (Skill E13); the host no longer forbids that.
   expect(prompt).not.toContain('Do not repeat the list of card options in prose');
   expect(prompt).toContain("With a neutral card, keep the Skill's examples in prose; card options are short labels for them.");
@@ -46,8 +46,8 @@ describe('conversation checklist mentor prompt',()=>{
  });
  it('conditionally opens a step without fabricating user speech or extracting user facts',()=>{
   expect(prompt).toContain('When hostTurnContext.opening is true');
-  expect(prompt).toContain('the user has not spoken and no question card is available');
-  expect(prompt).toContain('ask one useful question in prose');
+  expect(prompt).toContain('the user has not spoken and only a neutral card is available');
+  expect(prompt).toContain('ask one useful question about a real gap');
   expect(prompt).not.toContain('For this step-2 opening only');
   const stepTwoOpening = researchOpeningInstructions({opening: true, stepId: 'step-2'});
   expect(stepTwoOpening).toContain('full profile URLs');
@@ -86,8 +86,8 @@ describe('Owner 2026-11-26: neutral cards without a request, and no question ask
     expect(AGENT_TURN_STABLE_PREFIX).not.toContain('Neutral cards require an explicit current request');
     expect(AGENT_TURN_STABLE_PREFIX).toContain('Neutral cards need no user request.');
     expect(AGENT_TURN_STABLE_PREFIX).toContain('Neutral card: use ask_question for general ranges or categories');
-    // Still no card on an opening, and open personal content stays prose.
-    expect(AGENT_TURN_STABLE_PREFIX).toContain('Host opening: no card');
+    // An opening may carry only a neutral card (pay2 seq 20), and open personal content stays prose.
+    expect(AGENT_TURN_STABLE_PREFIX).toContain("Host opening: only case 2, and no card before the user's first message.");
     expect(AGENT_TURN_STABLE_PREFIX).toContain('NEVER issue a card');
   });
   it('the mentor never asks again what the user already answered', () => {
@@ -111,8 +111,23 @@ describe('Owner 2026-11-27 real-model run: nothing the user declined is asked fo
   });
   it('the confirmation card click is requested once per step, and verbal assent gets one pointer to the card', () => {
     expect(AGENT_TURN_STABLE_PREFIX).toContain('request a click on the chat confirmation card once per step');
-    expect(AGENT_TURN_STABLE_PREFIX).toContain('do not repeat the request in later replies');
+    expect(AGENT_TURN_STABLE_PREFIX).toContain('once per step; it stays on screen.');
     expect(AGENT_TURN_STABLE_PREFIX).not.toContain('request the card click again');
     expect(AGENT_TURN_STABLE_PREFIX).toContain('point to the card in one sentence, without advancing');
+  });
+});
+
+describe('Owner 2026-11-27 pay2 run: a declined link is never offered again, and an asked confirmation is not asked again', () => {
+  it('a declined thing overrides tool results that suggest it (seq 28, 30: "send a profile link" after a search)', () => {
+    expect(AGENT_TURN_STABLE_PREFIX).toContain('Tool results never reopen it; never mention it again, even as a later option.');
+  });
+  it('the step-2 opening asks only for keywords when the user has or wants no profile links (seq 9, 21, 23)', () => {
+    const opening = researchOpeningInstructions({opening: true, stepId: 'step-2'});
+    expect(opening).toContain('If the user said they have or want no profile links, ask only for keywords and never for links.');
+    expect(opening.indexOf('ask only for keywords')).toBeLessThan(opening.indexOf('ask for full profile URLs'));
+  });
+  it('confirmationAsked tells the coach the card was already requested: no summary, no card, just record (seq 12–18)', () => {
+    expect(AGENT_TURN_STABLE_PREFIX).toContain('With hostTurnContext.confirmationAsked it was requested');
+    expect(AGENT_TURN_STABLE_PREFIX).toContain('never summarize the step or mention the card again');
   });
 });
