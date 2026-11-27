@@ -53,10 +53,12 @@ export const isNeutralIntent = (intent: string) => intent === 'neutral_categorie
  * Owner 2026-11-26 (option A, restoring 2026-09-29 item 20): a neutral range or category card needs no request from the
  * user and no quotation, carries no recommendation and no reasons; a comparison (with a recommendation) still needs the
  * current request and the user's own alternatives, quoted verbatim. A host opening (the user has not spoken) can carry only a
- * neutral card: the 11-27 pay2 run opened step 2 with a neutral category question in prose, refused here as any card was. */
-export function groundedCardResult(value: unknown, sources: CardSources, turn: {opening?: boolean} = {}): string {
+ * neutral card: the 11-27 pay2 run opened step 2 with a neutral category question in prose, refused here as any card was.
+ * The conversation's first opening (no user message yet) still carries none (MASTER_PLAN §2.1 2026-11-26, §3 item 1). */
+export function groundedCardResult(value: unknown, sources: CardSources,
+  turn: {opening?: boolean; firstOpening?: boolean} = {}): string {
   const parsed = groundedCardParameters.safeParse(value);
-  if (!parsed.success) return INVALID_CARD_RESULT;
+  if (!parsed.success || turn.firstOpening) return INVALID_CARD_RESULT;
   const v = parsed.data;
   const neutral = isNeutralIntent(v.intent);
   if (turn.opening && !neutral) return INVALID_CARD_RESULT;
@@ -93,7 +95,7 @@ export function groundedCardFallback(arguments_: unknown): string | null {
     (option.reason?.trim() ? `\n推测，待你确认：${option.reason.trim()}` : '')).join('\n\n');
   return `${v.question.trim()}\n\n${options}\n\n可以直接回复你的选择，或用自己的话补充。`;
 }
-export function groundedCardTool(sources: () => CardSources, turn: {opening?: boolean} = {}): RuntimeTool {
+export function groundedCardTool(sources: () => CardSources, turn: {opening?: boolean; firstOpening?: boolean} = {}): RuntimeTool {
   return {name: ASK_QUESTION_TOOL, parameters: groundedCardParameters,
     description: 'Show a question card for exactly two kinds of question. '+
       '(1) neutral_categories: you ask the user to place themselves in general ranges or categories that can be listed '+

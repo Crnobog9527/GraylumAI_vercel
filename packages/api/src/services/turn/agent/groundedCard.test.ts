@@ -67,6 +67,9 @@ it('a host opening shows a neutral card under the coach\'s prose (pay2 seq 20); 
  expect(turn.message).toBe(PAY2_SEQ20);
  expect(groundedCardResult(neutral,sources,{opening:true})).not.toBe(INVALID_CARD_RESULT);
  expect(groundedCardResult(choice,sources,{opening:true})).toBe(INVALID_CARD_RESULT);
+ // The conversation's first opening (no user message yet) shows none, even a neutral one the model sends (MASTER_PLAN §3 item 1).
+ expect(await groundedCardTool(()=>opening,{opening:true,firstOpening:true}).execute(seq20,'x')).toBe(INVALID_CARD_RESULT);
+ expect(groundedTurn(PAY2_SEQ20,INVALID_CARD_RESULT,true,null).card).toBeNull();
  expect(questionCardFromResult(await groundedCardTool(()=>sources).execute(neutral,'x'))).not.toBeNull();
  expect(groundedCardFallback(JSON.stringify(neutral))).toContain('1. 3 小时以内');
 });

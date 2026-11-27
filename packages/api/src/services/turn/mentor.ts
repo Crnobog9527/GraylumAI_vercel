@@ -28,7 +28,7 @@ import type { CounterStore } from './limiter';
 import { mentorCatalog, MentorCatalogError, mentorPolicy } from './mentorCatalog';
 import { TurnReplay, type ResumeRead } from './resume';
 import { mentorHost, mentorOrganizerInput, mentorState, openingOrganizerOutput, resourcesOf } from './mentorContext';
-import { answeredText, confirmationAsked, mentorAnsweredCard, mentorReplyBody, mentorTurnInput, type MentorAnswer } from './mentorInput';
+import { answeredText, confirmationAsked, mentorAnsweredCard, userHasSpoken, mentorReplyBody, mentorTurnInput, type MentorAnswer } from './mentorInput';
 import { mentorSystem, mentorUserMessage, organizerInput, organizerInstructions, projectMentorHistory } from './mentorPrompt';
 import { loadMentorSkill, mentorSkillAvailable, mentorSkillFileTool, mentorSkillSource, prepareMentorFiles, skillFileReserveBytes } from './mentorSkill';
 import type { ChatQuote } from './quote';
@@ -260,11 +260,14 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
       callGate: async subcalls => { const gate = await deps.newWork.calls(input.actorId, subcalls, 'bill2.v2');
         if (!gate.ok) throw new TurnStop(GATE_CODES[gate.reason]); }, onStop: stop => { stopped = stop; } }) : undefined;
     // Each tool but the question card tells the page when it starts and ends (a `step` event); the benchmark tools keep their own stop handling.
-    const cardTools = summary ? [] : [groundedCardTool(() => sources, { opening })];
+    // The conversation's first opening (the user has said nothing yet) shows no card and may call no tool (MASTER_PLAN §3 item 1);
+    // a later step's opening may show a neutral card (Owner 2026-11-27, pay2 seq 20).
+    const firstOpening = opening && !userHasSpoken(opened.history);
+    const cardTools = summary ? [] : [groundedCardTool(() => sources, { opening, firstOpening })];
     const tools = withStepEvents([...cardTools, mentorSkillFileTool(prepared, binding), ...benchmark?.tools ?? []],
       emitStep, new Map(), undefined, methodName, METHOD_STEP_ID);
     const context: RequestContext = { providerRequestFormat: AGENT_TURN_REQUEST_FORMAT, tools: tools.map(t => t.name), network: 'deny',
-      reasoning: mentor.reasoning, hostTurnContext: { opening }, ...(promptCache ? { promptCache } : {}),
+      reasoning: mentor.reasoning, hostTurnContext: { opening: firstOpening }, ...(promptCache ? { promptCache } : {}),
       ...(organizer ? { attachedOrganizer: { reasoning: organizer.reasoning } } : {}) };
 
     // 5. The mentor's reply (and its continuation after one Skill file). A choice card ends the turn.

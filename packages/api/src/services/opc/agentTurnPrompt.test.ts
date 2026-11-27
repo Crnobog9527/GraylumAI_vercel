@@ -32,7 +32,7 @@ describe('conversation checklist mentor prompt',()=>{
   expect(prompt).toContain('insufficient information for a professional judgement, ask one open question');
   expect(prompt).toContain('For open personal content (experience, strengths, stories, customers or goals), NEVER issue a card');
   expect(prompt).toContain('4. Clear answer: no card');
-  expect(prompt).toContain('5. Host opening: only case 2 is available.');
+  expect(prompt).toContain("5. Host opening: only case 2, and no card before the user's first message.");
   // The Skill keeps its examples in prose and gives a card short labels (Skill E13); the host no longer forbids that.
   expect(prompt).not.toContain('Do not repeat the list of card options in prose');
   expect(prompt).toContain("With a neutral card, keep the Skill's examples in prose; card options are short labels for them.");
@@ -87,7 +87,7 @@ describe('Owner 2026-11-26: neutral cards without a request, and no question ask
     expect(AGENT_TURN_STABLE_PREFIX).toContain('Neutral cards need no user request.');
     expect(AGENT_TURN_STABLE_PREFIX).toContain('Neutral card: use ask_question for general ranges or categories');
     // An opening may carry only a neutral card (pay2 seq 20), and open personal content stays prose.
-    expect(AGENT_TURN_STABLE_PREFIX).toContain('Host opening: only case 2 is available.');
+    expect(AGENT_TURN_STABLE_PREFIX).toContain("Host opening: only case 2, and no card before the user's first message.");
     expect(AGENT_TURN_STABLE_PREFIX).toContain('NEVER issue a card');
   });
   it('the mentor never asks again what the user already answered', () => {

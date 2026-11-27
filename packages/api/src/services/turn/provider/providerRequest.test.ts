@@ -78,12 +78,13 @@ describe('Agent turn format',()=>{
  it('carries reasoning only on the primary dialogue call',()=>{
   expect(()=>body(request,agent(),'attached_organizer',false)).toThrow('RUNTIME_PROVIDER_BINDING_DENIED');
  });
- // Owner 2026-11-27 (pay2 seq 20): an opening shows a neutral card, so it no longer sends tool_choice none.
- it('PROMPT-CACHE-ALL: a host-opened turn offers the same tools and sends the same bytes as any other turn',()=>{
+ // The mentor marks only the conversation's first opening (Owner 2026-11-27: a later step's opening may show its neutral card).
+ it('PROMPT-CACHE-ALL: a host-opened turn that offers tools sends tool_choice none; the same bytes otherwise',()=>{
   const opening=JSON.parse(body(request,agent({hostTurnContext:{opening:true}})));
-  expect(opening).not.toHaveProperty('tool_choice');
+  expect(opening.tool_choice).toBe('none');
   expect(opening.tools.map((t:{function:{name:string}})=>t.function.name)).toEqual(['ask_question']);
-  expect(opening).toEqual(JSON.parse(body(request,agent({hostTurnContext:{opening:false}}))));
+  const rest={...opening};delete rest.tool_choice;
+  expect(rest).toEqual(JSON.parse(body(request,agent({hostTurnContext:{opening:false}}))));
   expect(JSON.parse(body(request,agent()))).not.toHaveProperty('tool_choice');
   // An opening frozen without tools (every execution before the alignment) keeps its bytes.
   const noTools=JSON.parse(request);noTools.tools=[];noTools.messages=noTools.messages.slice(0,2);

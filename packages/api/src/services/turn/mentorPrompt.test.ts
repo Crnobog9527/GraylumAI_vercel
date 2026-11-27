@@ -122,9 +122,9 @@ describe('mentor prompt cache breakpoints (CORE-PATH-V2 2.9, #1502)', () => {
     expect(markers(body)).toBe(3);
     const opening = await request({ stepId: 'step-1', opening: true, history: true });
     expect(markers(opening.body)).toBe(2);
-    // An opening offers the same tools as the turns after it (same cached prefix) and, since Owner 2026-11-27 (pay2 seq 20,
-    // a neutral category question it could not card), may call them: no tool_choice none, and the same system text.
-    expect(opening.body).not.toHaveProperty('tool_choice');
+    // The first opening offers the same tools and the same system text as the turns after it (same cached prefix) but may
+    // not call them (MASTER_PLAN §3 item 1); the mentor marks only that opening (Owner 2026-11-27).
+    expect(opening.body.tool_choice).toBe('none');
     expect(opening.body.tools.map((t: { function: { name: string } }) => t.function.name)).toEqual(['ask_question', 'read_skill_file']);
     expect(blocks(opening.body)[1]!.text).toContain(SKILL_FILE_INSTRUCTIONS);
     expect(blocks(opening.body)[1]!.text).toBe(blocks((await request({ stepId: 'step-1', history: true })).body)[1]!.text);

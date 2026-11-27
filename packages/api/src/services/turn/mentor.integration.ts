@@ -209,7 +209,7 @@ const credits = async (actor: string) => (await db.query('select credits from pr
 
 it('RUNTIME: CORE-PATH-V2 V2-5: a mentor turn opens with the draft, reads one Skill file, applies the organizer patch at close, in <= 11 round trips', async () => {
   const f = await setup();
-  // 1. The host opening: the same tools, callable since Owner 2026-11-27 (its neutral card), organized, no history marker.
+  // 1. The host opening: no tool may be called (tool_choice none, same tools), organized, no history marker.
   const open = transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, JSON.stringify({ inputKind: 'answer', patches: [], notes: [] }))
     : prose('gen-open-' + n, 'Welcome. What is your goal?'));
   const opening = await turn(f, { text: 'HOST_OPEN_CURRENT_QUESTION', transport: open.fn });
@@ -219,7 +219,7 @@ it('RUNTIME: CORE-PATH-V2 V2-5: a mentor turn opens with the draft, reads one Sk
     { type: 'step', id: 'method', tool: 'load_skill', label: 'Synthetic step 1', state: 'running' },
     { type: 'step', id: 'method', tool: 'load_skill', label: 'Synthetic step 1', state: 'done' }]);
   expect(open.bodies.map(b => b.model)).toEqual([MENTOR, ORGANIZER]);
-  expect(open.bodies[0]!).not.toHaveProperty('tool_choice');
+  expect(open.bodies[0]!.tool_choice).toBe('none');
   expect(JSON.stringify(open.bodies[0]).match(/cache_control/g)).toHaveLength(2);
 
   // 2. A user turn: the mentor reads its step file, then answers; the organizer patches the goal field.
@@ -285,21 +285,39 @@ it('RUNTIME: CORE-PATH-V2 V2-5: a grounded choice card ends the reply and is sav
 });
 
 // Owner 2026-11-27 pay2: the step-2 opening asked a neutral category question in prose, as no opening could show a card, and its
-// organizer output (turn 6874) carried no inputKind, so turn_close refused it and both step-2 drafts were lost.
-it('RUNTIME: Owner 2026-11-27: a host opening shows a neutral card; its organizer output without inputKind is not refused', async () => {
+// organizer output (turn 6874) carried no inputKind, so turn_close refused it and both step-2 drafts were lost. The conversation's
+// first opening (no user message yet) still shows no card (MASTER_PLAN §2.1 2026-11-26, §3 item 1).
+it('RUNTIME: Owner 2026-11-27: only a later opening shows a neutral card; an opening output without inputKind is not refused', async () => {
   const f = await setup();
-  const t = transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, JSON.stringify({ format: 'v2', patches: [], notes: [] }))
-    : toolCall('gen-open-' + n, 'ask_question', { intent: 'neutral_categories', requestQuote: null, basisQuotes: [],
-      question: 'Which kind of account should I look for?', options: [{ text: 'Local studios', reason: null },
-        { text: 'Beginner tutors elsewhere', reason: null }], recommended: null }));
-  const out = await turn(f, { text: 'HOST_OPEN_CURRENT_QUESTION', transport: t.fn });
-  const result = out.events.at(-1) as Extract<TurnEvent, { type: 'result' }>;
-  expect(result.type, JSON.stringify(out.events)).toBe('result');
-  expect(JSON.parse(result.body).card).toMatchObject({ question: 'Which kind of account should I look for?',
+  const card = { intent: 'neutral_categories', requestQuote: null, basisQuotes: [], question: 'Which kind of account should I look for?',
+    options: [{ text: 'Local studios', reason: null }, { text: 'Beginner tutors elsewhere', reason: null }], recommended: null };
+  const opener = () => transport((body, n) => body.model === ORGANIZER
+    ? organized('gen-org-' + n, JSON.stringify({ format: 'v2', patches: [], notes: [] }))
+    : toolCall('gen-open-' + n, 'ask_question', card));
+  const resultOf = (out: { events: TurnEvent[] }) => {
+    const result = out.events.at(-1) as Extract<TurnEvent, { type: 'result' }>;
+    expect(result.type, JSON.stringify(out.events)).toBe('result');
+    return result;
+  };
+  // 1. The first opening: tool_choice none, and a card the model sends anyway is refused by the host.
+  const first = opener();
+  const one = resultOf(await turn(f, { text: 'HOST_OPEN_CURRENT_QUESTION', transport: first.fn }));
+  expect(first.bodies[0]!.tool_choice).toBe('none');
+  expect(JSON.parse(one.body).card).toBeNull();
+  // 2. The user speaks.
+  const said = transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, JSON.stringify({ inputKind: 'answer', patches: [], notes: [] }))
+    : prose('gen-reply-' + n, 'Noted.'));
+  resultOf(await turn(f, { text: 'I teach leather craft on weekends', transport: said.fn }));
+  // 3. A later opening: tools callable, the neutral card shown, and its organizer output kept though it lacks inputKind.
+  const later = opener();
+  const three = resultOf(await turn(f, { text: 'HOST_OPEN_CURRENT_QUESTION', transport: later.fn }));
+  expect(later.bodies[0]!).not.toHaveProperty('tool_choice');
+  expect(JSON.parse(three.body).card).toMatchObject({ question: card.question,
     options: ['Local studios', 'Beginner tutors elsewhere'], recommended: null });
-  expect(t.bodies.map(b => b.model)).toEqual([MENTOR, ORGANIZER]);
-  expect(['applied', 'suggested']).toContain((result.kindResult as { result?: string }).result);
-  expect((await db.query("select close_kind from turns where actor_id=$1", [f.actor])).rows).toEqual([{ close_kind: 'completed' }]);
+  expect(later.bodies.map(b => b.model)).toEqual([MENTOR, ORGANIZER]);
+  expect(['applied', 'suggested']).toContain((three.kindResult as { result?: string }).result);
+  expect((await db.query("select close_kind from turns where actor_id=$1 order by id", [f.actor])).rows.map(r => r.close_kind))
+    .toEqual(['completed', 'completed', 'completed']);
 });
 
 it('RUNTIME: CORE-PATH-V2 V2-5: a module the draft is not bound to is refused before anything is frozen or sent', async () => {

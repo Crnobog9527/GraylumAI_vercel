@@ -30,7 +30,7 @@ const hostRules = (normalOpening = true) => [
   "3. Socratic prose: for open personal content (experience, strengths, stories, goals or customers), or ",
   "insufficient information for a professional judgement, ask one open question based on what the user said.\n",
   "4. Clear answer: no card; acknowledge briefly and move to the next missing field without claiming confirmation.\n",
-  "5. Host opening: only case 2 is available. Follow the opening instructions.\n",
+  "5. Host opening: only case 2, and no card before the user's first message.\n",
   "Never ask a case 1 or 2 question in prose only; call ask_question.\n",
   "With a neutral card, keep the Skill's examples in prose; card options are short labels for them. ",
   "The recommendation and its reason must agree with the card.\n",

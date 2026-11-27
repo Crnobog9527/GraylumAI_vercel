@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
 import { readAgentTurnBody } from '../../shared/agentTurn';
-import { isOpeningInput, readChecklistUpdatedInput } from '../../shared/opcQuestions';
+import { CHECKLIST_UPDATED_INPUT, isOpeningInput, readChecklistUpdatedInput } from '../../shared/opcQuestions';
 import { isStepSummaryInput } from '../../shared/opcStepSummary';
 import type { AnsweredCard } from '../opc/answerCard';
 import type { HistoryItem } from './db';
@@ -73,5 +73,16 @@ export function confirmationAsked(history: readonly HistoryItem[], stepId: strin
     let saved: { stepId?: unknown; roundId?: unknown };
     try { saved = JSON.parse(item.content) as typeof saved; } catch { return false; }
     return saved?.stepId === stepId && saved.roundId === roundId && CONFIRMATION_REQUEST.test(readAgentTurnBody(item.content).message);
+  });
+}
+
+/**
+ * Whether the user has said anything in this conversation: a saved user message that is not a host marker (an opening, a
+ * step summary or a checklist event). Before it, an opening is the conversation's first and shows no card (MASTER_PLAN §3).
+ */
+export function userHasSpoken(history: readonly HistoryItem[]): boolean {
+  return history.some(item => {
+    return item.role === 'user' && !isOpeningInput(item.content) && !isStepSummaryInput(item.content)
+      && !item.content.startsWith(CHECKLIST_UPDATED_INPUT);
   });
 }

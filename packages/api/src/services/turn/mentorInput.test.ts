@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { agentTurnBody } from '../../shared/agentTurn';
 import { CHECKLIST_UPDATED_INPUT, OPENING_INPUT } from '../../shared/opcQuestions';
 import { STEP_SUMMARY_INPUT } from '../../shared/opcStepSummary';
-import { answeredText, confirmationAsked, mentorAnsweredCard, mentorReplyBody, mentorTurnInput } from './mentorInput';
+import { answeredText, confirmationAsked, mentorAnsweredCard, mentorReplyBody, mentorTurnInput, userHasSpoken } from './mentorInput';
 
 const card = { question: 'Which one first?', options: ['Coffee', 'Tea'], recommended: 0 };
 const item = (role: 'user' | 'assistant', content: string, seq: number) => ({ seq, role, content, contentHash: 'a'.repeat(64) });
@@ -56,5 +56,15 @@ describe('confirmationAsked: an earlier reply of this step and round already ask
     expect(confirmationAsked([reply(12, seq12, 'step-1', 'r0')], 'step-1', 'r1')).toBe(false);
     expect(confirmationAsked([{ seq: 11, role: 'user', content: '确认卡在哪？', contentHash: 'a'.repeat(64) }], 'step-1', 'r1')).toBe(false);
     expect(confirmationAsked([{ seq: 12, role: 'assistant', content: '请点击确认卡片', contentHash: 'a'.repeat(64) }], 'step-1', 'r1')).toBe(false);
+  });
+});
+
+describe('userHasSpoken: before it, an opening is the conversation\'s first and shows no card (MASTER_PLAN §3 item 1)', () => {
+  const user = (seq: number, content: string) => ({ seq, role: 'user' as const, content, contentHash: 'a'.repeat(64) });
+  it('host markers are not the user\'s words; a typed message or a card answer is', () => {
+    expect(userHasSpoken([])).toBe(false);
+    expect(userHasSpoken([user(1, OPENING_INPUT), item('assistant', '你做这个账号，最希望它最后给你带来什么？', 2)])).toBe(false);
+    expect(userHasSpoken([user(1, STEP_SUMMARY_INPUT), user(3, CHECKLIST_UPDATED_INPUT)])).toBe(false);
+    expect(userHasSpoken([user(1, OPENING_INPUT), user(3, '我想靠周末的手工皮具体验课接到付费学员。')])).toBe(true);
   });
 });
