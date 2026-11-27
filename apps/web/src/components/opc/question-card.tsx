@@ -50,7 +50,10 @@ export function QuestionCardView({
   const reasonId = useId();
   const reasonIndex = card.recommendationReason ? card.recommended : null;
   const ref = useRef<HTMLElement>(null);
-  useEffect(() => { if (docked && reveal) ref.current?.scrollIntoView?.({ block: "nearest" }); }, [docked, reveal, card]);
+  // Once per card: the page parses the card again on every render (typing included), so the effect keys on what the card says,
+  // not on the object; a card shown again after being folded mounts anew and is revealed once more (review of #2061).
+  const identity = card.question + "\n" + card.options.join("\n");
+  useEffect(() => { if (docked && reveal) ref.current?.scrollIntoView?.({ block: "nearest" }); }, [docked, reveal, identity]);
   return (
     <section ref={ref} aria-label="AI 教练提问" data-question-card="open" className={cn(styles.card, docked && styles.docked)}>
       <p className={styles.head}>AI 教练提问</p>

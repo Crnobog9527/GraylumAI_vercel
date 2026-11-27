@@ -258,3 +258,35 @@ for (const [width, height] of SIZES) {
     } finally { await page.close(); }
   }, 60000);
 }
+
+// Review of #2061: the docked card is scrolled into view once, when it first shows. Typing re-renders the page and parses the card
+// again; that must not pull the step back to the card while the box being typed in keeps its caret in view (360x640).
+it('360x640, the goal card docked: after "其他", typing with the keyboard up keeps the box in view, no jump back to the card', async () => {
+  const { page, errors } = await open(360, 640, { values: missing, withCard: true, card: goalCard });
+  try {
+    const box = page.getByRole('textbox', { name: '给 AI 教练的回复' });
+    await page.getByRole('region', { name: 'AI 教练提问' }).getByRole('button', { name: '其他' }).click();
+    await ui(box).toBeFocused();
+    // The phone keyboard comes up (300px, as phone-keyboard.browser.test.tsx sets it): the card and the box no longer fit together.
+    await page.setViewportSize({ width: 360, height: 340 });
+    await page.evaluate(() => document.documentElement.toggleAttribute('data-keyboard', true));
+    await box.scrollIntoViewIfNeeded();
+    const step = () => page.evaluate(() => document.querySelector('section[aria-label="当前定位步骤"]')!.scrollTop);
+    // Count every time the card scrolls itself into view from here on (red before the fix: once on the first key typed).
+    await page.evaluate(() => { const w = window as unknown as { cardScrolls: number }; w.cardScrolls = 0;
+      const original = Element.prototype.scrollIntoView;
+      Element.prototype.scrollIntoView = function (this: Element, ...args: [ScrollIntoViewOptions?]) {
+        if (this.matches('[data-question-card]')) w.cardScrolls += 1; return original.apply(this, args); }; });
+    const cardScrolls = () => page.evaluate(() => (window as unknown as { cardScrolls: number }).cardScrolls);
+    const settled = await step();
+    for (const text of ['我', '想', '先', '做', '本', '地', '体', '验', '课']) {
+      await page.keyboard.type(text);
+      await page.waitForTimeout(60);
+      expect(await reachable(box), `box in view after typing ${text}`).toBe(true);
+      expect(await step(), `step scroll after typing ${text}`).toBeGreaterThanOrEqual(settled);
+      expect(await cardScrolls(), `card scrolled itself after typing ${text}`).toBe(0);
+    }
+    await ui(box).toHaveText('我想先做本地体验课');
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 60000);
