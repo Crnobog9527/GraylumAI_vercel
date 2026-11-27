@@ -4,7 +4,7 @@ import { researchRuntimeTools } from './researchRuntimeTool';
 import { requestIdentity, ResearchPause, runSubcall, type SubcallContext } from '../../research/runtime/subcall';
 import { socialRequest, stableResearchId, type ResearchToolContext } from '../../research/runtime/toolContext';
 import { SHORTFALL_MESSAGE } from '../../research/runtime/shortfall';
-import { ROUND_UNFINISHED_NEXT_STEP } from '../../research/runtime/discovery';
+import { LINKS_DECLINED_NEXT_STEP, ROUND_UNFINISHED_NEXT_STEP } from '../../research/runtime/discovery';
 import type { DiscoveryRecord, FetchClaim, RuntimeOperation, RuntimePlan, RuntimeResearchStore } from '../../research/runtime/store';
 import type { ToolEnvelope } from '../../research/tools/envelope';
 import { DISABLED_RESEARCH_TOOLS, researchToolsConfigSchema } from '../../research/vendors/config';
@@ -552,6 +552,20 @@ describe('durable benchmark discovery and free follow-up', () => {
     f.store.cancelUnsentPlan.mockResolvedValue(undefined);
     await f.execute('benchmark_discover', { discoveryId });
     expect(subcall).not.toHaveBeenCalled();
+  });
+
+  // Owner 2026-11-27 pay2 seq 28: the search found nothing and the coach offered "paste a few profile links" though the user had said
+  // (seq 5) there were none; that offer came from this result's nextStep.
+  it('a round without one selectable account never offers profile links to a user who declined them', async () => {
+    const declined = fixture();
+    declined.setAuthors(0);
+    declined.ctx.linksDeclined = true;
+    const none = await declined.execute('benchmark_discover', discoveryArgs);
+    expect(none).toMatchObject({ reason: 'NOT_ENOUGH_CANDIDATES', nextStep: LINKS_DECLINED_NEXT_STEP });
+    expect(JSON.stringify(none)).not.toContain('直接发来想对标的账号主页链接');
+    const open = fixture();
+    open.setAuthors(0);
+    expect(JSON.stringify(await open.execute('benchmark_discover', discoveryArgs))).toContain('直接发来想对标的账号主页链接');
   });
 
   it('BENCHMARK-SHORTFALL: a search round without new candidates, or a finished fetch, carries the host\'s open card', async () => {

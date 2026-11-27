@@ -76,6 +76,8 @@ const highestMultiplier = (policies: readonly ToolCallPolicy[]) =>
 export type BenchmarkToolsInput = { research: MentorResearch; prepared: PreparedResearch; refreshId?: string; deps?: BenchmarkDeps; admin: SupabaseClient;
   slots: CounterStore; calls: ToolCallDeps; actorId: string; sessionId: string; requestId: string; text: string; deadline: number;
   emit: (event: ResearchTurnEvent) => void;
+  /** The user declined profile links in this conversation (mentorInput.ts profileLinksDeclined). */
+  linksDeclined?: boolean;
   /** The one-switch pause and the call limits for this call's subcalls; throws TurnStop to refuse. */
   callGate: (subcalls: number) => Promise<void>;
   onStop: (stop: TurnStop) => void };
@@ -145,7 +147,8 @@ export function turnBenchmarkTools(input: BenchmarkToolsInput) {
   const ctx: ResearchToolContext = { scope, executionId: input.requestId, config: frozenResearchConfig(research), store, subcall,
     emit: event => { if (event.type === 'research_call') vendor = event.dataKind === 'web_search' ? 'parallel'
       : event.dataKind === 'web_fetch' ? 'firecrawl' : 'tikhub'; input.emit(event); },
-    now: () => new Date(), lookupTime: () => left() >= MIN_SUPPLIER_MS + LOOKUP_MS, ...(profileCache ? { profileCache } : {}) };
+    now: () => new Date(), lookupTime: () => left() >= MIN_SUPPLIER_MS + LOOKUP_MS, ...(profileCache ? { profileCache } : {}),
+    ...(input.linksDeclined ? { linksDeclined: true } : {}) };
   let used = false;
   const tools: RuntimeTool[] = researchRuntimeTools(ctx, names).map(tool => ({ ...tool, async execute(args, callId) {
     if (used) return toolEnvelope({ status: 'budget_exhausted', reason: 'REPLY_CALL_LIMIT' });

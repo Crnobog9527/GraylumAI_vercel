@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
-import { candidateShortage, ROUND_UNFINISHED_NEXT_STEP } from './discovery';
+import { candidateShortage, LINKS_DECLINED_NEXT_STEP, ROUND_UNFINISHED_NEXT_STEP } from './discovery';
 
 describe('benchmark discovery candidate shortage', () => {
   it('a finished round without one selectable account names both ways out, profile links first after two rounds', () => {
@@ -10,6 +10,13 @@ describe('benchmark discovery candidate shortage', () => {
         + '核对合格的账号同样算对标）。搜过两轮仍找不到时，主要建议发链接，不要只让用户再搜。',
       availableCandidates: 0,
     });
+  });
+
+  it('a user who declined profile links is offered other keywords only (Owner 2026-11-27, pay2 seq 28)', () => {
+    expect(candidateShortage(true)).toEqual({ message: '这一轮已经搜完，没有找到可选的对标账号。', nextStep: LINKS_DECLINED_NEXT_STEP,
+      availableCandidates: 0 });
+    expect(LINKS_DECLINED_NEXT_STEP).not.toMatch(/直接发来|贴几个|主要建议发链接/);
+    expect(LINKS_DECLINED_NEXT_STEP).toContain('不要提发链接、贴链接或以后补链接');
   });
 
   it('an unfinished round is not a round: the user continues it, nothing paid is fetched again', () => {

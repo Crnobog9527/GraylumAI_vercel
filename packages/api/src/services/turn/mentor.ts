@@ -28,7 +28,8 @@ import type { CounterStore } from './limiter';
 import { mentorCatalog, MentorCatalogError, mentorPolicy } from './mentorCatalog';
 import { TurnReplay, type ResumeRead } from './resume';
 import { mentorHost, mentorOrganizerInput, mentorState, openingOrganizerOutput, resourcesOf } from './mentorContext';
-import { answeredText, confirmationAsked, mentorAnsweredCard, userHasSpoken, mentorReplyBody, mentorTurnInput, type MentorAnswer } from './mentorInput';
+import { answeredText, confirmationAsked, mentorAnsweredCard, mentorReplyBody, mentorTurnInput, profileLinksDeclined, userHasSpoken,
+  type MentorAnswer } from './mentorInput';
 import { mentorSystem, mentorUserMessage, organizerInput, organizerInstructions, projectMentorHistory } from './mentorPrompt';
 import { loadMentorSkill, mentorSkillAvailable, mentorSkillFileTool, mentorSkillSource, prepareMentorFiles, skillFileReserveBytes } from './mentorSkill';
 import type { ChatQuote } from './quote';
@@ -37,6 +38,7 @@ import { METHOD_STEP_ID, withStepEvents } from './tools/announce';
 import { savedSteps } from './tools/toolStage';
 import { createRuntimeBudget } from './settings/budget';
 import { REPLY_CUT, REPLY_CUT_FAILURE, shownSoFar } from './shownReply';
+import { confirmationReminderFilter, dropsConfirmationReminder } from './confirmationReminder';
 import { benchmarkReady, benchmarkToolBytes, turnBenchmarkTools, type BenchmarkDeps } from './tools/benchmark';
 import { preparedResearch, type PreparedResearch } from './tools/benchmarkStore';
 import { logSwallowed, swallow } from '../../lib/swallow';
@@ -257,6 +259,8 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
       ...(input.researchRefreshId ? { refreshId: input.researchRefreshId } : {}), admin, slots: deps.slots,
       calls: { db, actorId: input.actorId, turnId: opened.turnId, nextSeq: () => ++seq }, actorId: input.actorId, sessionId: input.sessionId,
       requestId: input.requestId, text: words, deadline: Date.now() + MENTOR_RESEARCH_MS, emit,
+      ...(profileLinksDeclined([...opened.history.filter(m => m.role === 'user').map(m => m.content), words], carriesAccountLink)
+        ? { linksDeclined: true } : {}),
       callGate: async subcalls => { const gate = await deps.newWork.calls(input.actorId, subcalls, 'bill2.v2');
         if (!gate.ok) throw new TurnStop(GATE_CODES[gate.reason]); }, onStop: stop => { stopped = stop; } }) : undefined;
     // Each tool but the question card tells the page when it starts and ends (a `step` event); the benchmark tools keep their own stop handling.
@@ -272,10 +276,14 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
 
     // 5. The mentor's reply (and its continuation after one Skill file). A choice card ends the turn.
     let text = '', toolCalled = false, cardMessage: string | null | undefined;
+    // Asked once already, a sentence asking again for the confirmation card is dropped before it is shown (confirmationReminder.ts):
+    // `shownText` is what the user saw, and what is saved.
+    const dropping = dropsConfirmationReminder(asked, words), reminder = confirmationReminderFilter(dropping);
+    let shownText = '';
     saveShown = async () => {
       // The prose of the call that was cut, in the reply's own envelope; no card (the user never saw one) and no checklist write
       // (the organizer never read this reply). What the turn's research found is saved as on any other close.
-      const shown = shownSoFar(text), made = benchmark?.journal();
+      const shown = shownSoFar(shownText), made = benchmark?.journal();
       return shown ? close('completed', { delivered: true, failureCode: REPLY_CUT_FAILURE,
         messages: [{ role: 'user', content: words },
           { role: 'assistant', content: mentorReplyBody(agentTurnResult(shown, shown, false).body, input.stepId, ctx.roundId) }],
@@ -287,9 +295,9 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
       maxOutputTokens: mentor.outputLimit, maxTurns: benchmark ? 3 : 2, reasoning: mentor.reasoning, tools, stream: true,
       allowEmptyResult: true, firstToolCallOnly: true, stopAtToolNames: [ASK_QUESTION_TOOL],
       selectHistory: async (items, incoming) => { sources = cardSources(words, items); return [...items, ...incoming]; },
-      onText: delta => { text += delta; if (delta) emit({ type: 'text', delta }); },
+      onText: delta => { text += delta; const show = reminder.push(delta); shownText += show; if (show) emit({ type: 'text', delta: show }); },
       exchange: async (_sequence, body, onChunk) => {
-        text = ''; cardMessage = undefined;
+        text = ''; shownText = ''; reminder.reset(); cardMessage = undefined;
         const request = openRouterRequestBody(body, { context, policy: callPolicy(mentor) as never, phase: 'ordinary', primaryDialogue: true });
         try { assertRuntimeRequestCapacity(request, mentor.inputLimit); }
         catch { stopped = new TurnStop('TURN_INPUT_TOO_LARGE'); throw stopped; }
@@ -303,8 +311,16 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
         }, keep);
       },
     });
+    const tail = reminder.flush();
+    shownText += tail;
+    if (tail) emit({ type: 'text', delta: tail });
+    // A reply that was nothing but the request again keeps it (no empty reply); otherwise what was shown is the reply. Without a
+    // tool call the saved body is read from `output` (agentTurnResult), so it is the shown text too (review of #2059: a reload and
+    // the organizer saw the dropped request again); a tool call's output is the tool's result and stays as it is.
+    const filtered = dropping && shownText.trim() ? shownText : null;
+    if (filtered) text = filtered;
     // A neutral card keeps the coach's short prose before it; a comparison card with separate prose is refused (groundedCard.ts).
-    const turn = groundedTurn(text, output, toolCalled, cardMessage);
+    const turn = groundedTurn(text, filtered && !toolCalled ? filtered : output, toolCalled, cardMessage);
     // Nothing to show (no prose, no card): nothing was delivered, the user pays nothing.
     if (!turn.card && turn.message === INVALID_REPLY_NOTICE) throw new TurnStop('TURN_CALL_DENIED');
 
