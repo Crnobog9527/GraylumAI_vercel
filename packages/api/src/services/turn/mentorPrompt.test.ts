@@ -10,7 +10,7 @@ import { AGENT_TURN_REQUEST_FORMAT, openRouterRequestBody, type RequestContext }
 import { freezeSharedPromptCache } from './provider/promptCache';
 import { replySettingInstructions } from './agent/replyLanguage';
 import { openRouterBound } from './provider/openRouterPolicy';
-import { mentorSystem, mentorUserMessage, projectMentorHistory, SKILL_FILE_INSTRUCTIONS } from './mentorPrompt';
+import { mentorSystem, mentorUserMessage, NEUTRAL_CARD_CHECK, projectMentorHistory, SKILL_FILE_INSTRUCTIONS } from './mentorPrompt';
 import { loadMentorSkill, mentorSkillFileTool, mentorSkillSource, prepareMentorFiles, skillEntryChars, skillFileReserveBytes } from './mentorSkill';
 
 /*
@@ -66,6 +66,24 @@ const blocks = (body: { messages: Array<{ content: unknown }> }) => body.message
 const markers = (value: unknown) => (JSON.stringify(value).match(/cache_control/g) ?? []).length;
 
 beforeEach(() => { clearSkillResourceCache(); rpc.mockClear(); });
+
+describe('a neutral range/category question ends with its card (Owner 2026-11-26 option A; 11-27 real-model run)', () => {
+  const system = (opening: boolean, summary = false) => mentorSystem({ skillText: 'SKILL', skillEntryChars: 0, brandIdentity: false,
+    mode: 'mentor', host: host('step-1', opening), skillFile: !opening, summary, replyRule: 'REPLY' }).instructions;
+  it('an ordinary turn is told, last before the reply language, to call ask_question for such a question', () => {
+    const text = system(false);
+    expect(text).toContain(NEUTRAL_CARD_CHECK);
+    expect(text.indexOf(NEUTRAL_CARD_CHECK)).toBeGreaterThan(text.indexOf(SKILL_FILE_INSTRUCTIONS));
+    expect(text.endsWith(NEUTRAL_CARD_CHECK + '\nREPLY')).toBe(true);
+    expect(NEUTRAL_CARD_CHECK).toContain('call ask_question with intent neutral_categories');
+    expect(NEUTRAL_CARD_CHECK).toContain('how the service is charged');
+    expect(NEUTRAL_CARD_CHECK).toContain('Personal questions, guesses about the user and confirmation requests stay prose');
+  });
+  it('an opening and a step summary, which are offered no card, are not told to use one', () => {
+    expect(system(true)).not.toContain(NEUTRAL_CARD_CHECK);
+    expect(system(false, true)).not.toContain(NEUTRAL_CARD_CHECK);
+  });
+});
 
 describe('mentor prompt cache breakpoints (CORE-PATH-V2 2.9, #1502)', () => {
   it('breakpoint 1 ends exactly after brand + SKILL.md and is byte-identical for every step, user and turn', async () => {

@@ -3,6 +3,9 @@
 // the box and a question card docked in it, the message list had shrunk to about one sentence, and the confirmation card's list
 // covered the conversation. In a real browser, the real page and its CSS, built as phone-keyboard.browser.test.tsx builds it;
 // the frame is a stand-in with the geometry a conversation page has (the whole screen less a 48px row on top).
+// Second round (Owner's real-model run, 2026-11-27): at 1280x800 the list was still only about 190px and at 360x640 the card's
+// content scrolled away; the complete card is now one folded line until opened, the list keeps half the step on a desktop and
+// 180px on a phone.
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { chromium, expect as ui, type Browser, type Page } from '@playwright/test';
@@ -124,23 +127,37 @@ const reachable = (target: import('@playwright/test').Locator) => target.evaluat
   return box.height > 0 && y >= 0 && y <= innerHeight && Boolean(hit && (element === hit || element.contains(hit)));
 });
 
-const SIZES: Array<[number, number, number]> = [[1440, 900, 180], [1280, 800, 180], [390, 844, 180]];
-for (const [width, height, minimum] of SIZES) {
+/**
+ * Room to read: on a desktop, half the step's own height (the area under the step tabs) for the list together with a docked
+ * question card (the coach's latest question, scrolling in its own frame); on a phone, 180px for the list itself.
+ */
+const SIZES: Array<[number, number, number | 'half']> = [[1440, 900, 'half'], [1280, 800, 'half'], [390, 844, 180], [360, 640, 180]];
+const stepHeight = (page: Page) => page.evaluate(() => document.querySelector('section[aria-label="当前定位步骤"]')!.getBoundingClientRect().height);
+for (const [width, height, floor] of SIZES) {
   for (const state of [{ name: 'step ready (every field listed) and a docked question card', values: ready, withCard: true },
     { name: 'two fields still missing', values: missing, withCard: false }]) {
-    it(`${width}x${height}, ${state.name}: the message list keeps at least ${minimum}px on screen and nothing covers it`, async () => {
+    it(`${width}x${height}, ${state.name}: the message list keeps ${floor === 'half' ? 'half the step' : floor + 'px'} on screen, uncovered`, async () => {
       const { page, errors } = await open(width, height, state);
       try {
         await ui(page.getByRole('region', { name: '本步确认' })).toBeVisible();
+        const minimum = floor === 'half' ? Math.floor(await stepHeight(page) / 2) : floor;
+        // The complete card is one line until it is opened.
+        if (state.values === ready) expect((await page.getByRole('region', { name: '本步确认' }).boundingBox())!.height,
+          'folded confirmation card').toBeLessThanOrEqual(56);
         if (state.withCard) await ui(page.getByRole('button', { name: '3 到 6 小时' })).toBeVisible();
         const room = await logRoom(page);
-        expect(room.visible, 'visible height of the message list').toBeGreaterThanOrEqual(minimum);
+        const docked = floor === 'half' ? await page.evaluate(() =>
+          document.querySelector('[data-question-card]')?.parentElement?.getBoundingClientRect().height ?? 0) : 0;
+        expect(room.visible + docked, 'visible height of the message list (and the docked question)').toBeGreaterThanOrEqual(minimum);
         expect(room.covered, 'pixels of the message list covered by something else').toBe(0);
         // The box, and the step card's buttons, are on screen and nothing is drawn over them.
+        // A short phone (360x640) with both cards scrolls the step as a whole to reach them.
         for (const [name, target] of [['message box', page.getByRole('textbox', { name: '给 AI 教练的回复' })],
           ['send', page.getByRole('button', { name: '发送', exact: true })],
-          ['step card button', page.getByRole('region', { name: '本步确认' }).getByRole('button').first()]] as const)
+          ['step card button', page.getByRole('region', { name: '本步确认' }).getByRole('button').first()]] as const) {
+          if (height < 700) await target.scrollIntoViewIfNeeded();
           expect(await reachable(target), name).toBe(true);
+        }
         expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0);
         expect(errors).toEqual([]);
       } finally { await page.close(); }
@@ -172,16 +189,25 @@ it('the confirmation card\'s "暂时无法确定，写原因暂缓" opens the st
   } finally { await page.close(); }
 }, 60000);
 
-it('360x640 with both cards (a short phone): the step scrolls as a whole, so the box and send are reachable, and the list keeps 120px', async () => {
-  const { page, errors } = await open(360, 640, { values: ready, withCard: true });
-  try {
-    const box = page.getByRole('textbox', { name: '给 AI 教练的回复' });
-    // The step scrolls as a whole: bring the foot of the box (the send button) into view.
-    await page.getByRole('button', { name: '发送', exact: true }).scrollIntoViewIfNeeded();
-    expect(await reachable(box), 'message box').toBe(true);
-    expect(await reachable(page.getByRole('button', { name: '发送', exact: true })), 'send').toBe(true);
-    await page.getByRole('log', { name: '完整 AI 教练消息' }).scrollIntoViewIfNeeded();
-    expect((await logRoom(page)).visible).toBeGreaterThanOrEqual(120);
-    expect(errors).toEqual([]);
-  } finally { await page.close(); }
-}, 60000);
+for (const [width, height] of [[1280, 800], [360, 640]] as const) {
+  it(`${width}x${height}: the folded card opens to every value, and only then confirms; it folds again`, async () => {
+    const { page, errors } = await open(width, height, { values: ready, withCard: true });
+    try {
+      const region = page.getByRole('region', { name: '本步确认' });
+      await ui(region.getByRole('button', { name: '没问题，进入下一步' })).toHaveCount(0);
+      await region.getByRole('button', { name: '展开核对' }).click();
+      for (const field of fields) await ui(region.getByText(long(field.title))).toHaveCount(1);
+      const confirm = region.getByRole('button', { name: '没问题，进入下一步' });
+      await confirm.scrollIntoViewIfNeeded();
+      expect(await reachable(confirm), 'confirm button of the opened card').toBe(true);
+      // The box and send stay reachable with the card open (the step scrolls as a whole on a short phone).
+      await page.getByRole('button', { name: '发送', exact: true }).scrollIntoViewIfNeeded();
+      expect(await reachable(page.getByRole('button', { name: '发送', exact: true })), 'send').toBe(true);
+      await region.getByRole('button', { name: '收起' }).click();
+      await ui(region.getByRole('button', { name: '展开核对' })).toBeVisible();
+      await page.getByRole('log', { name: '完整 AI 教练消息' }).scrollIntoViewIfNeeded();
+      expect((await logRoom(page)).visible).toBeGreaterThanOrEqual(180);
+      expect(errors).toEqual([]);
+    } finally { await page.close(); }
+  }, 60000);
+}

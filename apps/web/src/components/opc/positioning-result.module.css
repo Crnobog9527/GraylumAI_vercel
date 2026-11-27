@@ -133,16 +133,26 @@
    message list and the box (the step's confirmation, the summary offer) shares one bounded tray that scrolls on its own, with
    its buttons pinned to the tray's foot so they are always on screen. A docked question card scrolls inside its own frame;
    when both are shown, each takes a smaller share, so the list, the tray's buttons and the box all fit. The box never shrinks. */
-.conversationPage .mentorChat [role=log]{flex:1 1 0;min-height:clamp(120px,24dvh,300px)}
+.conversationPage .mentorChat [role=log]{flex:1 1 0;min-height:clamp(180px,26dvh,300px)}
 /* A short screen where even the floors do not fit (360x640 with both cards): the step scrolls as a whole, so the box is reachable. */
 .conversationPage .workspaceContent>section[aria-label="当前定位步骤"]{overflow-y:auto;overscroll-behavior:contain}
 .conversationPage .mentorChat>.chatTray{flex:0 1 auto;min-height:min(92px,12dvh);max-height:clamp(110px,22dvh,220px);overflow-y:auto;overscroll-behavior:contain;margin-top:6px;scrollbar-width:thin}
 .chatTray:empty{display:none}
 .chatTray>section[aria-label="本步确认"]{margin-top:0}
 .chatTray>section[aria-label="本步确认"] ul{max-height:none;overflow:visible}
-.chatTray>section[aria-label="本步确认"]>div:last-child{position:sticky;bottom:-14px;z-index:1;margin:0 -16px -14px;padding:8px 16px 10px;background:inherit;border-top:1px solid #ececec}
+.chatTray>section[aria-label="本步确认"]:not([data-folded])>div:last-child{position:sticky;bottom:-14px;z-index:1;margin:0 -16px -14px;padding:8px 16px 10px;background:inherit;border-top:1px solid #ececec}
 .chatTray>div:not(:first-child){margin-top:6px}
 .conversationPage .mentorChat>div:has([role=textbox]){flex:none}
 .conversationPage .mentorChat>div:has([role=textbox])>div>div:has(>[data-question-card]){max-height:clamp(110px,24dvh,280px)}
-.conversationPage .mentorChat:has(>.chatTray:not(:empty))>div:has([role=textbox])>div>div:has(>[data-question-card]){max-height:clamp(96px,13dvh,170px)}
+.conversationPage .mentorChat:has(>.chatTray:not(:empty))>div:has([role=textbox])>div>div:has(>[data-question-card]){max-height:clamp(84px,11dvh,170px)}
 .conversationPage .mentorChat:has([data-question-card])>.chatTray{max-height:clamp(96px,13dvh,170px)}
+/* Folded, the card and the step-summary button share one row; the summary's explanation waits for the card to open. */
+.conversationPage .mentorChat>.chatTray:has(>[data-folded]){flex:none;min-height:0;overflow:visible;display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.chatTray>[data-folded]{flex:1 1 260px;min-width:0}
+.chatTray:has(>[data-folded])>div:not(:first-child){margin-top:0;flex:none}
+.chatTray:has(>[data-folded])>div:not(:first-child)>span{display:none}
+/* Typing on a phone (the keyboard is up): the box being typed in comes first, so the list gives up its reading floor (and shrinks
+   first) while the keyboard is shown (390x780 with a 300px keyboard leaves 432px for the page's own rows); the floor returns with the keyboard. */
+/* The step's card steps aside while typing too, as the final actions do; it is back when the keyboard goes. */
+@media(max-width:639px){:root[data-keyboard] .conversationPage .mentorChat [role=log]{min-height:0}
+ :root[data-keyboard] .conversationPage .mentorChat>.chatTray{display:none}}

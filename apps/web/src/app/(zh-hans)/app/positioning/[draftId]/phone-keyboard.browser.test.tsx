@@ -132,10 +132,14 @@ for (const [width, height] of [[390, 780], [390, 664], [360, 640]]) {
       expect(box!.y, 'under the top row').toBeGreaterThanOrEqual(48);
       expect(box!.y + box!.height, 'above the keyboard').toBeLessThanOrEqual(height - KEYBOARD);
       expect(send!.y + send!.height, 'the send button too').toBeLessThanOrEqual(height - KEYBOARD);
+      // The conversation keeps a visible strip above the box (Owner 11-27 run: the step's card steps aside while typing).
+      const log = await page.getByRole('log', { name: '完整 AI 教练消息' }).boundingBox();
+      expect(Math.min(log!.y + log!.height, box!.y) - Math.max(log!.y, 48), 'messages still in view').toBeGreaterThanOrEqual(40);
       await ui(page.getByRole('button', { name: '确认正式定位' })).toBeHidden();
       // The keyboard goes: the final actions are back.
       await keyboard(page, 0);
       await ui(page.getByRole('button', { name: '确认正式定位' })).toBeVisible();
+      await ui(page.getByRole('region', { name: '本步确认' })).toBeVisible();
       expect(errors).toEqual([]);
     } finally { await page.close(); }
   }, 30000);

@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {describe,expect,it} from 'vitest';
 import {AGENT_TURN_STABLE_PREFIX,agentTurnInstructions,OPENING_EXTRACTION_RULE,researchOpeningInstructions} from './agentTurnPrompt';
+import {groundedCardTool} from '../turn/agent/groundedCard';
 
 const prompt = agentTurnInstructions();
 describe('conversation checklist mentor prompt',()=>{
@@ -26,18 +27,19 @@ describe('conversation checklist mentor prompt',()=>{
   expect(prompt).not.toContain('most turns need no card');
   expect(prompt).toContain('you MUST call ask_question');
   expect(prompt).toContain('including when they explicitly ask for options');
-  expect(prompt).toContain('Never write a multiple-choice question only as assistant prose');
-  expect(prompt).toContain('examples in prose do not replace the card');
+  expect(prompt).toContain('Never ask a case 1 or 2 question in prose only; call ask_question.');
   expect(prompt).toContain('Set recommended to null. Options must not assert facts about the user.');
   expect(prompt).toContain('insufficient information for a professional judgement, ask one open question');
-  expect(prompt).toContain("Do not turn guesses about the user's customers, audience, strengths, story or offer into options");
+  expect(prompt).toContain('For open personal content (experience, strengths, stories, customers or goals), NEVER issue a card');
   expect(prompt).toContain('4. Clear answer: no card');
   expect(prompt).toContain('5. Host opening: no card');
-  expect(prompt).toContain('Do not repeat the list of card options in prose');
+  // The Skill keeps its examples in prose and gives a card short labels (Skill E13); the host no longer forbids that.
+  expect(prompt).not.toContain('Do not repeat the list of card options in prose');
+  expect(prompt).toContain("With a neutral card, keep the Skill's examples in prose; card options are short labels for them.");
   expect(prompt).toContain('Recommend one with a reason');
   expect(prompt).toContain('The host adds an Other entry; never add other, not-sure, skip, defer or continue options');
-  expect(prompt).toContain('For user_fact, use a neutral card only for general ranges or categories and Socratic prose for open personal content');
-  expect(prompt).toContain('never offer guesses as options');
+  expect(prompt).toContain('NEVER issue a card, even when the user explicitly requests options');
+  expect(prompt).toContain('Offer examples in prose only as guesses');
   expect(prompt).toContain('explicitly label the claim as a hypothesis made because information is insufficient');
   expect(prompt).toContain('information is insufficient; never present it as measured data');
   expect(prompt).not.toContain('我不确定，帮我分析');
@@ -90,5 +92,27 @@ describe('Owner 2026-11-26: neutral cards without a request, and no question ask
   });
   it('the mentor never asks again what the user already answered', () => {
     expect(AGENT_TURN_STABLE_PREFIX).toContain('Never re-ask an answered question');
+  });
+  it('how a service is charged is a neutral category; the card tool no longer calls every offer question personal', () => {
+    expect(AGENT_TURN_STABLE_PREFIX).toContain('how a service is charged');
+    const description = groundedCardTool(() => ({current: '', user: []})).description;
+    expect(description).toContain('how the service is charged');
+    expect(description).toContain('offer content');
+    expect(description).not.toMatch(/customers, offers\)/);
+    expect(description).not.toContain('do not repeat the options');
+  });
+});
+
+describe('Owner 2026-11-27 real-model run: nothing the user declined is asked for again, and the card click is asked once', () => {
+  it('something the user lacks or declined is settled: not asked again, not listed as an option, no stand-in', () => {
+    expect(AGENT_TURN_STABLE_PREFIX).toContain('If the user said they lack, cannot give or do not want something (a link, data, a referral), it is settled');
+    expect(AGENT_TURN_STABLE_PREFIX).toContain('list or recommend it as an option, or seek a stand-in');
+    expect(AGENT_TURN_STABLE_PREFIX).toContain('only the user may reopen it');
+  });
+  it('the confirmation card click is requested once per step, and verbal assent gets one pointer to the card', () => {
+    expect(AGENT_TURN_STABLE_PREFIX).toContain('request a click on the chat confirmation card once per step');
+    expect(AGENT_TURN_STABLE_PREFIX).toContain('do not repeat the request in later replies');
+    expect(AGENT_TURN_STABLE_PREFIX).not.toContain('request the card click again');
+    expect(AGENT_TURN_STABLE_PREFIX).toContain('point to the card in one sentence, without advancing');
   });
 });

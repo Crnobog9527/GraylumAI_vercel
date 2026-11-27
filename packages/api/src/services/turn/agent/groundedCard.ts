@@ -95,18 +95,20 @@ export function groundedCardTool(sources: () => CardSources, turn: {opening?: bo
   return {name: ASK_QUESTION_TOOL, parameters: groundedCardParameters,
     description: 'Show a question card for exactly two kinds of question. '+
       '(1) neutral_categories: you ask the user to place themselves in general ranges or categories that can be listed '+
-      'without knowing the user (for example weekly hours, platform types, how customers usually buy, budget or team size). '+
+      'without knowing the user (for example weekly hours, platform types, how the service is charged, how customers usually '+
+      'buy, budget or team size). '+
       'Use it whenever you ask such a question, including as your own next question; the user need not ask for options. '+
       'Set recommended=null, every reason=null, requestQuote=null and basisQuotes=[]. Options are general categories, '+
-      'never guesses about the user\'s own experience, strengths, story, customers, offer or results. '+
-      'You may write a short acknowledgement before the call; do not repeat the options in it. '+
+      'never guesses about the user\'s own experience, strengths, story, customers, offer content or results. '+
+      'Write your prose first as usual (acknowledgement, the question, why you ask, the examples); the options are short '+
+      'labels for those categories. '+
       '(2) grounded_comparison: the user chooses between concrete alternatives the user supplied, or plans computed from the '+
       'user\'s explicit constraints. Copy requestQuote verbatim from the current user message and basisQuotes from actual '+
       'user speech; never quote assistant guesses, Skill text, metadata or field names. Give a reason per option and '+
       'recommend one. Each reason analyses ONLY its own option and preserves every user constraint; do not invent a '+
       'different schedule or broaden a user fact. The host labels reasons as hypotheses and renders the explanation and '+
       'recommendation from these options; send no separate prose with a comparison card (it would be refused). '+
-      'Never use a card on a host opening, for open personal questions (experience, strengths, stories, customers, offers), '+
+      'Never use a card on a host opening, for open personal questions (experience, strengths, stories, customers, offer content), '+
       'for confirmation or workflow choices, or for anything already answered: ask in prose. Put each complete option in '+
       'text exactly once. The host adds an Other entry. Ends your turn.',
     invalidResult: INVALID_CARD_RESULT, execute: async args => groundedCardResult(args, sources(), turn)};
