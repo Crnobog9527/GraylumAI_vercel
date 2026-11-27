@@ -21,7 +21,7 @@ const host = (stepId: string, filled: Record<string, string> = {}, opts: { openi
 const reply = (seq: number, body: string, roundId = 'r1'): HistoryItem =>
   ({ seq, role: 'assistant', content: mentorReplyBody(body, 'step-1', roundId), contentHash: 'a'.repeat(64) });
 const pick = (h: ReturnType<typeof host>, extra: Partial<Parameters<typeof fixedQuestionFor>[0]> = {}) =>
-  fixedQuestionFor({ host: h, history: [], roundId: 'r1', locale: 'zh-Hans', firstOpening: false, summary: false, ...extra });
+  fixedQuestionFor({ host: h, history: [], roundId: 'r1', locale: 'zh-Hans', firstOpening: false, summary: false, mode: 'mentor', ...extra });
 const before = (upTo: string) => Object.fromEntries(STEP1.slice(0, STEP1.indexOf(upTo)).map(id => [id, '已说过']));
 
 describe('Owner 2026-11-27 option C: which fixed question the host asks, and when none', () => {
@@ -37,6 +37,8 @@ describe('Owner 2026-11-27 option C: which fixed question the host asks, and whe
   it('the first opening, a step summary, a ready or confirmed step get no card', () => {
     expect(pick(host('step-1', {}, { opening: true }), { firstOpening: true })).toBeNull();
     expect(pick(host('step-1'), { summary: true })).toBeNull();
+    // Importing an existing positioning asks for the user's material, not the interview's questions.
+    expect(pick(host('step-1'), { mode: 'manual' })).toBeNull();
     const ready = Object.fromEntries(STEP1.map(id => [id, '已说过']));
     expect(pick(host('step-1', ready))).toBeNull();
     expect(pick(host('step-1', {}, { confirmed: true }))).toBeNull();

@@ -11,6 +11,7 @@ import type { HistoryItem } from './db';
  *    already has) stay prose, as everything outside the list does;
  *  - only when the next empty field of the step is that field, so the coach's own order of questions is kept;
  *  - never on the conversation's first opening, a step summary, or once the step is ready or confirmed;
+ *  - only in the interview (mode mentor): importing an existing positioning (mode manual) asks for the user's material instead;
  *  - never twice in a round, and not when the user answered the field in the same turn (the organizer wrote it).
  * Cards carry no recommendation; the page adds the "Other" entry. The questions and options are copy (the decision allows edits).
  */
@@ -72,9 +73,9 @@ function askedInRound(history: readonly HistoryItem[], roundId: string): Set<str
 
 /** The fixed question this turn asks, or null (see the rules above). */
 export function fixedQuestionFor(input: { host: HostTurnContext; history: readonly HistoryItem[]; roundId: string; locale: ReplyLocale;
-  firstOpening: boolean; summary: boolean }): ChosenQuestion | null {
+  firstOpening: boolean; summary: boolean; mode: unknown }): ChosenQuestion | null {
   const { host } = input;
-  if (input.summary || input.firstOpening || host.confirmation?.stepReady || host.confirmation?.stepConfirmed) return null;
+  if (input.mode !== 'mentor' || input.summary || input.firstOpening || host.confirmation?.stepReady || host.confirmation?.stepConfirmed) return null;
   const fields = host.checklist.find(step => step.id === host.stepId)?.fields ?? [];
   const missing = fields.filter(field => field.required && field.status === 'missing');
   // The next field the user is asked about: the first empty one the user supplies; in a step of the coach's drafts only (step 2),

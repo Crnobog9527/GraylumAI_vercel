@@ -240,7 +240,7 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
     const firstOpening = opening && !userHasSpoken(opened.history);
     // Owner 2026-11-27 option C: the host's fixed question of this turn, whose card the host shows (fixedQuestions.ts).
     const chosen = fixedQuestionFor({ host, history: opened.history, roundId: ctx.roundId,
-      locale: effectiveReplyLocale(opened.replyLanguage), firstOpening, summary });
+      locale: effectiveReplyLocale(opened.replyLanguage), firstOpening, summary, mode: ctx.mode });
     const userMessage = mentorUserMessage(words, state.scopeMaterial, { ...host, ...(asked ? { confirmationAsked: true } : {}),
       ...(chosen ? { fixedQuestion: { question: chosen.question, note: FIXED_QUESTION_NOTE } } : {}) });
 
