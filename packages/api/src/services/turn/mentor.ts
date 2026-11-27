@@ -8,7 +8,6 @@ import { agentTurnResult } from './agent/agentTurnResult';
 import { assertRuntimeRequestCapacity } from './agent/context';
 import { cardSources, groundedCardFallback, groundedCardTool, groundedCardToolBytes, groundedTurn,
   type CardSources } from './agent/groundedCard';
-import { organizerNeutralCard, withOrganizerCard, withoutOrganizerCard } from './agent/organizerCard';
 import { AGENT_TURN_REQUEST_FORMAT, openRouterRequestBody, type RequestContext } from './provider/providerRequest';
 import { freezeSharedPromptCache } from './provider/promptCache';
 import { replySettingInstructions } from './agent/replyLanguage';
@@ -300,22 +299,18 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
       },
     });
     // A neutral card keeps the coach's short prose before it; a comparison card with separate prose is refused (groundedCard.ts).
-    let turn = groundedTurn(text, output, toolCalled, cardMessage);
+    const turn = groundedTurn(text, output, toolCalled, cardMessage);
     // Nothing to show (no prose, no card): nothing was delivered, the user pays nothing.
     if (!turn.card && turn.message === INVALID_REPLY_NOTICE) throw new TurnStop('TURN_CALL_DENIED');
 
     // 6. The organizer: the checklist patches of this turn, applied by turn_close. A failed organizer call never takes the
     // delivered reply back; its result is then empty (recorded as invalid_output, as the old path recorded a lost organizer).
     let organized: unknown = null, captureInput: unknown;
-    // A neutral range/category question the mentor wrote as prose may still get its card (organizerCard.ts); never on a turn
-    // that may carry no card, nor beside research cards or a step waiting for its confirmation click.
-    const cardAfter = !opening && !summary && !turn.card && !benchmark?.journal() && !host.confirmation?.stepReady
-      && !host.confirmation?.stepConfirmed;
     if (organizer) {
       const capture = mentorOrganizerInput(state, host, words, answered);
       captureInput = capture.value;
       try { organized = await runOrganizer({ catalog: organizer, context, deps: callDeps(organizer), gate: callGate,
-        template: prepared.organizerTemplate, opening, card: cardAfter, input: organizerInput(capture.text, turn.body) }); }
+        template: prepared.organizerTemplate, opening, input: organizerInput(capture.text, turn.body) }); }
       catch (error) {
         // A deletion ends the turn; a credit pause keeps it waiting (not closed, so a resume can still organize this reply); the
         // stop-loss closes it failed with everything refunded (ENGINEERING 5).
@@ -323,9 +318,6 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
           || error.code === 'STOP_LOSS_REACHED')) throw error;
         logSwallowed('turn_mentor_organizer_failed', error, { category: 'ai' });
       }
-      const card = cardAfter ? organizerNeutralCard(organized, turn.message) : null;
-      if (card) turn = withOrganizerCard(turn, card);
-      organized = withoutOrganizerCard(organized);
     }
 
     // 7. Close: settle once, save both messages, apply the checklist patches in the same transaction. A source withdrawn during
@@ -379,9 +371,9 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
 /** One organizer call (no tools, no history): its JSON object, or null when the reply is not one. */
 async function runOrganizer(input: { catalog: ChatQuote; context: RequestContext; deps: Parameters<typeof modelCall>[0];
   gate: () => Promise<void>;
-  template: string | undefined; opening: boolean; card: boolean; input: string }): Promise<unknown> {
+  template: string | undefined; opening: boolean; input: string }): Promise<unknown> {
   const { catalog } = input;
-  const instructions = organizerInstructions(input.template, input.opening, input.card);
+  const instructions = organizerInstructions(input.template, input.opening);
   // The SDK wraps what the exchange throws; the turn's own stop (a pause, a deletion) is kept and rethrown as itself.
   let stopped: TurnStop | undefined;
   const keep = (error: unknown) => { if (error instanceof TurnStop) stopped = error; throw error; };
