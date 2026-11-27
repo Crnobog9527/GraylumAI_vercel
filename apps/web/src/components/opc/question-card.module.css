@@ -21,6 +21,13 @@
 .reason{margin:-4px 0 4px;padding:0 8px;color:#6b6b6b;font-size:12px;line-height:18px;white-space:pre-wrap;overflow-wrap:anywhere}
 /* Docked inside the composer, above the text box: the composer draws the border. */
 .docked{position:relative;margin:0;padding:0 0 10px;border:0;border-bottom:1px solid #ececec;border-radius:0;background:none}
+/* Docked, the options wrap as compact chips, so every one is in view without scrolling (defect E, Owner 2026-11-27: a list of
+   five rows was cut to its first one above the box). The recommended option's reason takes its own line right after it. */
+.docked .options{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
+.docked .optionItem{display:contents}
+.card.docked .option{width:auto;max-width:100%;min-height:34px;padding:6px 12px;border:1px solid #e6e6e6;border-radius:10px;line-height:20px}
+.card.docked .option:hover:not(:disabled),.card.docked .option:focus-visible{border-color:#d4d4d8}
+.docked .reason{flex-basis:100%;margin:0 0 2px;padding:0 4px}
 /* The 32px fold button reaches below the 18px title into the question line: keep both clear of it. */
 .docked .head,.docked .question{padding-right:36px}
 /* At least 32px to tap; inside the box so the scrolling dock never overflows. */
@@ -33,3 +40,6 @@
 .foldedText .head{display:inline;margin-right:8px}
 .folded button.show{flex:none;min-height:0;padding:0;border:0;background:none;color:#555;font:inherit;font-size:12px;text-decoration:underline;cursor:pointer}
 @media(max-width:480px){.card .option{min-height:44px}.docked{padding-bottom:8px}}
+/* A phone keeps the docked card to the question and its options (the section is still named "AI 教练提问" for assistive tech), so
+   the conversation keeps its reading room above it. */
+@media(max-width:639px){.docked .head{display:none}}

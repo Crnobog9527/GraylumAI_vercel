@@ -26,12 +26,15 @@ const fixture = (values: Record<string, unknown>) => ({ draftId: 'draft', projec
   information: { s: { schema: fields, values, meta: {} }, t: { schema: [{ id: 'g', title: '对标', required: true }], values: {}, meta: {} } } });
 const card = { question: '你每周大概能拿出多少时间做这个账号？', options: ['3 小时以内', '3 到 6 小时', '6 小时以上'], recommended: null,
   message: '下面是中性的范围或类别，请按实际情况选择。', recommendationReason: null };
-const reply = (text: string, withCard = false) =>
-  JSON.stringify({ format: 'agent-turn.v1', message: text, card: withCard ? card : null, stepId: 's', roundId: 'round' });
-const messages = (withCard: boolean) => Array.from({ length: 6 }, (_, index) => [
+// The host's fixed goal question (Owner 2026-11-27 option C), five options: the most a fixed card has.
+const goalCard = { question: '你做这个账号，最希望它最后带来什么？', options: ['每月多份零花钱', '给生意带客户', '慢慢做成主业', '卖课程或产品', '先试试适不适合'],
+  recommended: null, message: '你做这个账号，最希望它最后带来什么？', recommendationReason: null };
+const reply = (text: string, shown: typeof card | null) =>
+  JSON.stringify({ format: 'agent-turn.v1', message: text, card: shown, stepId: 's', roundId: 'round' });
+const messages = (withCard: boolean, shown = card) => Array.from({ length: 6 }, (_, index) => [
   { seq: index * 2 + 1, role: 'user', turnId: index + 1, content: `第 ${index + 1} 轮：` + '我是上海的上班族，想做小红书快手晚餐。'.repeat(2) },
   { seq: index * 2 + 2, role: 'assistant', turnId: index + 1,
-    content: reply(`第 ${index + 1} 段回复。` + '我们先把你的目标和受众说清楚，再看平台和时间。'.repeat(4), withCard && index === 5) },
+    content: reply(`第 ${index + 1} 段回复。` + '我们先把你的目标和受众说清楚，再看平台和时间。'.repeat(4), withCard && index === 5 ? shown : null) },
 ]).flat();
 
 beforeAll(async () => {
@@ -83,7 +86,7 @@ beforeAll(async () => {
 }, 60000);
 afterAll(async () => { await browser?.close(); }, 30000);
 
-async function open(width: number, height: number, state: { values: Record<string, unknown>; withCard: boolean }) {
+async function open(width: number, height: number, state: { values: Record<string, unknown>; withCard: boolean; card?: typeof card }) {
   const page = await browser.newPage({ viewport: { width, height } });
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
@@ -93,7 +96,7 @@ async function open(width: number, height: number, state: { values: Record<strin
     if (path === '/') return route.fulfill({ contentType: 'text/html',
       body: '<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{margin:0}</style><div id="root"></div>' });
     if (path === '/api/turn') return route.fulfill({ contentType: 'application/json',
-      body: JSON.stringify({ activeTurn: null, lastTurn: null, messages: messages(state.withCard), calls: [] }) });
+      body: JSON.stringify({ activeTurn: null, lastTurn: null, messages: messages(state.withCard, state.card), calls: [] }) });
     const result = path.endsWith('/opc.read') ? data : path.endsWith('/runtime.choices') ? {}
       : path.endsWith('/opc.businesses') ? [] : path.endsWith('/opc.list') ? { drafts: [] } : path.endsWith('/opc.library') ? { businesses: [] }
         : path.endsWith('/opc.capturePending') ? { processed: [] } : {};
@@ -207,6 +210,50 @@ for (const [width, height] of [[1280, 800], [360, 640]] as const) {
       await ui(region.getByRole('button', { name: '展开核对' })).toBeVisible();
       await page.getByRole('log', { name: '完整 AI 教练消息' }).scrollIntoViewIfNeeded();
       expect((await logRoom(page)).visible).toBeGreaterThanOrEqual(180);
+      expect(errors).toEqual([]);
+    } finally { await page.close(); }
+  }, 60000);
+}
+
+/**
+ * Directly visible: inside the viewport and inside every box that clips it (a scrolling frame shows it without being scrolled),
+ * and the topmost thing at its centre is the element itself.
+ */
+const inView = (target: import('@playwright/test').Locator) => target.evaluate(element => {
+  const box = element.getBoundingClientRect();
+  let top = 0, bottom = innerHeight;
+  for (let node = element.parentElement; node; node = node.parentElement) {
+    const style = getComputedStyle(node);
+    if (/(auto|scroll|hidden|clip)/.test(style.overflowY)) {
+      const clip = node.getBoundingClientRect();
+      top = Math.max(top, clip.top); bottom = Math.min(bottom, clip.bottom);
+    }
+  }
+  const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+  return { inside: box.height > 0 && box.top >= top - 0.5 && box.bottom <= bottom + 0.5, top: box.top, bottom: box.bottom, clipTop: top,
+    clipBottom: bottom, onTop: Boolean(hit && (element === hit || element.contains(hit))) };
+});
+
+// Defect E (Owner 2026-11-27, #2060 run): with the step's missing-fields card above the box, the docked card showed only its
+// first option ("每月多份零花钱"); the rest scrolled inside a frame cut to about 100px, with no sign there was more. Every option
+// and "其他" must now be on screen without scrolling anything, at the four sizes.
+for (const [width, height] of SIZES) {
+  it(`${width}x${height}, two fields missing and the five-option goal card docked: every option is directly visible`, async () => {
+    const { page, errors } = await open(width, height, { values: missing, withCard: true, card: goalCard });
+    try {
+      const options = page.getByRole('region', { name: 'AI 教练提问' }).getByRole('group', { name: '建议选项' }).getByRole('button');
+      await ui(options).toHaveCount(6);
+      for (const label of [...goalCard.options, '其他']) {
+        const seen = await inView(options.filter({ hasText: label }).first());
+        expect(seen, `${label} at ${width}x${height}: ${JSON.stringify(seen)}`).toMatchObject({ inside: true, onTop: true });
+      }
+      // The box and the missing-fields card's buttons stay on screen too (the step scrolls as a whole only on a short phone).
+      for (const target of [page.getByRole('textbox', { name: '给 AI 教练的回复' }),
+        page.getByRole('region', { name: '本步确认' }).getByRole('button').first()]) {
+        if (height < 700) await target.scrollIntoViewIfNeeded();
+        expect(await reachable(target)).toBe(true);
+      }
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0);
       expect(errors).toEqual([]);
     } finally { await page.close(); }
   }, 60000);

@@ -545,7 +545,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   const liveOnly = liveReply && !mentorExecutions.some(e => e.executionId === liveReply.executionId) ? liveReply : null;
   // The one open question card, docked to the message box. Set while the conversation renders.
   let chatShown = false, lastTurnNotice = false, lastTurnText = "";
-  let dock: ReactNode = liveOnly?.card ? <QuestionCardView key="live" card={liveOnly.card} disabled docked/> : null;
+  let dock: ReactNode = liveOnly?.card ? <QuestionCardView key="live" card={liveOnly.card} disabled docked reveal/> : null;
   // A retained mentor envelope can exist before its execution is visible in
   // history (or after a lost reply), so recovery is driven by the envelope
   // itself rather than the execution list.
@@ -672,7 +672,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                           : pendingBubble && { ...pendingBubble, roundId: d.roundId } });
                       const cardLocked = !status.onShownStep || execution.state !== "completed" || sendLocked || snap.state !== "draft";
                       if (reply.card && !status.answered && !liveOnly && foldedCard !== execution.executionId) {
-                        dock = <QuestionCardView key={execution.executionId} card={reply.card} disabled={cardLocked} docked
+                        dock = <QuestionCardView key={execution.executionId} card={reply.card} disabled={cardLocked} docked reveal
                           onAnswer={(input, optionIndex) => void ask(step, input, {executionId: execution.executionId, optionIndex})}
                           onOther={focusReply} onDismiss={() => setFoldedCard(execution.executionId)}/>;
                       }
