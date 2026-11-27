@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {describe,expect,it} from 'vitest';
-import {agentTurnInstructions,OPENING_EXTRACTION_RULE,researchOpeningInstructions} from './agentTurnPrompt';
+import {AGENT_TURN_STABLE_PREFIX,agentTurnInstructions,OPENING_EXTRACTION_RULE,researchOpeningInstructions} from './agentTurnPrompt';
 
 const prompt = agentTurnInstructions();
 describe('conversation checklist mentor prompt',()=>{
@@ -77,4 +77,18 @@ it('confirmation gate overrides opening and question rules without turning assen
  expect(prompt).toContain('volunteered later-step information');
  for (const phrase of ['继续','下一步','没问题','好的']) expect(prompt).toContain(phrase);
  expect(prompt).not.toContain('confirm this step in the right panel');
+});
+
+describe('Owner 2026-11-26: neutral cards without a request, and no question asked twice', () => {
+  it('the mentor is told to use a neutral card for any general range or category it asks about', () => {
+    expect(AGENT_TURN_STABLE_PREFIX).not.toContain('Neutral cards require an explicit current request');
+    expect(AGENT_TURN_STABLE_PREFIX).toContain('Neutral cards need no user request.');
+    expect(AGENT_TURN_STABLE_PREFIX).toContain('Neutral card: use ask_question for general ranges or categories');
+    // Still no card on an opening, and open personal content stays prose.
+    expect(AGENT_TURN_STABLE_PREFIX).toContain('Host opening: no card');
+    expect(AGENT_TURN_STABLE_PREFIX).toContain('NEVER issue a card');
+  });
+  it('the mentor never asks again what the user already answered', () => {
+    expect(AGENT_TURN_STABLE_PREFIX).toContain('Never re-ask an answered question');
+  });
 });

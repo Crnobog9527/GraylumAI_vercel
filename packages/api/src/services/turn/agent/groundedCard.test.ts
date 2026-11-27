@@ -1,9 +1,11 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {expect,it} from 'vitest';
-import {cardSources,groundedCardFallback,groundedCardResult,groundedCardTool,groundedCardToolBytes,rejectSeparateCardProse} from './groundedCard';
+import {cardSources,groundedCardFallback,groundedCardParameters,groundedCardResult,groundedCardTool,groundedCardToolBytes,groundedTurn,rejectSeparateCardProse} from './groundedCard';
 import {INVALID_CARD_RESULT,questionCardFromResult,askQuestionTool} from './agentTools';
 import {agentTurnResult} from './agentTurnResult';
-import {INVALID_REPLY_NOTICE} from '../../../shared/agentTurn';
+import {INVALID_REPLY_NOTICE,readAgentTurnBody} from '../../../shared/agentTurn';
+import {projectMentorHistory} from '../mentorPrompt';
+import {mentorReplyBody} from '../mentorInput';
 import {hostTurnContextSchema} from './hostTurn';
 const sources={current:'我考虑甲或乙，还不确定，帮我比较。',user:['每周共四小时。']};
 const choice={intent:'grounded_comparison',requestQuote:'甲或乙',basisQuotes:['每周共四小时。'],
@@ -30,13 +32,51 @@ it('requires current request evidence and earlier USER evidence, rejecting inven
  expect(cardSources(sources.current,[{role:'user',content:JSON.stringify({inputFormat:'host-turn-v1',
   userRequest:'每周共四小时。',hostTurnContext:{stepId:'metadata'}})}]).user).toEqual(['每周共四小时。']);
 });
-it('allows explicitly requested neutral categories but prevents a recommendation or guessed rationale',()=>{
- const neutral={...choice,intent:'requested_neutral_categories',recommended:null,
-  requestQuote:'请列常见范围',basisQuotes:['请列常见范围'],options:[{text:'少量',reason:null},{text:'较多',reason:null}]};
- const source={current:'请列常见范围',user:[]};
- expect(questionCardFromResult(groundedCardResult(neutral,source))).toMatchObject({recommended:null,recommendationReason:null});
- expect(groundedCardResult({...neutral,recommended:0},source)).toBe(INVALID_CARD_RESULT);
- expect(groundedCardResult({...neutral,options:choice.options},source)).toBe(INVALID_CARD_RESULT);
+// Owner 2026-11-26, option A (restoring 2026-09-29 item 20): staging had 0 cards in about 2,400 mentor replies because a
+// neutral card needed the user to ask for options in the same message.
+const neutral={intent:'neutral_categories',requestQuote:null,basisQuotes:[],question:'你每周大概能拿出多少时间？',
+ options:[{text:'3 小时以内',reason:null},{text:'3 到 6 小时',reason:null},{text:'6 小时以上',reason:null}],recommended:null};
+it('a neutral range card needs no request and no quotation from the user, and never carries a recommendation or reasons',()=>{
+ const none={current:'我想获客，我们是做餐饮收银软件的。',user:[]};
+ expect(questionCardFromResult(groundedCardResult(neutral,none))).toMatchObject({question:neutral.question,
+  options:['3 小时以内','3 到 6 小时','6 小时以上'],recommended:null,recommendationReason:null});
+ expect(groundedCardResult({...neutral,recommended:0},none)).toBe(INVALID_CARD_RESULT);
+ expect(groundedCardResult({...neutral,options:choice.options},none)).toBe(INVALID_CARD_RESULT);
+ // The name before the decision, and quotes the model still sends, are read as before.
+ expect(questionCardFromResult(groundedCardResult({...neutral,intent:'requested_neutral_categories',requestQuote:'随便写',
+  basisQuotes:['随便写']},none))?.options).toHaveLength(3);
+});
+it('a comparison (with a recommendation) still needs the current request and the user\'s own alternatives, quoted',()=>{
+ expect(groundedCardResult({...choice,requestQuote:null},sources)).toBe(INVALID_CARD_RESULT);
+ expect(groundedCardResult({...choice,basisQuotes:[]},sources)).toBe(INVALID_CARD_RESULT);
+ expect(groundedCardResult({...choice,intent:'neutral_categories'},sources)).toBe(INVALID_CARD_RESULT);
+});
+it('no card on a host opening: the user has not spoken (the tool refuses it, the fallback keeps it as prose)',async()=>{
+ expect(groundedCardResult(neutral,sources,{opening:true})).toBe(INVALID_CARD_RESULT);
+ expect(await groundedCardTool(()=>sources,{opening:true}).execute(neutral,'x')).toBe(INVALID_CARD_RESULT);
+ expect(questionCardFromResult(await groundedCardTool(()=>sources).execute(neutral,'x'))).not.toBeNull();
+ expect(groundedCardFallback(JSON.stringify(neutral))).toContain('1. 3 小时以内');
+});
+it('a neutral card keeps the coach\'s acknowledgement before it; a comparison card with separate prose is still refused',()=>{
+ const neutralTurn=groundedTurn('明白了，你想通过账号获客。',groundedCardResult(neutral,sources),true,null);
+ expect(neutralTurn.card?.options).toHaveLength(3);
+ expect(neutralTurn.message).toBe('明白了，你想通过账号获客。');
+ expect(JSON.parse(neutralTurn.body)).toMatchObject({message:'明白了，你想通过账号获客。',card:{recommended:null}});
+ // Review (P2): a reload and the next turn's history read the card's own message; both must keep the coach's words.
+ expect(readAgentTurnBody(neutralTurn.body)).toMatchObject({message:'明白了，你想通过账号获客。',card:{options:['3 小时以内','3 到 6 小时','6 小时以上']}});
+ expect(projectMentorHistory([{seq:2,role:'assistant',content:mentorReplyBody(neutralTurn.body,'s','r'),contentHash:'h'}])[0]!.content)
+  .toBe('明白了，你想通过账号获客。');
+ const alone=groundedTurn('',groundedCardResult(neutral,sources),true,null);
+ expect(alone.card).not.toBeNull();expect(alone.message).toBe('下面是中性的范围或类别，请按实际情况选择。');
+ const comparison=groundedTurn('另一套安排。',groundedCardResult(choice,sources),true,null);
+ expect(comparison.card).toBeNull();expect(comparison.message).toBe('另一套安排。');
+ expect(groundedTurn('',groundedCardResult(choice,sources),true,null).card?.recommended).toBe(0);
+});
+it('the tool tells the model a neutral card needs no user request, and its schema allows the empty quotations',()=>{
+ const description=groundedCardTool(()=>sources).description!;
+ expect(description).toContain('the user need not ask for options');
+ expect(description).not.toContain('explicitly requested in the current user message');
+ expect(groundedCardParameters.safeParse(neutral).success).toBe(true);
 });
 it('rejects duplicate options, invalid recommendation and independent prose without retracting already streamed text',()=>{
  expect(groundedCardResult({...choice,recommended:10},sources)).toBe(INVALID_CARD_RESULT);

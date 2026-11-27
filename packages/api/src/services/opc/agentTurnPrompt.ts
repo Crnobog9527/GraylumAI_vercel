@@ -54,7 +54,7 @@ const hostRules = (normalOpening = true) => [
   "A vague reply is not a field value or confirmation; clarify per the cases above, and the user may defer an item tha",
   "t stays unclear. An acknowledgement, help request or uncertainty is neither an answer nor permission to advance. Wh",
   "en the user is not sure, first analyse the available information: recommend when it supports one, otherwise ask wha",
-  "t is missing, not merely repeat the question.\n",
+  "t is missing, not merely repeat the question. Never re-ask an answered question: ask for one named missing detail or move on.\n",
   "\n",
   "Use current checklist values and frozen scopeMaterial. Task is identity, not topic restriction. Respond to the user; ",
   "the extractor records volunteered later-step information there, but do not expand into that step's work. ",
@@ -88,9 +88,10 @@ const hostRules = (normalOpening = true) => [
   "Never claim research, search or verification that did not occur. Ask at most one main question; no fixed template.\n",
 ].join('');
 
+// Owner 2026-11-26 (option A, restoring 2026-09-29 item 20): neutral range/category cards need no request from the user.
 const GROUNDED_RULES = [
-  'grounded-card-v1 overrides prior card delivery: host renders prose; no separate text.',
-  'Neutral cards require an explicit current request; no follow-up pivots.',
+  'grounded-card-v1: comparison cards get host prose (send none); a neutral card may follow a brief acknowledgement.',
+  'Neutral cards need no user request.',
   'Label deductions as guesses. Never broaden negation, infer schedules from occupation,',
   'or infer commercial exclusivity from delivery scope.',
 ].join(' ');
