@@ -7,7 +7,11 @@
  * streamed sentence by sentence and what is shown is what is saved. Only on a turn the host marked confirmationAsked, and not
  * when the user asks to go on in words (the coach then points to the card once, agentTurnPrompt.ts).
  */
-const REMINDER = /确认卡|確認卡|(点|點|按)(一下|一點)?(聊天里的?|这张|那张)?卡片|confirmation card|click the card/i;
+// A request names the card and asks for it: click it, go confirm, or that it is still in the chat. A sentence that only mentions
+// the card ("确认卡里的课程规模也会更新") is kept (review of #2059).
+const CARD = /确认卡|確認卡|卡片|confirmation card|the card/i;
+const ASK = new RegExp(['点', '點', '按一下', 'click', 'tap', 'press', '还在(聊天|对话)', '仍在(聊天|对话)', '在聊天里',
+  'still (in|on) (the )?(chat|screen)', '请.{0,8}确认', '去确认', 'confirm (this|the) step'].join('|'), 'i');
 const ASSENT = /^\s*(继续|下一步|没问题|好的?|可以|行|确认|ok(ay)?|next|continue|go on)[\s。.!！~～了吧啊呀]*$/i;
 const END = '。！？!?';
 const CLOSER = '*”"’）)」』';
@@ -35,7 +39,7 @@ function sentences(text: string, final: boolean): { done: string[]; rest: string
   }
   return { done, rest: text.slice(start) };
 }
-const keep = (sentence: string) => !REMINDER.test(sentence);
+const keep = (sentence: string) => !(CARD.test(sentence) && ASK.test(sentence));
 
 /** Whether this turn drops repeated requests: the host marked it, and the user did not just ask to go on. */
 export const dropsConfirmationReminder = (asked: boolean, words: string) => asked && !ASSENT.test(words);

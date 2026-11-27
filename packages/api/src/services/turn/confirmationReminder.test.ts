@@ -31,6 +31,11 @@ describe('a repeated request for the confirmation card is dropped before it is s
     expect(dropConfirmationReminder('记下了。**请点击聊天里的确认卡片。**还有一个问题？')).toBe('记下了。还有一个问题？');
     expect(dropConfirmationReminder('Noted. Please click the confirmation card in the chat. Anything else?')).toBe('Noted. Anything else?');
     expect(dropConfirmationReminder('卡包的材料费你问过吗？')).toBe('卡包的材料费你问过吗？');
+    // Review of #2059: a sentence that only mentions the card is the coach's answer, not a request; it stays.
+    const mention = '我把你补充的每场三四人记下了，确认卡里的课程规模也会据此更新。场地仍按次预约。';
+    expect(dropConfirmationReminder(mention)).toBe(mention);
+    expect(dropConfirmationReminder('The confirmation card now shows four people per class. Noted.'))
+      .toBe('The confirmation card now shows four people per class. Noted.');
   });
   it('is off unless the host marked the turn, and off when the user asks to go on in words (the coach points to the card once)', () => {
     const off = confirmationReminderFilter(false);
