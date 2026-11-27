@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import type { ReplyLocale } from '../../shared/replyLocales';
 
 /*
  * Owner 2026-11-27 (pay2, two runs): with the step ready and the confirmation card already asked for, the coach kept asking
@@ -49,6 +50,10 @@ export const asksForConfirmationCard = (sentence: string) => CARD.test(sentence)
  */
 const REPLY_CONTINUE = /(回|回复|说|发|打|输入)(我|一下|给我)?(一句|一声|个)?\s*[“"「『‘']?(继续|繼續)|\b(reply|say|type|send)\b[^.!?。！？]{0,12}\bcontinue\b/i;
 export const asksToReplyContinue = (sentence: string) => REPLY_CONTINUE.test(sentence);
+
+/** What the reply says when it was nothing but that request (review of #2062): the search goes on, the user replies nothing. */
+export const SEARCH_GOES_ON: Record<ReplyLocale, string> = { 'zh-Hans': '还在接着搜，搜完会直接告诉你。',
+  'zh-Hant': '還在接著搜，搜完會直接告訴你。', en: "Still searching. I'll tell you as soon as it's done." };
 
 /** Whether this turn drops repeated requests: the host marked it, and the user did not just ask to go on. */
 export const dropsConfirmationReminder = (asked: boolean, words: string) => asked && !ASSENT.test(words);

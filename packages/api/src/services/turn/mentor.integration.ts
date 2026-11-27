@@ -1040,7 +1040,8 @@ it('RUNTIME: CORE-PATH-V2 V2-5c: a process killed mid-turn loses nothing receipt
   expect((await db.query('select account from research_benchmarks where session_id=$1 order by account', [f.session])).rows.map(r => r.account)).toEqual(accounts);
 }, 120000);
 
-it('RUNTIME: CORE-PATH-V2 V2-5c: a discovery round stopped by its limit is continued by the next turn without paying for its searches again', async () => {
+// A turn whose discovery round its limit stops (it goes on in the next reply); the coach's prose after the search is `said`.
+async function stoppedRound(said: string) {
   const f = await setup();
   await researchOn();
   const quiet = JSON.stringify({ inputKind: 'answer', patches: [], notes: [] });
@@ -1066,12 +1067,17 @@ it('RUNTIME: CORE-PATH-V2 V2-5c: a discovery round stopped by its limit is conti
       const qualifies = Number(/(\d+)$/.exec(String(call.account))?.[1] ?? 0) % 4 === 0;
       return { ...base, items: [{ missing: [], fields: { followers: qualifies ? 50000 : 500, postsCount: 200 } }] };
     } } as unknown as VendorCalls };
-  // pay4 2026-11-27 seq 26 (its last two sentences): the coach told the user to reply "继续" although the page goes on by itself.
-  const said = '我会扩大范围接着搜，已经取过的数据不会重复取。\n\n如果下一条消息没有自动接着搜，你回我一句"继续"就行。';
   const discover = (args: unknown, reply = 'Still searching.') => transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, quiet)
     : n === 1 ? toolCall('gen-reply-1', 'benchmark_discover', args) : prose('gen-reply-' + n, reply));
   const second = await turn(f, { text: 'Go on', transport: discover({ keywordConfirmationId: confirmationId, platforms: ['tiktok'], discoveryId: null },
     said).fn, research: stub });
+  return { f, second, discover, stub, calls };
+}
+
+it('RUNTIME: CORE-PATH-V2 V2-5c: a discovery round stopped by its limit is continued by the next turn without paying for its searches again', async () => {
+  // pay4 2026-11-27 seq 26 (its last two sentences): the coach told the user to reply "继续" although the page goes on by itself.
+  const said = '我会扩大范围接着搜，已经取过的数据不会重复取。\n\n如果下一条消息没有自动接着搜，你回我一句"继续"就行。';
+  const { f, second, discover, stub, calls } = await stoppedRound(said);
   const result = second.events.at(-1) as Extract<TurnEvent, { type: 'result' }>;
   expect(result.type).toBe('result');
   const stopped = second.events.find(e => e.type === 'research_continue') as { discoveryId: string } | undefined;
@@ -1095,6 +1101,25 @@ it('RUNTIME: CORE-PATH-V2 V2-5c: a discovery round stopped by its limit is conti
   // No supplier call was sent twice: the round went on from what the earlier turn paid for.
   expect(calls.slice(sent).filter(c => c.startsWith('keyword_posts'))).toEqual([]);
   expect(new Set(calls).size).toBe(calls.length);
+});
+
+// Review of #2062: a reply that is nothing but the request to reply "继续" says only that the search goes on, shown and saved.
+it('RUNTIME: CORE-PATH-V2 V2-5c: a stopped round whose reply only asks the user to reply "continue" says it goes on instead', async () => {
+  const { f, second } = await stoppedRound('这一轮还没搜完，你回复"继续"即可接着搜索。');
+  const result = second.events.at(-1) as Extract<TurnEvent, { type: 'result' }>;
+  expect(result.type, JSON.stringify(second.events)).toBe('result');
+  expect(second.events.some(e => e.type === 'research_continue')).toBe(true);
+  const shown = second.events.filter(e => e.type === 'text').map(e => (e as { delta: string }).delta).join('');
+  const saved = (await db.query("select content from session_messages where session_id=$1 and role='assistant' order by seq desc limit 1",
+    [f.session])).rows[0].content as string;
+  const reloaded = (await db.query('select turn_session_view($1,$2,0) v', [f.actor, f.session])).rows[0].v;
+  const last = JSON.stringify(reloaded.messages.filter((m: { role: string }) => m.role === 'assistant').at(-1));
+  expect(shown).toBe('还在接着搜，搜完会直接告诉你。');
+  expect(JSON.parse(result.body).message).toBe('还在接着搜，搜完会直接告诉你。');
+  for (const text of [saved, last]) {
+    expect(text).toContain('还在接着搜，搜完会直接告诉你。');
+    expect(text).not.toContain('继续');
+  }
 });
 
 it('RUNTIME: CORE-PATH-V2 V2-5c: a round that finishes makes its candidate card at close, and the next turn can follow it up', async () => {

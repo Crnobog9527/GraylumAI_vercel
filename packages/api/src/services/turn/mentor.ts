@@ -38,7 +38,7 @@ import { METHOD_STEP_ID, withStepEvents } from './tools/announce';
 import { savedSteps } from './tools/toolStage';
 import { createRuntimeBudget } from './settings/budget';
 import { REPLY_CUT, REPLY_CUT_FAILURE, shownSoFar } from './shownReply';
-import { asksForConfirmationCard, asksToReplyContinue, dropsConfirmationReminder, replySentenceFilter } from './confirmationReminder';
+import { asksForConfirmationCard, asksToReplyContinue, dropsConfirmationReminder, replySentenceFilter, SEARCH_GOES_ON } from './confirmationReminder';
 import { FIXED_QUESTION_NOTE, LATER_QUESTIONS_NOTE, fixedCardChoice, fixedQuestionCard, fixedQuestionFor, laterFixedQuestions,
   organizerWrote } from './fixedQuestions';
 import { benchmarkReady, benchmarkToolBytes, turnBenchmarkTools, type BenchmarkDeps } from './tools/benchmark';
@@ -329,6 +329,12 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
     const tail = reminder.flush();
     shownText += tail;
     if (tail) emit({ type: 'text', delta: tail });
+    // A reply of a search that goes on, that was nothing but a request to reply "continue", says only that the search goes on
+    // (review of #2062): never the request kept as the saved reply.
+    if (continuing && !shownText.trim() && text.trim()) {
+      shownText = SEARCH_GOES_ON[effectiveReplyLocale(opened.replyLanguage)];
+      emit({ type: 'text', delta: shownText });
+    }
     // A reply that was nothing but the request again keeps it (no empty reply); otherwise what was shown is the reply. Without a
     // tool call the saved body is read from `output` (agentTurnResult), so it is the shown text too (review of #2059: a reload and
     // the organizer saw the dropped request again); a tool call's output is the tool's result and stays as it is.
