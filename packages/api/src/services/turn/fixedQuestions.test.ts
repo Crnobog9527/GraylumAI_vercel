@@ -53,7 +53,8 @@ describe('Owner 2026-11-27 option C: which fixed question the host asks, and whe
   it('an answered field gets no card; a question already shown in the round is not asked again (the next one of its field is)', () => {
     expect(pick(host('step-1', { ...before('resources'), resources: '每周四小时' }))).toBeNull();
     const timeCard = fixedQuestionCard(pick(host('step-1', before('resources')))!, '好的。');
-    const history = [reply(4, agentTurnBody('好的。', timeCard))];
+    // The card was under an earlier reply (the latest one, after the user answered something else, has none).
+    const history = [reply(4, agentTurnBody('好的。', timeCard)), reply(6, agentTurnBody('先说你的问题。', null))];
     expect(pick(host('step-1', before('resources')), { history })?.fixed.id).toBe('filming');
     expect(pick(host('step-1', before('resources')), { history, roundId: 'r2' })?.fixed.id).toBe('weekly_time');
     const all = FIXED_QUESTIONS.filter(q => q.fieldId === 'resources')
@@ -115,5 +116,30 @@ describe('Owner 2026-11-27 option C: which fixed question the host asks, and whe
     // The rules that give no question give no later questions either.
     expect(laterFixedQuestions({ host: atSeq9, history: [], roundId: 'r1', locale: 'zh-Hans', firstOpening: true, summary: false,
       mode: 'mentor', words: '' })).toEqual([]);
+  });
+  // pay4 2026-11-27 (seq 12-14, the real words): the time card was under seq 12; seq 13 answered time, filming and budget at
+  // once; the host, before the organizer wrote resources, handed the coach the filming question, and seq 14 asked it with no card.
+  it('the field whose card the user is answering this turn is not asked about again in it', () => {
+    const atSeq13 = host('step-1', { goal: '给生意带客户', track: '手工制作过程和成品', audience: '附近喜欢 DIY 的年轻女性',
+      platforms: '小红书', assets: '杭州周末皮具手作体验课' });
+    const time = FIXED_QUESTIONS.find(q => q.id === 'weekly_time')!;
+    const timeCard = fixedQuestionCard({ fixed: time, question: time.question['zh-Hans'], options: time.options['zh-Hans'] },
+      '选小红书，我记下了。接下来要排内容节奏，所以想问你这一项：\n\n你每周大概能拿出多少时间做账号？');
+    const history = [reply(12, agentTurnBody('选小红书，我记下了。接下来要排内容节奏，所以想问你这一项：\n\n你每周大概能拿出多少时间做账号？', timeCard))];
+    const at = (words: string) => ({ host: atSeq13, history, roundId: 'r1', locale: 'zh-Hans' as const, firstOpening: false,
+      summary: false, mode: 'mentor', words });
+    const words = '每周大概四小时，不露脸，不投广告。';
+    expect(fixedQuestionFor(at(words))).toBeNull();
+    expect(laterFixedQuestions(at(words))).toEqual([]);
+    const seq14 = '每周大概四小时，不露脸，不投广告，这三点我都记下了。\n\n接下来还差一项资源信息，我想弄清你拍内容时的实际条件：\n\n拍内容时，你能接受哪种方式？';
+    expect(fixedCardChoice({ chosen: null, later: laterFixedQuestions(at(words)), reply: seq14, written: f => f === 'resources' })).toBeNull();
+    // An option clicked on the card is an answer too.
+    expect(laterFixedQuestions(at('3 到 6 小时'))).toEqual([]);
+    // When the organizer did not write the field (the user answered something else), the next turn asks its next question.
+    const after = [...history, { seq: 13, role: 'user' as const, content: '我想先问问别的。', contentHash: 'b'.repeat(64) },
+      reply(14, agentTurnBody('好的，先说你的问题。', null))];
+    expect(laterFixedQuestions({ ...at('再说说吧。'), history: after }).map(q => q.fixed.id)).toEqual(['filming']);
+    // A turn without the user's words (a later step's opening, a refresh of the current question) is not an answer.
+    expect(laterFixedQuestions(at('')).map(q => q.fixed.id)).toEqual(['filming']);
   });
 });

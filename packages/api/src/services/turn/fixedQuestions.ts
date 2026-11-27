@@ -15,7 +15,8 @@ import type { HistoryItem } from './db';
  *  - only in the interview (mode mentor): importing an existing positioning (mode manual) asks for the user's material instead;
  *  - not when the user asks in this turn for no questions or options (that request overrides the question rules, agentTurnPrompt.ts;
  *    review of #2060);
- *  - never twice in a round, and not when the user answered the field in the same turn (the organizer wrote it).
+ *  - never twice in a round, and not when the user answered the field in the same turn (the organizer wrote it);
+ *  - never about the field whose card the user is answering in this turn: the next question waits for the organizer's write.
  * Cards carry no recommendation; the page adds the "Other" entry. The questions and options are copy (the decision allows edits).
  */
 type Localized = Record<ReplyLocale, string>;
@@ -79,6 +80,17 @@ function askedInRound(history: readonly HistoryItem[], roundId: string): Set<str
   return asked;
 }
 
+/*
+ * The field of the fixed card under the coach's latest reply: the user's message of this turn answers it (an option, "Other",
+ * or words). Read from the saved card's question text, exactly as the host wrote it; any other card or no card gives null.
+ */
+function answeredField(history: readonly HistoryItem[]): string | null {
+  const last = [...history].reverse().find(item => item.role === 'assistant');
+  const question = last ? readAgentTurnBody(last.content).card?.question.trim() : undefined;
+  if (!question) return null;
+  return FIXED_QUESTIONS.find(q => Object.values(q.question).includes(question))?.fieldId ?? null;
+}
+
 type Pick = { host: HostTurnContext; history: readonly HistoryItem[]; roundId: string; locale: ReplyLocale;
   firstOpening: boolean; summary: boolean; mode: unknown; words: string };
 
@@ -88,7 +100,10 @@ function plan(input: Pick): { next: string | null; questions: Map<string, Chosen
   if (input.mode !== 'mentor' || input.summary || input.firstOpening || NO_QUESTIONS.test(input.words)
     || host.confirmation?.stepReady || host.confirmation?.stepConfirmed) return null;
   const fields = host.checklist.find(step => step.id === host.stepId)?.fields ?? [];
-  const missing = fields.filter(field => field.required && field.status === 'missing');
+  // The field the user is answering in this turn is not asked about again in it (pay4 2026-11-27, seq 13-14): the organizer
+  // writes this turn's answer only after the coach's reply, so before it the field still reads empty.
+  const answering = input.words.trim() ? answeredField(input.history) : null;
+  const missing = fields.filter(field => field.required && field.status === 'missing' && field.id !== answering);
   // The next field the user is asked about: the first empty one the user supplies; in a step of the coach's drafts only (step 2),
   // the first empty one with a fixed question.
   const next = missing.find(field => field.role === 'user_fact')

@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
-import { confirmationReminderFilter, dropConfirmationReminder, dropsConfirmationReminder } from './confirmationReminder';
+import { asksToReplyContinue, confirmationReminderFilter, dropConfirmationReminder, dropsConfirmationReminder, replySentenceFilter } from './confirmationReminder';
 
 // Owner 2026-11-27 pay2 (second run): seq 18 asked for the confirmation card; seq 20 and 22, the coach's own words, asked again
 // although the host had marked the turn confirmationAsked.
@@ -44,4 +44,30 @@ describe('a repeated request for the confirmation card is dropped before it is s
     expect(dropsConfirmationReminder(true, '再补一条：场地我会先看按次预约的共享空间。')).toBe(true);
     for (const words of ['继续', '下一步', '好的', '没问题。', 'continue']) expect(dropsConfirmationReminder(true, words)).toBe(false);
   });
+});
+
+// pay4 2026-11-27, seq 26 (the real reply): the round ran out of lookups and goes on by itself, yet the coach asked the user to
+// reply "继续".
+const SEQ26 = '收到你确认的 8 个关键词，我已经在小红书上开始找杭州的本地同行了。\n\n这一轮还没搜完，目前只拿到了几个候选账号。'
+  + '它们的粉丝量、最近有没有更新，还要等取到作品数据后再核对，所以现在还不能算合格对标。我会扩大范围接着搜，已经取过的数据不会重复取。\n\n'
+  + '如果下一条消息没有自动接着搜，你回我一句"继续"就行。';
+describe('a search that goes on by itself: the host drops a request to reply "continue"', () => {
+  const run = (active: boolean, text: string, size: number) => {
+    const filter = replySentenceFilter(() => active, asksToReplyContinue);
+    let out = '';
+    for (let i = 0; i < text.length; i += size) out += filter.push(text.slice(i, i + size));
+    return out + filter.flush();
+  };
+  it('drops the sentence of seq 26 however the reply is streamed, and keeps the rest', () => {
+    const kept = SEQ26.slice(0, SEQ26.lastIndexOf('如果下一条'));
+    for (const size of [1, 3, 9, 10000]) expect(run(true, SEQ26, size)).toBe(kept);
+    expect(run(true, SEQ26, 5)).not.toContain('继续');
+  });
+  it('drops other ways of asking, in both languages, and keeps sentences that only say it goes on', () => {
+    for (const ask of ['没有自动继续的话，回复“继续”即可。', '你说一声继续就行。', 'If it stops, just reply "continue".'])
+      expect(asksToReplyContinue(ask)).toBe(true);
+    for (const keep of ['我会扩大范围接着搜。', '下一条回复会自动继续搜。', 'The search will continue on its own.'])
+      expect(asksToReplyContinue(keep)).toBe(false);
+  });
+  it('is off on a turn whose search does not go on', () => expect(run(false, SEQ26, 4)).toBe(SEQ26));
 });

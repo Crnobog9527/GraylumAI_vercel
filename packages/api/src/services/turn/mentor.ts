@@ -38,7 +38,7 @@ import { METHOD_STEP_ID, withStepEvents } from './tools/announce';
 import { savedSteps } from './tools/toolStage';
 import { createRuntimeBudget } from './settings/budget';
 import { REPLY_CUT, REPLY_CUT_FAILURE, shownSoFar } from './shownReply';
-import { confirmationReminderFilter, dropsConfirmationReminder } from './confirmationReminder';
+import { asksForConfirmationCard, asksToReplyContinue, dropsConfirmationReminder, replySentenceFilter } from './confirmationReminder';
 import { FIXED_QUESTION_NOTE, LATER_QUESTIONS_NOTE, fixedCardChoice, fixedQuestionCard, fixedQuestionFor, laterFixedQuestions,
   organizerWrote } from './fixedQuestions';
 import { benchmarkReady, benchmarkToolBytes, turnBenchmarkTools, type BenchmarkDeps } from './tools/benchmark';
@@ -266,11 +266,14 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
       cacheWriteUsdPerMillion: mentor.providerLimits.cacheWriteUsdPerMillion, instructions: system.instructions,
       prefixChars: system.prefixChars, historyMarker: !opening }) : undefined;
     let sources: CardSources = cardSources(words, history);
+    // This turn's discovery round goes on in the next reply, which the page sends by itself (discovery.ts, research_continue).
+    let continuing = false;
     // A step summary is offered no question card (as the old path's admission removed it), not only told not to show one.
     benchmark = researchFits ? turnBenchmarkTools({ research: research!, prepared: flow!, deps: deps.research,
       ...(input.researchRefreshId ? { refreshId: input.researchRefreshId } : {}), admin, slots: deps.slots,
       calls: { db, actorId: input.actorId, turnId: opened.turnId, nextSeq: () => ++seq }, actorId: input.actorId, sessionId: input.sessionId,
-      requestId: input.requestId, text: words, deadline: Date.now() + MENTOR_RESEARCH_MS, emit,
+      requestId: input.requestId, text: words, deadline: Date.now() + MENTOR_RESEARCH_MS,
+      emit: event => { if (event.type === 'research_continue') continuing = true; emit(event); },
       ...(profileLinksDeclined([...opened.history.filter(m => m.role === 'user').map(m => m.content), words], carriesAccountLink)
         ? { linksDeclined: true } : {}),
       callGate: async subcalls => { const gate = await deps.newWork.calls(input.actorId, subcalls, 'bill2.v2');
@@ -285,9 +288,12 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
 
     // 5. The mentor's reply (and its continuation after one Skill file). A choice card ends the turn.
     let text = '', toolCalled = false, cardMessage: string | null | undefined;
-    // Asked once already, a sentence asking again for the confirmation card is dropped before it is shown (confirmationReminder.ts):
-    // `shownText` is what the user saw, and what is saved.
-    const dropping = dropsConfirmationReminder(asked, words), reminder = confirmationReminderFilter(dropping);
+    // Asked once already, a sentence asking again for the confirmation card is dropped before it is shown (confirmationReminder.ts);
+    // so is one asking the user to reply "continue" while the search goes on by itself. `shownText` is what the user saw, and
+    // what is saved.
+    const dropping = dropsConfirmationReminder(asked, words);
+    const reminder = replySentenceFilter(() => dropping || continuing,
+      sentence => (dropping && asksForConfirmationCard(sentence)) || (continuing && asksToReplyContinue(sentence)));
     let shownText = '';
     saveShown = async () => {
       // The prose of the call that was cut, in the reply's own envelope; no card (the user never saw one) and no checklist write
@@ -326,7 +332,7 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
     // A reply that was nothing but the request again keeps it (no empty reply); otherwise what was shown is the reply. Without a
     // tool call the saved body is read from `output` (agentTurnResult), so it is the shown text too (review of #2059: a reload and
     // the organizer saw the dropped request again); a tool call's output is the tool's result and stays as it is.
-    const filtered = dropping && shownText.trim() ? shownText : null;
+    const filtered = (dropping || continuing) && shownText.trim() ? shownText : null;
     if (filtered) text = filtered;
     // A neutral card keeps the coach's short prose before it; a comparison card with separate prose is refused (groundedCard.ts).
     let turn = groundedTurn(text, filtered && !toolCalled ? filtered : output, toolCalled, cardMessage);

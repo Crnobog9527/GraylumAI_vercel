@@ -19,9 +19,12 @@ describe('benchmark discovery candidate shortage', () => {
     expect(LINKS_DECLINED_NEXT_STEP).toContain('不要提发链接、贴链接或以后补链接');
   });
 
-  it('an unfinished round is not a round: the user continues it, nothing paid is fetched again', () => {
+  it('an unfinished round is not a round: it goes on by itself, nothing paid is fetched again', () => {
     expect(ROUND_UNFINISHED_NEXT_STEP).toContain('不算一轮');
-    expect(ROUND_UNFINISHED_NEXT_STEP).toContain('继续');
+    expect(ROUND_UNFINISHED_NEXT_STEP).toContain('自动接着搜');
+    // pay4 2026-11-27 seq 26: the coach told the user to reply "继续"; the page sends the next reply itself (Owner 10-23, 3 A).
+    expect(ROUND_UNFINISHED_NEXT_STEP).not.toMatch(/回复"继续"即可|回复“继续”即可/);
+    expect(ROUND_UNFINISHED_NEXT_STEP).toContain('不要让用户回复"继续"');
     expect(ROUND_UNFINISHED_NEXT_STEP).not.toMatch(/\d+\s*积分/);
   });
 });

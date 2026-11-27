@@ -39,23 +39,36 @@ function sentences(text: string, final: boolean): { done: string[]; rest: string
   }
   return { done, rest: text.slice(start) };
 }
-const keep = (sentence: string) => !(CARD.test(sentence) && ASK.test(sentence));
+/** A sentence that asks again for the confirmation card. */
+export const asksForConfirmationCard = (sentence: string) => CARD.test(sentence) && ASK.test(sentence);
+
+/*
+ * pay4 2026-11-27, seq 26: a discovery round that ran out of lookups goes on by itself (the page sends the next reply, Owner
+ * 2026-10-23, 3 A: the user types nothing), yet the coach told the user to reply "继续" if it did not. On a turn whose search
+ * goes on, the host drops a sentence that asks the user to reply "continue"; the page itself says so past its limit.
+ */
+const REPLY_CONTINUE = /(回|回复|说|发|打|输入)(我|一下|给我)?(一句|一声|个)?\s*[“"「『‘']?(继续|繼續)|\b(reply|say|type|send)\b[^.!?。！？]{0,12}\bcontinue\b/i;
+export const asksToReplyContinue = (sentence: string) => REPLY_CONTINUE.test(sentence);
 
 /** Whether this turn drops repeated requests: the host marked it, and the user did not just ask to go on. */
 export const dropsConfirmationReminder = (asked: boolean, words: string) => asked && !ASSENT.test(words);
 
-/** The stream filter of one reply: push each delta and show what it returns; flush at the end. Inactive, it passes text through. */
-export function confirmationReminderFilter(active: boolean) {
+/**
+ * The stream filter of one reply: push each delta and show what it returns; flush at the end. `drop` is read for every
+ * sentence; while `active()` is false the filter passes text through (it may turn on between two model calls of a turn).
+ */
+export function replySentenceFilter(active: () => boolean, drop: (sentence: string) => boolean) {
   let buffer = '';
+  const keep = (sentence: string) => !drop(sentence);
   return {
     push(delta: string): string {
-      if (!active) return delta;
+      if (!active()) return delta;
       const { done, rest } = sentences(buffer + delta, false);
       buffer = rest;
       return done.filter(keep).join('');
     },
     flush(): string {
-      if (!active) return '';
+      if (!active()) return '';
       const { done, rest } = sentences(buffer, true);
       buffer = '';
       return [...done, rest].filter(keep).join('');
@@ -63,6 +76,9 @@ export function confirmationReminderFilter(active: boolean) {
     reset() { buffer = ''; },
   };
 }
+
+/** The confirmation-reminder filter alone (on when the turn drops repeated requests). */
+export const confirmationReminderFilter = (active: boolean) => replySentenceFilter(() => active, asksForConfirmationCard);
 
 /** The whole reply through the same filter (for a reply that was not streamed in pieces). */
 export function dropConfirmationReminder(text: string): string {
