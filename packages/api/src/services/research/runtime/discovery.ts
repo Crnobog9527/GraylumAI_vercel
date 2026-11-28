@@ -275,9 +275,10 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
   const screen = async (platform: SocialPlatform, authorId: string, label: string | null, authorPosts: EvidenceItem[]) => {
     const account = canonicalAccount(platform, authorId);
     if (!account || screened.has(`${platform}:${account}`)) return;
-    // Owner 2026-11-28 (H, pay4): an author none of whose found posts names the confirmed niche is no candidate, and is not looked up
+    // Owner 2026-11-28 (H, pay4): an author not one of whose found posts names the confirmed niche is no candidate, and is not looked up
     // (nor paid for). Decided from the replayed search pages only, so a continued round passes over the same authors.
-    if (offTopic({ name: label, posts: authorPosts, keywords: d.keywords })) {
+    // Zero matches only: the search's posts are a sample, not the account's newest posts (the one-in-ten rule is the fetch's).
+    if (offTopic({ name: label, posts: authorPosts, keywords: d.keywords, minShare: 0 })) {
       screened.add(`${platform}:${account}`);
       const spent = coverage.platforms[platform];
       if (spent) spent.offTopic = (spent.offTopic ?? 0) + 1;

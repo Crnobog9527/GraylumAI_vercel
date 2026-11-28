@@ -2,6 +2,7 @@
 import { accountMetrics, suppliedWholeHistory, type EvidenceItem } from '../benchmark/metrics';
 import { classifyAccount, excludeOffTopic, qualifyFetchedAccount } from '../benchmark/classify';
 import { offTopic, topicRelevance } from '../benchmark/relevance';
+import { judgedKeywords, relevanceBasis } from '../benchmark/relevanceBasis';
 import { authorizeBenchmarkFetch } from '../tools/authorize';
 import { shortfallNotice } from './shortfall';
 import { toolEnvelope } from '../tools/envelope';
@@ -59,6 +60,11 @@ export async function benchmarkFetch(ctx: ResearchToolContext, args: ResearchToo
   // Read at most once per call, and only when an account was really fetched; a read failure only drops the label.
   let sessionKeywords: Promise<string[]> | undefined;
   const keywords = () => (sessionKeywords ??= (ctx.store.sessionKeywords?.() ?? Promise.resolve([])).catch(() => []));
+  // A candidate is judged by the keywords of the round that found it (review of #2063); without that record, the session's.
+  let round: Promise<string[]> | undefined;
+  const source = args.source;
+  const roundKeywords = () => (round ??= (source.kind === 'candidate' && ctx.store.roundKeywords
+    ? ctx.store.roundKeywords(source.confirmationId).catch(() => null) : Promise.resolve(null)).then(found => found ?? keywords()));
   let stopReason: string | null = null;
   let stopBudget = false;
   for (const account of authorization.accounts) {
@@ -68,6 +74,8 @@ export async function benchmarkFetch(ctx: ResearchToolContext, args: ResearchToo
       continue;
     }
     const refreshId = args.source.kind === 'refresh' ? args.source.refreshId : undefined;
+    // Before a refresh claims the fetch: the claim replaces the evidence that holds the account's basis.
+    const basis = await relevanceBasis(ctx.store, args.source, account, roundKeywords);
     let claim = await ctx.store.fetchClaim(account.platform, account.account, refreshId);
     // A balance pause left this answer's own attempt in progress: continue it after the top-up (BILL-PAYG, 0279).
     if (!claim.claimed && claim.state === 'in_progress') {
@@ -162,15 +170,15 @@ export async function benchmarkFetch(ctx: ResearchToolContext, args: ResearchToo
       // Whole history only when the profile's own post count shows nothing is left (Owner 2026-10-16, A: new accounts).
       const metrics = accountMetrics({ profile, posts, followersItem: results[routes.followersFrom]?.[0],
         complete: suppliedWholeHistory(results.account_profile?.[0], posts) }, ctx.now());
-      const niche = await keywords();
       // Owner 2026-11-28 (H, pay4): an account that plainly makes other content than the confirmed niche never qualifies. An account
-      // the user sent the link of is the user's own pick and is judged on its numbers only.
+      // the user sent the link of is the user's own pick and is judged on its numbers only (relevanceBasis.ts).
+      const judged = judgedKeywords(basis);
       const classification = excludeOffTopic(qualifyFetchedAccount(metrics, classifyAccount(metrics, ctx.config.recentGrowth, ctx.now())),
-        args.source.kind !== 'user_message' && offTopic({ name: typeof profile.fields.name === 'string' ? profile.fields.name : null,
-          posts, keywords: niche }));
-      // BENCHMARK-COVERAGE: how much of the account is on the confirmed niche (the share offTopic decides by).
-      const relevance = topicRelevance(posts, niche);
-      const evidence = { ...account, metrics, classification, ...(relevance ? { relevance } : {}), fetchedAt: ctx.now().toISOString() };
+        offTopic({ name: typeof profile.fields.name === 'string' ? profile.fields.name : null, posts, keywords: judged }));
+      // BENCHMARK-COVERAGE: how much of the account is on the niche (by what it is judged by; a label only for a user pick).
+      const relevance = topicRelevance(posts, basis.kind === 'keywords' ? judged : await keywords());
+      const evidence = { ...account, metrics, classification, ...(relevance ? { relevance } : {}), relevanceBasis: basis,
+        fetchedAt: ctx.now().toISOString() };
       await ctx.store.fetchFinish(claim.fetchId, claim.attempt, 'succeeded', evidence);
       // What the coach judges the account by (pay4 2026-11-28, I): its name and newest post titles, for this reply only (not saved).
       rows.push({ fields: { ...account, ...accountView(profile, posts), evidence: JSON.stringify(evidence) }, missing: metrics.missing });

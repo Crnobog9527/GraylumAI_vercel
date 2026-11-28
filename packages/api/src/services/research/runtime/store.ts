@@ -57,6 +57,10 @@ export interface RuntimeResearchStore {
   discoveryRead: (id: string) => Promise<DiscoveryRecord | null>;
   /** The keywords the user confirmed on this session's keyword cards (BENCHMARK-COVERAGE relevance); optional: without it no topic relevance is computed. */
   sessionKeywords?: () => Promise<string[]>;
+  /** The keywords of the search round whose candidate card this confirmation answers (null: not a confirmed candidate card). */
+  roundKeywords?: (confirmationId: string) => Promise<string[] | null>;
+  /** The evidence the account's last fetch saved (read before a refresh claims it), or null. */
+  priorEvidence?: (platform: SocialPlatform, account: string) => Promise<Record<string, unknown> | null>;
   discoverySave: (id: string, cursor: Record<string, unknown>, state: DiscoveryRecord['state']) => Promise<DiscoveryRecord>;
   selectedAccounts: (discoveryId: string) => Promise<CanonicalAccount[]>;
   fetchClaim: (platform: SocialPlatform, account: string, refreshId?: string) => Promise<FetchClaim>;

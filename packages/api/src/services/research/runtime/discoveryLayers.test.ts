@@ -26,7 +26,7 @@ interface Script {
   nextPage?: (keyword: string, cursor: string) => { authors: string[]; next?: string } | undefined;
   firstCursor?: string;
   /** A found post's title by its author (default "one video", on the niche of KEYWORDS). */
-  title?: (author: string) => string;
+  title?: (author: string, n: number) => string;
   leads?: (keyword: string) => string[];
   followers?: number;
   /** Web search results (Parallel); configured only when given. */
@@ -71,7 +71,7 @@ function fixture(platform: SocialPlatform, script: Script, kinds: SocialKind[] =
         maxUnitsPerCall: '1' }] : [])] });
   const sent: SupplierRequest[] = [];
   const post = (author: string, n: number): ResearchItem => ({ fields: { id: `${author}-v${n}`, ...(author ? { authorId: author } : {}), author: `Name ${author}`,
-    title: script.title?.(author) ?? 'one video', publishedAt: now.toISOString(), views: 1000, likes: 10, comments: 1, shares: 1 }, missing: [] });
+    title: script.title?.(author, n) ?? 'one video', publishedAt: now.toISOString(), views: 1000, likes: 10, comments: 1, shares: 1 }, missing: [] });
   subcall.mockImplementation(async (context, request) => {
     const operationId = context.newId();
     sent.push(request);
@@ -142,6 +142,15 @@ describe('deeper discovery layers', () => {
     expect(envelope.candidateCard).toMatchObject({ shown: true, selectable: 8 });
     expect(envelope.coverage.platforms.tiktok.offTopic).toBeGreaterThan(0);
     expect((envelope.items as Array<{ fields: { account: string } }>).some(item => item.fields.account.startsWith('off'))).toBe(false);
+  });
+
+  // Review of #2063: the search's posts are a sample, so one post on the niche keeps an author (the one-in-ten rule is the fetch's).
+  it('looks up an author with only one of eleven found posts on the niche', async () => {
+    const f = fixture('tiktok', { firstPage: keyword => (keyword === 'one' ? Array(11).fill('few') : []),
+      title: (_author, n) => (n === 0 ? 'one video' : 'cooking video') });
+    const envelope = await f.run();
+    expect(f.sent.some(r => r.vendor === 'tikhub' && r.call.kind === 'account_profile' && r.call.account === 'few')).toBe(true);
+    expect(envelope.coverage.platforms.tiktok.offTopic).toBeUndefined();
   });
 
   it('too few first-page authors: searches for accounts with each keyword and screens the leads until there are eight', async () => {
