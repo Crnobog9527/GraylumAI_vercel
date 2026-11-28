@@ -109,6 +109,20 @@ class CIWorkflowsTest < Minitest::Test
     sim = jobs.fetch('sim-e2e')
     assert_equal ['scope'], sim.fetch('needs')
     assert_equal "needs.scope.outputs.docs_only != 'true'", sim.fetch('if')
+    # CI-SPEED (Owner 2026-11-28): the simulated tests run as two parallel parts. Every journey runs exactly once: the first part skips the two
+    # provider-deadline journeys, the second runs only them (plus the warm-up), and neither part may be skipped or tolerate failure.
+    assert_equal({'fail-fast'=>false,'matrix'=>{'part'=>%w[journeys provider-deadlines]}}, sim.fetch('strategy'))
+    refute sim.key?('continue-on-error')
+    slow = 'provider timeout after its headers|provider silent until the deadline'
+    runs = sim.fetch('steps').select { |step| step.fetch('run', '').include?('scripts/e2e-sim/run.mjs') }
+    assert_equal 2, runs.length
+    assert_equal "matrix.part == 'journeys'", runs[0].fetch('if')
+    assert_equal "node scripts/e2e-sim/run.mjs --grep-invert '#{slow}'", runs[0].fetch('run').strip
+    assert_equal "matrix.part == 'provider-deadlines'", runs[1].fetch('if')
+    assert_equal "node scripts/e2e-sim/run.mjs --grep 'warm-up: compile the routes|#{slow}'", runs[1].fetch('run').strip
+    spec = File.read("#{ROOT}/../apps/web/tests/e2e/sim/02-failures.spec.ts")
+    ['provider timeout after its headers', 'provider silent until the deadline'].each { |title| assert_includes spec, "'#{title}" }
+    assert_includes File.read("#{ROOT}/../apps/web/tests/e2e/sim/00-warmup.spec.ts"), "'warm-up: compile the routes"
     # Every other job runs unconditionally: the skip covers the two database jobs and, for documentation only, the simulated tests.
     gated = %w[integration db-suites sim-e2e unit-check lint-check typecheck security-unit-tests build security-e2e-tests]
     (jobs.keys - gated).each do |id|
