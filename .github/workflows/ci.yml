@@ -581,14 +581,14 @@ jobs:
   # MAINT-P1b: the run-local database suites have their own worker, split in two, so neither this job nor
   # the integration job comes near its 30-minute limit. Every suite still runs; none is skipped.
   db-suites:
-    name: Run database behaviour suites (${{ matrix.shard }}/4)
+    name: Run database behaviour suites (${{ matrix.shard }}/6)
     needs: [scope]
     if: needs.scope.outputs.full == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6]
     timeout-minutes: 30
     permissions:
       contents: read
@@ -653,13 +653,16 @@ jobs:
           done
 
       # Every database suite that starts its own container (packages/db/tests/<dir>/*-local.mjs) runs in one
-      # of the four shards unless packages/db/tests/local-suites-excluded.json lists it (that list only shrinks).
+      # of the six shards unless packages/db/tests/local-suites-excluded.json lists it (that list only shrinks).
       - name: Integration — Database behaviour suites (run-local)
-        run: node packages/db/tests/run-local-suites.mjs --ci --shard ${{ matrix.shard }}/4
+        run: node packages/db/tests/run-local-suites.mjs --ci --shard ${{ matrix.shard }}/6
 
-      # CORE-PATH-V2 V2-1: turn budget, on the same database image in each shard (about half a minute); the old path's numbers
-      # are reported against scripts/turn-budget-baseline.json, a scenario marked "enforce": true may not exceed its baseline.
+      # CORE-PATH-V2 V2-1: turn budget (about a minute), on the same database image; the old path's numbers are reported against
+      # scripts/turn-budget-baseline.json, a scenario marked "enforce": true may not exceed its baseline. CI-SPEED: the check does not
+      # depend on which suites a shard holds, so it runs once (shard 1) instead of six times; the Unit Tests gate still needs this
+      # whole job to succeed, so a failure here still fails it.
       - name: Check turn budget (database round trips, time, locks)
+        if: matrix.shard == 1
         run: node scripts/check-turn-budget.mjs --ci
 
   unit-check:
