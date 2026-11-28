@@ -109,20 +109,38 @@ class CIWorkflowsTest < Minitest::Test
     sim = jobs.fetch('sim-e2e')
     assert_equal ['scope'], sim.fetch('needs')
     assert_equal "needs.scope.outputs.docs_only != 'true'", sim.fetch('if')
-    # CI-SPEED (Owner 2026-11-28): the simulated tests run as two parallel parts. Every journey runs exactly once: the first part skips the two
-    # provider-deadline journeys, the second runs only them (plus the warm-up), and neither part may be skipped or tolerate failure.
-    assert_equal({'fail-fast'=>false,'matrix'=>{'part'=>%w[journeys provider-deadlines]}}, sim.fetch('strategy'))
+    # CI-SPEED (Owner 2026-11-28): the simulated tests run as four parallel parts. Every journey runs exactly once: two parts hold the spec
+    # files (each file in exactly one of them, the warm-up file in both) and skip the two provider-deadline journeys, the other two run one each
+    # of those two (plus the warm-up) by title. No part may be skipped or tolerate failure, and no step may carry a condition.
+    strat = sim.fetch('strategy')
+    assert_equal false, strat.fetch('fail-fast')
+    assert_equal ['include'], strat.fetch('matrix').keys
+    parts = strat.fetch('matrix').fetch('include')
+    assert_equal %w[journeys-a journeys-b provider-deadline-headers provider-deadline-silent], parts.map { |part| part.fetch('part') }
     refute sim.key?('continue-on-error')
     slow = 'provider timeout after its headers|provider silent until the deadline'
     runs = sim.fetch('steps').select { |step| step.fetch('run', '').include?('scripts/e2e-sim/run.mjs') }
-    assert_equal 2, runs.length
-    assert_equal "matrix.part == 'journeys'", runs[0].fetch('if')
-    assert_equal "node scripts/e2e-sim/run.mjs --grep-invert '#{slow}'", runs[0].fetch('run').strip
-    assert_equal "matrix.part == 'provider-deadlines'", runs[1].fetch('if')
-    assert_equal "node scripts/e2e-sim/run.mjs --grep 'warm-up: compile the routes|#{slow}'", runs[1].fetch('run').strip
-    spec = File.read("#{ROOT}/../apps/web/tests/e2e/sim/02-failures.spec.ts")
+    assert_equal 1, runs.length
+    assert_equal "node scripts/e2e-sim/run.mjs ${{ matrix.args }}", runs[0].fetch('run').strip
+    refute runs[0].key?('if')
+    refute runs[0].key?('continue-on-error')
+    sim.fetch('steps').each { |step| refute step.key?('if') unless step.fetch('name', '').start_with?('Upload failed') }
+    dir = "#{ROOT}/../apps/web/tests/e2e/sim"
+    specs = Dir.children(dir).select { |name| name.end_with?('.spec.ts') }.sort
+    assert_includes specs, '00-warmup.spec.ts'
+    listed = parts.first(2).map { |part| part.fetch('args').scan(/\S+\.spec\.ts/) }
+    parts.first(2).each { |part| assert_includes part.fetch('args'), "--grep-invert '#{slow}' " }
+    listed.each { |files| assert_equal files.uniq, files; assert_includes files, '00-warmup.spec.ts' }
+    others = specs - ['00-warmup.spec.ts']
+    assert_equal others, (listed[0] + listed[1] - ['00-warmup.spec.ts']).sort, 'every spec file must be in exactly one journey part'
+    assert_equal specs.length > 0, true
+    assert_equal "--grep 'warm-up: compile the routes|provider timeout after its headers'", parts[2].fetch('args')
+    assert_equal "--grep 'warm-up: compile the routes|provider silent until the deadline'", parts[3].fetch('args')
+    assert_equal slow, 'provider timeout after its headers|provider silent until the deadline'
+    spec = File.read("#{dir}/02-failures.spec.ts")
     ['provider timeout after its headers', 'provider silent until the deadline'].each { |title| assert_includes spec, "'#{title}" }
-    assert_includes File.read("#{ROOT}/../apps/web/tests/e2e/sim/00-warmup.spec.ts"), "'warm-up: compile the routes"
+    assert_includes listed.flatten, '02-failures.spec.ts'
+    assert_includes File.read("#{dir}/00-warmup.spec.ts"), "'warm-up: compile the routes"
     # Every other job runs unconditionally: the skip covers the two database jobs and, for documentation only, the simulated tests.
     gated = %w[integration db-suites sim-e2e unit-check lint-check typecheck security-unit-tests build security-e2e-tests]
     (jobs.keys - gated).each do |id|
