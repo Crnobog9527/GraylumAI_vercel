@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
-import { aggregateAuthors, classifyAccount, selectCandidates, type ScoredAccount } from '../benchmark/classify';
+import { aggregateAuthors, classifyAccount, searchActivity, selectCandidates, type ScoredAccount } from '../benchmark/classify';
 import { accountMetrics, distinctPosts, type EvidenceItem } from '../benchmark/metrics';
 import { offTopic } from '../benchmark/relevance';
 import { BENCHMARK_ROUTE_KINDS } from '../vendors/config';
@@ -161,12 +161,18 @@ async function step(ctx: ResearchToolContext, d: DiscoveryRecord, budget: ToolAl
     ...(!outcome.sent ? { reason: outcome.stop, budget: outcome.budget } : {}) };
 }
 
+/**
+ * A candidate's activity note on the card. Discovery never decides activity (Owner 2026-10-18; benchmark_fetch does), but a newest
+ * found post older than 30 days says the account may have stopped (Owner 2026-11-28, "按 A 修"); it stays selectable.
+ */
+const activityStatus = (a: FoundAccount, now: Date) => (searchActivity(a.metrics, now) === 'stale' ? '可能停更' : '活跃度待核对');
+
 /** Shows the card and returns how many options on it the user can tick (0: no card shown). */
 async function card(ctx: ResearchToolContext, discoveryId: string, accounts: FoundAccount[], followUp: boolean, callId: string) {
   const chosen = followUp ? await ctx.store.selectedAccounts(discoveryId) : [];
   const keys = new Set(chosen.map(a => `${a.platform}:${a.account}`));
   const remaining = accounts.filter(a => !keys.has(a.key));
-  const selection = selectCandidates(remaining, true);
+  const selection = selectCandidates(remaining, true, ctx.now());
   // The first card comes only from a round searched to the end (the caller), so fewer than candidatesMin means the keywords
   // found no more: show what there is (Owner 2026-10-23; the database checks the round is completed, 0343).
   if (selection.selectable.length === 0) return 0;
@@ -177,7 +183,7 @@ async function card(ctx: ResearchToolContext, discoveryId: string, accounts: Fou
     .map((a, i) => ({ id: `c${i}`, platform: a.platform, account: a.account, evidenceRef: a.evidenceRef,
       // The account id stays on the card's second line; the label leads with the readable name.
       label: a.classification.excluded === 'ACTIVE_CHECK_PENDING'
-        ? `${a.name ?? a.account} · 活跃度待核对` : a.name ?? a.account,
+        ? `${a.name ?? a.account} · ${activityStatus(a, ctx.now())}` : a.name ?? a.account,
       selectable: selectable.has(a.key) }));
   const payload = { kind: 'candidates' as const, discoveryId, options: options.map(o => ({ ...o })),
     ...(followUp ? { followUp: true, minSelect: Math.min(options.length, Math.max(1, 3 - keys.size)) } : {}) };
@@ -421,7 +427,7 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
       evidenceRef: a.evidenceRef,
       category: a.classification.excluded === 'ACTIVE_CHECK_PENDING'
         ? 'activity_pending' : a.classification.category ?? 'excluded',
-      ...(a.classification.excluded === 'ACTIVE_CHECK_PENDING' ? { activityStatus: '活跃度待核对' } : {}) },
+      ...(a.classification.excluded === 'ACTIVE_CHECK_PENDING' ? { activityStatus: activityStatus(a, ctx.now()) } : {}) },
     missing: a.metrics.missing })) });
 }
 

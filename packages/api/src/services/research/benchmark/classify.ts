@@ -84,6 +84,19 @@ export function excludeOffTopic(classification: Classification, offTopic: boolea
   return { category: null, qualified: false, excluded: 'OFF_TOPIC' };
 }
 
+/**
+ * How recent a discovery candidate's newest found post is (Owner 2026-11-28, "按 A 修"). The search sees only some of an account's
+ * posts, so this orders and labels the candidate card and never excludes: older than the 30 days of INACTIVE_30_DAYS is "stale",
+ * no dated post found (an account-search lead) is "unknown".
+ */
+export type SearchActivity = 'recent' | 'unknown' | 'stale';
+export function searchActivity(metrics: AccountMetrics, now: Date): SearchActivity {
+  const last = metrics.lastPublishedAt.value === null ? Number.NaN : Date.parse(metrics.lastPublishedAt.value);
+  if (Number.isNaN(last)) return 'unknown';
+  return now.getTime() - last > BENCHMARK_RULES.activeWithinDays * DAY_MS ? 'stale' : 'recent';
+}
+const ACTIVITY_RANK: Record<SearchActivity, number> = { recent: 0, unknown: 1, stale: 2 };
+
 export interface ScoredAccount {
   key: string;
   metrics: AccountMetrics;
@@ -94,15 +107,23 @@ export interface ScoredAccount {
  * Candidate card contents (§1.2 step 5): selectable = qualified accounts, fast rising first, then by median
  * views; at most candidatesMax. Head references are listed separately and are never selectable. With fewer
  * than candidatesMin selectable accounts no card is sent (`enough: false`); the caller returns partial.
+ * Given `now` (the card), candidates go by their newest found post first (Owner 2026-11-28, "按 A 修"): recent ones newest first,
+ * then those with no dated post, then those older than 30 days, so a stale account is the first left off a full card.
  */
-export function selectCandidates(accounts: ScoredAccount[], allowPendingActivity = false) {
+export function selectCandidates(accounts: ScoredAccount[], allowPendingActivity = false, now?: Date) {
   const views = (a: ScoredAccount) => a.metrics.medianViews.value ?? -1;
+  const activity = (a: ScoredAccount) => (now ? ACTIVITY_RANK[searchActivity(a.metrics, now)] : 0);
+  const newest = (a: ScoredAccount) => {
+    const last = now && a.metrics.lastPublishedAt.value !== null ? Date.parse(a.metrics.lastPublishedAt.value) : Number.NaN;
+    return Number.isNaN(last) ? 0 : last;
+  };
   // One slot per account: the same account found by several keywords or a resumed discovery counts once.
   const distinct = [...new Map(accounts.map(a => [a.key, a] as const)).values()];
   const selectable = distinct.filter(a => a.classification.qualified
     || (allowPendingActivity && a.classification.excluded === 'ACTIVE_CHECK_PENDING'))
-    .sort((a, b) => Number(b.classification.category === 'fast_rising') - Number(a.classification.category === 'fast_rising')
-      || views(b) - views(a) || a.key.localeCompare(b.key))
+    .sort((a, b) => activity(a) - activity(b)
+      || Number(b.classification.category === 'fast_rising') - Number(a.classification.category === 'fast_rising')
+      || newest(b) - newest(a) || views(b) - views(a) || a.key.localeCompare(b.key))
     .slice(0, BENCHMARK_RULES.candidatesMax);
   const headReferences = distinct.filter(a => a.classification.category === 'head_reference');
   return { selectable, headReferences, enough: selectable.length >= BENCHMARK_RULES.candidatesMin };
