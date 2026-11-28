@@ -13,6 +13,11 @@
 -- deleted only as discardable test data, or the constraint stays). Prefer reverting the application code, which never writes
 -- OFF_TOPIC again, and leaving this migration in place.
 
+BEGIN;
+-- A short wait for the table lock (the ADD CONSTRAINT checks the existing rows): a busy table fails the migration instead of
+-- queuing every reader and writer behind it; rerun it then.
+SET LOCAL lock_timeout='5s';
+
 ALTER TABLE public.research_benchmarks DROP CONSTRAINT IF EXISTS research_benchmarks_excluded_check;
 ALTER TABLE public.research_benchmarks ADD CONSTRAINT research_benchmarks_excluded_check CHECK (excluded IN ('FOLLOWERS_MISSING',
   'FOLLOWERS_BELOW_MIN','NO_PUBLISH_TIME','INACTIVE_30_DAYS','NO_POSTS','TOO_FEW_POSTS','EVIDENCE_UNVERIFIED','OFF_TOPIC'));
@@ -112,3 +117,5 @@ BEGIN
           AND research_account_key(u.platform,o.result->'call'->>'query')=research_account_key(u.platform,u.account));
   END IF;
 END $function$;
+
+COMMIT;
