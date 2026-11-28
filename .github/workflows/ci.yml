@@ -393,11 +393,17 @@ jobs:
   # disposable database built from repository files and a deterministic simulated model (scripts/e2e-sim). No secret, no paid
   # call, no network beyond the runner's loopback. Not a required check yet: it is added as a separate job first.
   sim-e2e:
-    name: Run simulated-model browser tests
+    # Two parallel parts (CI-SPEED, Owner 2026-11-28): the two journeys that really wait for the provider's 240 s deadline run in their own
+    # job so they no longer add 8.8 minutes to the other journeys. Every journey still runs, once; the warm-up runs in both parts.
+    name: Run simulated-model browser tests (${{ matrix.part }})
     # A pull request that changes documentation only has nothing for a browser test to find. Front-end changes still run it.
     needs: [scope]
     if: needs.scope.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [journeys, provider-deadlines]
     # Measured 9m52s on CI (2026-11-03); the 30-minute ceiling of docs/ENGINEERING.md section 7 leaves about 20 minutes.
     timeout-minutes: 30
     permissions:
@@ -423,8 +429,15 @@ jobs:
       - name: Install Playwright browser
         run: cd apps/web && pnpm exec playwright install --with-deps --only-shell chromium
 
-      - name: Simulated-model browser tests
-        run: node scripts/e2e-sim/run.mjs
+      - name: Simulated-model browser tests (every journey except the two provider-deadline ones)
+        if: matrix.part == 'journeys'
+        run: |
+          node scripts/e2e-sim/run.mjs --grep-invert 'provider timeout after its headers|provider silent until the deadline'
+
+      - name: Simulated-model browser tests (the two provider-deadline journeys, with the warm-up)
+        if: matrix.part == 'provider-deadlines'
+        run: |
+          node scripts/e2e-sim/run.mjs --grep 'warm-up: compile the routes|provider timeout after its headers|provider silent until the deadline'
 
       # A failed journey's screenshots only (simulated accounts and data on a disposable local stack; no trace, storage state or
       # report, which could hold a local session token). The page text, failed requests and turn calls are in the job log.
@@ -432,7 +445,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: sim-e2e-failure-screenshots
+          name: sim-e2e-failure-screenshots-${{ matrix.part }}
           path: apps/web/test-results/sim/artifacts/**/*.png
           if-no-files-found: ignore
           retention-days: 7
