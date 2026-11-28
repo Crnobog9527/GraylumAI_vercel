@@ -109,14 +109,14 @@ class CIWorkflowsTest < Minitest::Test
     sim = jobs.fetch('sim-e2e')
     assert_equal ['scope'], sim.fetch('needs')
     assert_equal "needs.scope.outputs.docs_only != 'true'", sim.fetch('if')
-    # CI-SPEED (Owner 2026-11-28): the simulated tests run as three parallel parts. Every journey runs exactly once: two parts hold the spec
-    # files (each file in exactly one of them, the warm-up file in both) and skip the two provider-deadline journeys, the third runs only those
-    # two (plus the warm-up) by title. No part may be skipped or tolerate failure, and no step may carry a condition.
+    # CI-SPEED (Owner 2026-11-28): the simulated tests run as four parallel parts. Every journey runs exactly once: two parts hold the spec
+    # files (each file in exactly one of them, the warm-up file in both) and skip the two provider-deadline journeys, the other two run one each
+    # of those two (plus the warm-up) by title. No part may be skipped or tolerate failure, and no step may carry a condition.
     strat = sim.fetch('strategy')
     assert_equal false, strat.fetch('fail-fast')
     assert_equal ['include'], strat.fetch('matrix').keys
     parts = strat.fetch('matrix').fetch('include')
-    assert_equal %w[journeys-a journeys-b provider-deadlines], parts.map { |part| part.fetch('part') }
+    assert_equal %w[journeys-a journeys-b provider-deadline-headers provider-deadline-silent], parts.map { |part| part.fetch('part') }
     refute sim.key?('continue-on-error')
     slow = 'provider timeout after its headers|provider silent until the deadline'
     runs = sim.fetch('steps').select { |step| step.fetch('run', '').include?('scripts/e2e-sim/run.mjs') }
@@ -134,7 +134,9 @@ class CIWorkflowsTest < Minitest::Test
     others = specs - ['00-warmup.spec.ts']
     assert_equal others, (listed[0] + listed[1] - ['00-warmup.spec.ts']).sort, 'every spec file must be in exactly one journey part'
     assert_equal specs.length > 0, true
-    assert_equal "--grep 'warm-up: compile the routes|#{slow}'", parts[2].fetch('args')
+    assert_equal "--grep 'warm-up: compile the routes|provider timeout after its headers'", parts[2].fetch('args')
+    assert_equal "--grep 'warm-up: compile the routes|provider silent until the deadline'", parts[3].fetch('args')
+    assert_equal slow, 'provider timeout after its headers|provider silent until the deadline'
     spec = File.read("#{dir}/02-failures.spec.ts")
     ['provider timeout after its headers', 'provider silent until the deadline'].each { |title| assert_includes spec, "'#{title}" }
     assert_includes listed.flatten, '02-failures.spec.ts'

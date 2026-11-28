@@ -393,9 +393,9 @@ jobs:
   # disposable database built from repository files and a deterministic simulated model (scripts/e2e-sim). No secret, no paid
   # call, no network beyond the runner's loopback. Not a required check yet: it is added as a separate job first.
   sim-e2e:
-    # Three parallel parts (CI-SPEED, Owner 2026-11-28): the two journeys that really wait for the provider's 240 s deadline run in their own
-    # job, and the other journeys are split by spec file into two jobs (each spec file is named in exactly one of them; the warm-up file is in
-    # both, and the deadline part runs it by title). Every journey still runs exactly once; .github/scripts/test-ci-workflows.rb fails if a
+    # Four parallel parts (CI-SPEED, Owner 2026-11-28): each of the two journeys that really wait for the provider's 240 s deadline runs in its own
+    # job (with the warm-up), and the other journeys are split by spec file into two jobs (each spec file is named in exactly one of them; the warm-up file is in
+    # both, and each deadline part runs it by title). Every journey still runs exactly once; .github/scripts/test-ci-workflows.rb fails if a
     # spec file is in no part or in two.
     name: Run simulated-model browser tests (${{ matrix.part }})
     # A pull request that changes documentation only has nothing for a browser test to find. Front-end changes still run it.
@@ -407,11 +407,13 @@ jobs:
       matrix:
         include:
           - part: journeys-a
-            args: "--grep-invert 'provider timeout after its headers|provider silent until the deadline' 00-warmup.spec.ts 01-free-chat.spec.ts 02-failures.spec.ts 03-compare-and-tabs.spec.ts 04-mentor.spec.ts 05-read-retry.spec.ts 06-login-hydration.spec.ts 07-auth-forms-hydration.spec.ts 07-chat-image.spec.ts 12-consent-bar.spec.ts"
+            args: "--grep-invert 'provider timeout after its headers|provider silent until the deadline' 00-warmup.spec.ts 01-free-chat.spec.ts 02-failures.spec.ts 03-compare-and-tabs.spec.ts 04-mentor.spec.ts 05-read-retry.spec.ts 06-login-hydration.spec.ts 07-auth-forms-hydration.spec.ts 07-chat-image.spec.ts"
           - part: journeys-b
-            args: "--grep-invert 'provider timeout after its headers|provider silent until the deadline' 00-warmup.spec.ts 07-refresh-cache.spec.ts 08-no-loading-words.spec.ts 09-pillars-two-tabs.spec.ts 10-steps.spec.ts 11-light-first-paint.spec.ts"
-          - part: provider-deadlines
-            args: "--grep 'warm-up: compile the routes|provider timeout after its headers|provider silent until the deadline'"
+            args: "--grep-invert 'provider timeout after its headers|provider silent until the deadline' 00-warmup.spec.ts 07-refresh-cache.spec.ts 08-no-loading-words.spec.ts 09-pillars-two-tabs.spec.ts 10-steps.spec.ts 11-light-first-paint.spec.ts 12-consent-bar.spec.ts"
+          - part: provider-deadline-headers
+            args: "--grep 'warm-up: compile the routes|provider timeout after its headers'"
+          - part: provider-deadline-silent
+            args: "--grep 'warm-up: compile the routes|provider silent until the deadline'"
     # Measured 9m52s on CI (2026-11-03) as one job; the 30-minute ceiling of docs/ENGINEERING.md section 7 leaves about 20 minutes.
     timeout-minutes: 30
     permissions:
