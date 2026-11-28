@@ -156,6 +156,12 @@ export function turnResearchStore(input: { actorId: string; sessionId: string; r
     discoveryRead: async id => discoveries.get(id) ?? null,
     sessionKeywords: async () => [...new Set(prepared.cards.filter(c => c.kind === 'keywords' && c.items)
       .flatMap(c => c.items as string[]))].slice(0, 40),
+    async roundKeywords(confirmationId) {
+      const card = confirmed(confirmationId, 'candidates');
+      const discovery = card ? discoveries.get(prepared.cardDiscoveries[card.cardId] ?? '') : undefined;
+      return discovery ? [...discovery.keywords] : null;
+    },
+    priorEvidence: async (platform, account) => fetches.get(accountKey(platform, account))?.evidence ?? null,
     async discoverySave(id, cursor, state) {
       const record = discoveries.get(id);
       if (!record) throw new Error('RESEARCH_SCOPE_DENIED');

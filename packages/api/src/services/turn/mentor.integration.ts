@@ -435,6 +435,67 @@ it('RUNTIME: Owner 2026-11-27: a repeated request for the confirmation card is n
   expect(JSON.stringify(second.bodies.find(b => b.model === ORGANIZER)!.messages)).not.toContain('确认卡片');
 });
 
+// Owner 2026-11-28 (I, pay4 seq 28/30/32): once a reply of the step asked the user to open the benchmark accounts and check them,
+// a sentence asking again is dropped from what is shown and saved.
+it('RUNTIME: Owner 2026-11-28: a second request to open the accounts and check them is not shown or saved', async () => {
+  const f = await setup();
+  const quiet = JSON.stringify({ inputKind: 'answer', patches: [], notes: [] });
+  const seq28 = '你可以点开这几个账号主页看一眼，告诉我哪几个是杭州本地、做皮具手作体验课的。';
+  const first = transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, quiet)
+    : prose('gen-reply-' + n, '数据合格的有 4 个。' + seq28));
+  await turn(f, { text: '我选好了对标账号', transport: first.fn });
+  const seq32 = '最稳妥的做法是：你点开账号主页，看一眼简介和近期作品，再告诉我哪几个是杭州本地、做体验课的。';
+  const second = transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, quiet)
+    : prose('gen-reply-' + n, '这 4 个账号的身份还没核实。\n' + seq32 + '\n看不出来，我就在结论里保留"身份未核实"这一条。'));
+  const out = await turn(f, { text: '单看账号名，我不能确认它们是不是杭州皮具手作体验课。', transport: second.fn });
+  const result = out.events.at(-1) as Extract<TurnEvent, { type: 'result' }>;
+  expect(result.type, JSON.stringify(out.events)).toBe('result');
+  const shown = out.events.filter(e => e.type === 'text').map(e => (e as { delta: string }).delta).join('');
+  const saved = (await db.query("select content from session_messages where session_id=$1 and role='assistant' order by seq", [f.session])).rows;
+  expect(saved[0].content).toContain('点开这几个账号主页');
+  for (const text of [shown, JSON.parse(result.body).message, saved[1].content]) {
+    expect(text).toContain('身份还没核实');
+    expect(text).toContain('身份未核实');
+    expect(text).not.toContain('点开');
+  }
+});
+
+// Review of #2063: a reply that is nothing but the repeated request says what stays unverified, never the request itself.
+it('RUNTIME: Owner 2026-11-28: a reply that only asks again to check the accounts says they stay unverified', async () => {
+  const f = await setup();
+  const quiet = JSON.stringify({ inputKind: 'answer', patches: [], notes: [] });
+  const first = transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, quiet)
+    : prose('gen-reply-' + n, '你可以点开这几个账号主页看一眼，告诉我哪几个是杭州本地的。'));
+  await turn(f, { text: '我选好了对标账号', transport: first.fn });
+  const second = transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, quiet)
+    : prose('gen-reply-' + n, '你可以点开账号主页，看一眼简介。'));
+  const out = await turn(f, { text: '我看不出来。', transport: second.fn });
+  const result = out.events.at(-1) as Extract<TurnEvent, { type: 'result' }>;
+  expect(result.type, JSON.stringify(out.events)).toBe('result');
+  const shown = out.events.filter(e => e.type === 'text').map(e => (e as { delta: string }).delta).join('');
+  const saved = (await db.query("select content from session_messages where session_id=$1 and role='assistant' order by seq", [f.session])).rows;
+  for (const text of [shown, JSON.parse(result.body).message, JSON.parse(saved[1].content).message]) {
+    expect(text).toBe('没能核实的账号，我会在结论里标成"未核实"。');
+  }
+  expect(JSON.stringify(second.bodies.find(b => b.model === ORGANIZER)!.messages)).not.toContain('点开账号主页');
+});
+
+// Owner 2026-11-28 (J, pay4 seq 20/22): on the benchmark step the keyword card waits for the question which kind of account to learn
+// from; the coach's call is refused with the host's text and no card is made.
+it('RUNTIME: Owner 2026-11-28: no keyword card before the question which kind of account to learn from', async () => {
+  const f = await setup({ benchmarkStep: true });
+  await researchOn();
+  const t = transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, JSON.stringify({ inputKind: 'answer', patches: [], notes: [] }))
+    : n === 1 ? toolCall('gen-reply-1', 'propose_keywords', { keywords: ['杭州皮具手作', '皮具体验课', '皮革DIY'] })
+      : prose('gen-reply-' + n, '先选想参考哪一类账号。'));
+  const out = await turn(f, { text: '我没有对标账号，请按杭州本地皮具手作体验课的方向找。', transport: t.fn, research: tiktokVendors() });
+  expect(out.events.at(-1)?.type, JSON.stringify(out.events)).toBe('result');
+  expect(out.events.some(e => e.type === 'research_card')).toBe(false);
+  expect(JSON.stringify(t.bodies.filter(b => b.model === MENTOR)[1]!.messages)).toContain('KEYWORDS_NOT_YET');
+  const listed = await rest().rpc('research_user_cards', { a: f.actor, s: f.session });
+  expect(listed.data).toEqual([]);
+});
+
 it('RUNTIME: CORE-PATH-V2 V2-5: a module the draft is not bound to is refused before anything is frozen or sent', async () => {
   const f = await setup();
   const other = randomUUID();
@@ -1038,6 +1099,51 @@ it('RUNTIME: CORE-PATH-V2 V2-5c: a process killed mid-turn loses nothing receipt
   // The five receipted calls are reused; only the call in flight when the process died is sent again (a batch is the loss bound).
   expect(paid).toEqual(['cc_three:account_posts']);
   expect((await db.query('select account from research_benchmarks where session_id=$1 order by account', [f.session])).rows.map(r => r.account)).toEqual(accounts);
+}, 120000);
+
+// Owner 2026-11-28 (H, migration 0551): a candidate whose fetched posts are off the confirmed niche is saved as an unqualified
+// OFF_TOPIC benchmark; the database accepts the exclusion, the other candidates qualify.
+it('RUNTIME: Owner 2026-11-28: a fetched candidate off the confirmed niche is saved as OFF_TOPIC and does not qualify', async () => {
+  const f = await setup();
+  await researchOn({ maxSubcallsPerRound: 26, discoverSubcalls: 26 });
+  const quiet = JSON.stringify({ inputKind: 'answer', patches: [], notes: [] });
+  const say = (name: string, args: unknown) => transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, quiet)
+    : n === 1 ? toolCall('gen-reply-1', name, args) : prose('gen-reply-' + n, 'Done.'));
+  const first = await turn(f, { text: 'Find benchmarks', transport: say('propose_keywords', { keywords: ['leather wallet', 'leather craft class',
+    'leather card holder'] }).fn, research: tiktokVendors() });
+  const keywordCard = (first.events.find(e => e.type === 'research_card') as { card: { cardId: string } }).card.cardId;
+  const keywords = await rest().rpc('research_card_confirm', { a: f.actor, p_card: keywordCard, p: { selected: ['k0', 'k1', 'k2'] } });
+  // The search finds posts on leather; author 0's own posts are about cakes.
+  const stub: NonNullable<MentorDeps['research']> = { readKey: async () => 'local-synthetic', vendors: {
+    parallel: () => { throw new Error('not used'); }, firecrawl: () => { throw new Error('not used'); },
+    tikhub: async (call: { kind: string; keyword?: string; account?: string }) => {
+      const base = { vendor: 'tikhub', route: tikhubRouteId('tiktok', call.kind as never), outcome: 'ok', reason: null, httpStatus: 200,
+        supplierMayCharge: true, usage: { unit: 'call', units: '1' }, truncated: false, fetchedAt: new Date().toISOString() };
+      if (call.kind === 'keyword_posts') return { ...base, items: Array.from({ length: 5 }, (_, i) => ({ missing: [], fields: {
+        id: `${call.keyword}-${i}`, authorId: `maker${i}`, author: `Maker ${i}`, title: `${call.keyword} tutorial`, likes: 10, comments: 1,
+        shares: 1, views: 1000, publishedAt: new Date().toISOString() } })) };
+      if (call.kind === 'account_profile') return { ...base, items: [{ missing: [], fields: { followers: 50000, postsCount: 200 } }] };
+      return { ...base, items: Array.from({ length: 25 }, (_, i) => ({ missing: [], fields: { id: `${call.account}-${i}`,
+        title: call.account === 'maker0' ? 'Strawberry cake decorating' : 'Hand stitched leather wallet', views: 1000 + i, likes: 50,
+        comments: 5, shares: 2, publishedAt: new Date(Date.now() - i * 86400000).toISOString() } })) };
+    } } as unknown as VendorCalls };
+  const second = await turn(f, { text: 'Go on', transport: say('benchmark_discover', { keywordConfirmationId:
+    (keywords.data as { confirmationId: string }).confirmationId, platforms: ['tiktok'], discoveryId: null }).fn, research: stub });
+  const candidates = (second.events.find(e => e.type === 'research_card') as { card: { cardId: string;
+    options: Array<{ id: string; account: string; selectable: boolean }> } }).card;
+  const picks = candidates.options.filter(o => o.selectable && ['maker0', 'maker1', 'maker2'].includes(o.account)).map(o => o.id);
+  expect(picks).toHaveLength(3);
+  const picked = await rest().rpc('research_card_confirm', { a: f.actor, p_card: candidates.cardId, p: { selected: picks } });
+  expect(picked.error).toBeNull();
+  const third = await turn(f, { text: 'I picked them', transport: say('benchmark_fetch', { accounts: ['maker0', 'maker1', 'maker2']
+    .map(account => ({ platform: 'tiktok', account })), source: { kind: 'candidate', confirmationId: (picked.data as { confirmationId: string })
+    .confirmationId } }).fn, research: stub });
+  expect(third.events.at(-1)?.type, JSON.stringify(third.events.at(-1))).toBe('result');
+  const rows = (await db.query('select account,qualified,category is null no_category,excluded from research_benchmarks where session_id=$1 order by account',
+    [f.session])).rows;
+  expect(rows).toEqual([{ account: 'maker0', qualified: false, no_category: true, excluded: 'OFF_TOPIC' },
+    { account: 'maker1', qualified: true, no_category: false, excluded: null },
+    { account: 'maker2', qualified: true, no_category: false, excluded: null }]);
 }, 120000);
 
 // A turn whose discovery round its limit stops (it goes on in the next reply); the coach's prose after the search is `said`.

@@ -1,7 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
 import { aggregateAuthors, classifyAccount, selectCandidates, type ScoredAccount } from '../benchmark/classify';
-import { accountMetrics, type EvidenceItem } from '../benchmark/metrics';
+import { accountMetrics, distinctPosts, type EvidenceItem } from '../benchmark/metrics';
+import { offTopic } from '../benchmark/relevance';
 import { BENCHMARK_ROUTE_KINDS } from '../vendors/config';
 import { authorizeDiscoverStart } from '../tools/authorize';
 import { canonicalAccount } from '../tools/accountLinks';
@@ -230,7 +231,11 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
     }
     return result;
   };
+  // Accounts whose profile this round has looked up (or tried to): each at most once.
   const screened = new Set<string>();
+  // Authors passed over so far because none of their found posts names the niche, with those posts (review of #2063): judged again,
+  // with every post found of theirs, when a later page or an account search finds them again.
+  const unmatched = new Map<string, EvidenceItem[]>();
   const enough = () => selectCandidates(found, true).enough;
   // The shared profile cache (0493): profiles read within 24 hours by any search are not looked up (and not paid for) again. One batched
   // read per batch of authors, one batched write at the end; each cached lookup still takes its place in the operation order, so a
@@ -274,6 +279,17 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
   const screen = async (platform: SocialPlatform, authorId: string, label: string | null, authorPosts: EvidenceItem[]) => {
     const account = canonicalAccount(platform, authorId);
     if (!account || screened.has(`${platform}:${account}`)) return;
+    // Owner 2026-11-28 (H, pay4): an author not one of whose found posts names the confirmed niche is no candidate, and is not looked up
+    // (nor paid for). Decided from the replayed search pages only, so a continued round passes over the same authors.
+    // Zero matches among all its found posts only: they are a sample, not the account's newest posts (the one-in-ten rule and the
+    // newest 30 are the fetch's).
+    const key = `${platform}:${account}`;
+    const known = distinctPosts([...(unmatched.get(key) ?? []), ...authorPosts]);
+    if (offTopic({ name: label, posts: known, keywords: d.keywords, minShare: 0, allPosts: true })) {
+      unmatched.set(key, known);
+      return;
+    }
+    unmatched.delete(key);
     const request = authorLookup(ctx, platform, account, authorPosts);
     if (!request) { complete = false; return; }
     const kind = cacheKind(request);
@@ -352,7 +368,13 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
   // Deeper layers stop at the eighth selectable account (candidatesMin, Owner 2026-11-03: stop as soon as there are 8); once the round
   // is searched to the end, a card shows whatever is selectable, even below candidatesMin (Owner 2026-10-23).
   if (!stopped && !enough()) {
-    await deepen({ ctx, d, posts, firstPages, coverage, pay, screen, enough, cardable: enough, warm, isStopped: () => stopped });
+    await deepen({ ctx, d, posts, firstPages, coverage, pay, screen, enough, cardable: enough, warm, isStopped: () => stopped,
+      unmatched: (platform, authorId) => unmatched.has(`${platform}:${canonicalAccount(platform, authorId)}`) });
+  }
+  // Authors still passed over at the end of this reply, per platform (an author a later page brought back on the niche is not one).
+  for (const key of unmatched.keys()) {
+    const spent = coverage.platforms[key.slice(0, key.indexOf(':')) as SocialPlatform];
+    if (spent) spent.offTopic = (spent.offTopic ?? 0) + 1;
   }
   const resumable = stopReason === 'ROUND_LIMIT';
   // Which replies this round took (each reply once, also when one is replayed) and, while it waits for its next reply, the

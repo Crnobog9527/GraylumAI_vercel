@@ -27,7 +27,8 @@ function keywordAnswer(keyword: string) {
   const template = samples.keywordSearch.data.videos[0]!;
   return { ...samples.keywordSearch, data: { ...samples.keywordSearch.data, keyword,
     videos: Array.from({ length: CHANNELS }, (_, i) => ({ ...template, video_id: `${keyword.slice(0, 3)}vid${String(i).padStart(5, '0')}`,
-      channel_id: channel(i), author: `Channel ${i}` })) } };
+      // A search result names what was searched (a title off the confirmed niche keeps its author off the card, Owner 2026-11-28).
+      channel_id: channel(i), author: `Channel ${i}`, title: `${keyword} stitch along` })) } };
 }
 
 /** The real video detail shape for the requested video; `stranger` answers with another channel's detail. */

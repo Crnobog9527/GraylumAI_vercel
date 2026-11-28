@@ -25,6 +25,8 @@ interface Script {
   /** Further pages: authors by keyword and cursor; none = no next page. */
   nextPage?: (keyword: string, cursor: string) => { authors: string[]; next?: string } | undefined;
   firstCursor?: string;
+  /** A found post's title by its author (default "one video", on the niche of KEYWORDS). */
+  title?: (author: string, n: number) => string;
   leads?: (keyword: string) => string[];
   followers?: number;
   /** Web search results (Parallel); configured only when given. */
@@ -69,7 +71,7 @@ function fixture(platform: SocialPlatform, script: Script, kinds: SocialKind[] =
         maxUnitsPerCall: '1' }] : [])] });
   const sent: SupplierRequest[] = [];
   const post = (author: string, n: number): ResearchItem => ({ fields: { id: `${author}-v${n}`, ...(author ? { authorId: author } : {}), author: `Name ${author}`,
-    title: 'video', publishedAt: now.toISOString(), views: 1000, likes: 10, comments: 1, shares: 1 }, missing: [] });
+    title: script.title?.(author, n) ?? 'one video', publishedAt: now.toISOString(), views: 1000, likes: 10, comments: 1, shares: 1 }, missing: [] });
   subcall.mockImplementation(async (context, request) => {
     const operationId = context.newId();
     sent.push(request);
@@ -123,6 +125,63 @@ describe('deeper discovery layers', () => {
     const envelope = await f.run();
     expect(f.kindsSent()).toEqual([...Array(3).fill('keyword_posts'), ...Array(8).fill('account_profile')]);
     expect(envelope.candidateCard).toMatchObject({ shown: true, selectable: 8 });
+  });
+
+  // Owner 2026-11-28 (H, pay4): an author whose found posts never name the confirmed niche is not looked up (not paid for) and never
+  // reaches the card; the authors that do name it fill it.
+  it('passes over authors whose found posts are off the niche, without a lookup, and fills the card with the others', async () => {
+    // Each first page: three authors on the niche ("onea1" titled "one video") and three off it ("off0x0" titled "cooking video").
+    const f = fixture('tiktok', { firstPage: keyword => Array.from({ length: 6 }, (_, i) => (i % 2
+      ? `${keyword}a${i}` : `off${KEYWORDS.indexOf(keyword)}x${i}`)),
+    title: author => (author.startsWith('off') ? 'cooking video' : `${author.replace(/a\d$/, '')} video`) });
+    const envelope = await f.run();
+    const looked = f.sent.filter(r => r.vendor === 'tikhub' && r.call.kind === 'account_profile')
+      .map(r => r.vendor === 'tikhub' ? r.call.account : '');
+    expect(looked).toHaveLength(8);
+    expect(looked.some(account => account!.startsWith('off'))).toBe(false);
+    expect(envelope.candidateCard).toMatchObject({ shown: true, selectable: 8 });
+    expect(envelope.coverage.platforms.tiktok.offTopic).toBeGreaterThan(0);
+    expect((envelope.items as Array<{ fields: { account: string } }>).some(item => item.fields.account.startsWith('off'))).toBe(false);
+  });
+
+  // Review of #2063: the search's posts are a sample, so one post on the niche keeps an author (the one-in-ten rule is the fetch's).
+  it('looks up an author with only one of eleven found posts on the niche', async () => {
+    const f = fixture('tiktok', { firstPage: keyword => (keyword === 'one' ? Array(11).fill('few') : []),
+      title: (_author, n) => (n === 0 ? 'one video' : 'cooking video') });
+    const envelope = await f.run();
+    expect(f.sent.some(r => r.vendor === 'tikhub' && r.call.kind === 'account_profile' && r.call.account === 'few')).toBe(true);
+    expect(envelope.coverage.platforms.tiktok.offTopic).toBeUndefined();
+  });
+
+  it('looks up an author whose only found post on the niche is its 31st (review of #2063)', async () => {
+    const f = fixture('tiktok', { firstPage: keyword => (keyword === 'one' ? Array(31).fill('late') : []),
+      title: (_author, n) => (n === 30 ? 'one video' : 'cooking video') });
+    await f.run();
+    expect(f.sent.some(r => r.vendor === 'tikhub' && r.call.kind === 'account_profile' && r.call.account === 'late')).toBe(true);
+  });
+
+  // Review of #2063: an author passed over for its first page's posts is judged again when a later page finds one of its posts on the
+  // niche; only the profile lookup is once per account.
+  it('looks up an author whose first-page posts are off the niche once a next page finds its post on it', async () => {
+    const f = fixture('tiktok', { firstPage: keyword => (keyword === 'one' ? ['sweet', 'p1', 'p2', 'p3'] : []), firstCursor: '20',
+      nextPage: (_keyword, cursor) => (cursor === '20' ? { authors: ['sweet', 'n1'] } : undefined),
+      title: (author, n) => (author === 'sweet' && n < 100 ? 'dessert box' : 'one video') });
+    const envelope = await f.run();
+    const looked = f.sent.filter(r => r.vendor === 'tikhub' && r.call.kind === 'account_profile')
+      .map(r => r.vendor === 'tikhub' ? r.call.account : '');
+    expect(looked).toEqual(['p1', 'p2', 'p3', 'n1', 'sweet']);
+    expect(envelope.coverage.platforms.tiktok.offTopic).toBeUndefined();
+    expect((envelope.items as Array<{ fields: { account: string } }>).map(item => item.fields.account)).toContain('sweet');
+  });
+
+  it('still passes over an author whose later posts stay off the niche, also when an account search names it again', async () => {
+    const f = fixture('tiktok', { firstPage: keyword => (keyword === 'one' ? ['sweet', 'p1', 'p2', 'p3'] : []), firstCursor: '20',
+      nextPage: (_keyword, cursor) => (cursor === '20' ? { authors: ['sweet', 'n1'] } : undefined), leads: () => ['sweet'],
+      title: author => (author === 'sweet' ? 'dessert box' : 'one video') },
+    ['keyword_posts', 'account_profile', 'account_posts', 'account_search']);
+    const envelope = await f.run();
+    expect(f.sent.some(r => r.vendor === 'tikhub' && r.call.kind === 'account_profile' && r.call.account === 'sweet')).toBe(false);
+    expect(envelope.coverage.platforms.tiktok.offTopic).toBe(1);
   });
 
   it('too few first-page authors: searches for accounts with each keyword and screens the leads until there are eight', async () => {

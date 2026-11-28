@@ -28,7 +28,7 @@ import type { CounterStore } from './limiter';
 import { mentorCatalog, MentorCatalogError, mentorPolicy } from './mentorCatalog';
 import { TurnReplay, type ResumeRead } from './resume';
 import { mentorHost, mentorOrganizerInput, mentorState, openingOrganizerOutput, resourcesOf } from './mentorContext';
-import { answeredText, confirmationAsked, mentorAnsweredCard, mentorReplyBody, mentorTurnInput, profileLinksDeclined, userHasSpoken,
+import { answeredText, askedInStep, confirmationAsked, mentorAnsweredCard, mentorReplyBody, mentorTurnInput, profileLinksDeclined, userHasSpoken,
   type MentorAnswer } from './mentorInput';
 import { mentorSystem, mentorUserMessage, organizerInput, organizerInstructions, projectMentorHistory } from './mentorPrompt';
 import { loadMentorSkill, mentorSkillAvailable, mentorSkillFileTool, mentorSkillSource, prepareMentorFiles, skillFileReserveBytes } from './mentorSkill';
@@ -38,9 +38,10 @@ import { METHOD_STEP_ID, withStepEvents } from './tools/announce';
 import { savedSteps } from './tools/toolStage';
 import { createRuntimeBudget } from './settings/budget';
 import { REPLY_CUT, REPLY_CUT_FAILURE, shownSoFar } from './shownReply';
-import { asksForConfirmationCard, asksToReplyContinue, dropsConfirmationReminder, replySentenceFilter, SEARCH_GOES_ON } from './confirmationReminder';
+import { anySentence, asksForConfirmationCard, asksToReplyContinue, asksUserToCheckAccounts, dropsConfirmationReminder, replySentenceFilter,
+  SEARCH_GOES_ON, UNVERIFIED_NOTED } from './confirmationReminder';
 import { FIXED_QUESTION_NOTE, LATER_QUESTIONS_NOTE, fixedCardChoice, fixedQuestionCard, fixedQuestionFor, laterFixedQuestions,
-  organizerWrote } from './fixedQuestions';
+  keywordCardHeld, organizerWrote } from './fixedQuestions';
 import { benchmarkReady, benchmarkToolBytes, turnBenchmarkTools, type BenchmarkDeps } from './tools/benchmark';
 import { preparedResearch, type PreparedResearch } from './tools/benchmarkStore';
 import { logSwallowed, swallow } from '../../lib/swallow';
@@ -268,12 +269,15 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
     let sources: CardSources = cardSources(words, history);
     // This turn's discovery round goes on in the next reply, which the page sends by itself (discovery.ts, research_continue).
     let continuing = false;
+    // The keyword card waits for the question which kind of account to learn from (Owner 2026-11-28, J).
+    const keywordsHeld = keywordCardHeld({ host, history: opened.history, roundId: ctx.roundId, mode: ctx.mode });
     // A step summary is offered no question card (as the old path's admission removed it), not only told not to show one.
     benchmark = researchFits ? turnBenchmarkTools({ research: research!, prepared: flow!, deps: deps.research,
       ...(input.researchRefreshId ? { refreshId: input.researchRefreshId } : {}), admin, slots: deps.slots,
       calls: { db, actorId: input.actorId, turnId: opened.turnId, nextSeq: () => ++seq }, actorId: input.actorId, sessionId: input.sessionId,
       requestId: input.requestId, text: words, deadline: Date.now() + MENTOR_RESEARCH_MS,
       emit: event => { if (event.type === 'research_continue') continuing = true; emit(event); },
+      ...(keywordsHeld ? { keywordsHeld } : {}),
       ...(profileLinksDeclined([...opened.history.filter(m => m.role === 'user').map(m => m.content), words], carriesAccountLink)
         ? { linksDeclined: true } : {}),
       callGate: async subcalls => { const gate = await deps.newWork.calls(input.actorId, subcalls, 'bill2.v2');
@@ -292,8 +296,11 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
     // so is one asking the user to reply "continue" while the search goes on by itself. `shownText` is what the user saw, and
     // what is saved.
     const dropping = dropsConfirmationReminder(asked, words);
-    const reminder = replySentenceFilter(() => dropping || continuing,
-      sentence => (dropping && asksForConfirmationCard(sentence)) || (continuing && asksToReplyContinue(sentence)));
+    // Once a reply of the step asked the user to open the benchmark accounts and check them, it is not asked again (pay4 seq 28-32).
+    const checkAsked = askedInStep(opened.history, input.stepId, ctx.roundId, message => anySentence(message, asksUserToCheckAccounts));
+    const reminder = replySentenceFilter(() => dropping || continuing || checkAsked,
+      sentence => (dropping && asksForConfirmationCard(sentence)) || (continuing && asksToReplyContinue(sentence))
+        || (checkAsked && asksUserToCheckAccounts(sentence)));
     let shownText = '';
     saveShown = async () => {
       // The prose of the call that was cut, in the reply's own envelope; no card (the user never saw one) and no checklist write
@@ -330,15 +337,16 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
     shownText += tail;
     if (tail) emit({ type: 'text', delta: tail });
     // A reply of a search that goes on, that was nothing but a request to reply "continue", says only that the search goes on
-    // (review of #2062): never the request kept as the saved reply.
-    if (continuing && !shownText.trim() && text.trim()) {
-      shownText = SEARCH_GOES_ON[effectiveReplyLocale(opened.replyLanguage)];
+    // (review of #2062); one that was nothing but a repeated request to check the accounts says what is left unverified (review of
+    // #2063). Never the request kept as the saved reply.
+    if ((continuing || checkAsked) && !shownText.trim() && text.trim()) {
+      shownText = (continuing ? SEARCH_GOES_ON : UNVERIFIED_NOTED)[effectiveReplyLocale(opened.replyLanguage)];
       emit({ type: 'text', delta: shownText });
     }
     // A reply that was nothing but the request again keeps it (no empty reply); otherwise what was shown is the reply. Without a
     // tool call the saved body is read from `output` (agentTurnResult), so it is the shown text too (review of #2059: a reload and
     // the organizer saw the dropped request again); a tool call's output is the tool's result and stays as it is.
-    const filtered = (dropping || continuing) && shownText.trim() ? shownText : null;
+    const filtered = (dropping || continuing || checkAsked) && shownText.trim() ? shownText : null;
     if (filtered) text = filtered;
     // A neutral card keeps the coach's short prose before it; a comparison card with separate prose is refused (groundedCard.ts).
     let turn = groundedTurn(text, filtered && !toolCalled ? filtered : output, toolCalled, cardMessage);

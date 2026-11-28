@@ -78,6 +78,8 @@ export type BenchmarkToolsInput = { research: MentorResearch; prepared: Prepared
   emit: (event: ResearchTurnEvent) => void;
   /** The user declined profile links in this conversation (mentorInput.ts profileLinksDeclined). */
   linksDeclined?: boolean;
+  /** The keyword card is held back this turn (fixedQuestions.ts keywordCardHeld): the host text the coach gets instead. */
+  keywordsHeld?: string;
   /** The one-switch pause and the call limits for this call's subcalls; throws TurnStop to refuse. */
   callGate: (subcalls: number) => Promise<void>;
   onStop: (stop: TurnStop) => void };
@@ -153,6 +155,9 @@ export function turnBenchmarkTools(input: BenchmarkToolsInput) {
   const tools: RuntimeTool[] = researchRuntimeTools(ctx, names).map(tool => ({ ...tool, async execute(args, callId) {
     if (used) return toolEnvelope({ status: 'budget_exhausted', reason: 'REPLY_CALL_LIMIT' });
     used = true;
+    if (tool.name === 'propose_keywords' && input.keywordsHeld) {
+      return toolEnvelope({ status: 'not_confirmed', reason: 'KEYWORDS_NOT_YET', nextStep: input.keywordsHeld });
+    }
     try {
       if (tool.name === 'benchmark_discover' && turnStore.finishedRound(args)) return ROUND_FINISHED;
       if (FREE.includes(tool.name)) return await tool.execute(args, callId);

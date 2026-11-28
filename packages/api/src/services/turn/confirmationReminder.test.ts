@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
-import { asksToReplyContinue, confirmationReminderFilter, dropConfirmationReminder, dropsConfirmationReminder, replySentenceFilter } from './confirmationReminder';
+import { anySentence, asksToReplyContinue, asksUserToCheckAccounts, confirmationReminderFilter, dropConfirmationReminder, dropsConfirmationReminder, replySentenceFilter } from './confirmationReminder';
 
 // Owner 2026-11-27 pay2 (second run): seq 18 asked for the confirmation card; seq 20 and 22, the coach's own words, asked again
 // although the host had marked the turn confirmationAsked.
@@ -84,5 +84,54 @@ describe('a repeated request for the confirmation card in Traditional characters
   });
   it('a verbal go-ahead in Traditional characters is not filtered (the coach points to the card once)', () => {
     for (const words of ['繼續', '沒問題。', '確認']) expect(dropsConfirmationReminder(true, words)).toBe(false);
+  });
+});
+
+describe('Owner 2026-11-28 (I, pay4 seq 28/30/32): the user is asked once to open the accounts and check them', () => {
+  // The three requests of the run, each from a different reply.
+  const SEQ28 = '**接下来我想请你做一件小事:** 你可以点开这几个账号主页看一眼，告诉我哪几个是杭州本地、做皮具手作体验课的。';
+  const SEQ30 = '你不用等我，可以自己做一件很小的事：点开前两个账号，各看一眼主页简介和最近几条作品。';
+  const SEQ32 = '4. 最稳妥的做法是：你点开账号主页，看一眼简介和近期作品，再告诉我哪几个是杭州本地、做体验课的。';
+
+  it('recognises each of the three requests, in Simplified and Traditional characters and in English', () => {
+    for (const sentence of [SEQ28, SEQ30, SEQ32, '你可以點開這幾個帳號主頁看一眼。', 'You could open their profiles and tell me which are local.']) {
+      expect(asksUserToCheckAccounts(sentence)).toBe(true);
+    }
+  });
+
+  it('keeps a sentence that asks for profile links, or only reports what the host saw', () => {
+    for (const sentence of ['有想对标的账号，把它的主页链接直接发给我。', '这 4 个账号的作品标题里没有提到皮具。', '黑手造的最近作品都是小手工玩具。']) {
+      expect(asksUserToCheckAccounts(sentence)).toBe(false);
+    }
+  });
+
+  // Review of #2063: only a request to the user is dropped; the coach's own judgment stays, or "未核实" would replace it.
+  it('keeps a sentence that says the user need not check, in Simplified and Traditional characters and in English', () => {
+    for (const sentence of ['不用你点开账号主页，我已经从标题看出它做的是甜品。', '不用你點開帳號主頁，我已經從標題看出它做的是甜品。',
+      '你不需要再去看主页了，我按作品标题判断。', "You don't need to open their profiles: the titles show desserts."]) {
+      expect(asksUserToCheckAccounts(sentence)).toBe(false);
+    }
+  });
+
+  it('keeps the coach reporting its own look at an account', () => {
+    for (const sentence of ['我打开账号主页核实了，云朵泡芙实际做甜品，不是皮具。', '我看了主页，它做的是甜品，不是皮具。',
+      '我點開帳號主頁看了，它做的是甜品。']) {
+      expect(asksUserToCheckAccounts(sentence)).toBe(false);
+    }
+    const filter = replySentenceFilter(() => true, asksUserToCheckAccounts);
+    const reply = '我打开账号主页核实了，云朵泡芙实际做甜品，不是皮具。\n不用你点开账号主页，结论我写成"不相关"。';
+    expect(filter.push(reply) + filter.flush()).toBe(reply);
+  });
+
+  it('a reply after the first request has the request dropped and the rest kept, also when streamed in pieces', () => {
+    const reply = `数据合格的有 4 个账号。\n${SEQ32}\n看不出来，我就在结论里保留"身份未核实"这一条。`;
+    const filter = replySentenceFilter(() => true, asksUserToCheckAccounts);
+    const shown = Array.from(reply).map(c => filter.push(c)).join('') + filter.flush();
+    expect(shown).not.toContain('点开');
+    expect(shown).toContain('数据合格的有 4 个账号。');
+    expect(shown).toContain('身份未核实');
+    // The saved reply of seq 28 is what marks the step as asked.
+    expect(anySentence(`有几点要说清楚。\n${SEQ28}`, asksUserToCheckAccounts)).toBe(true);
+    expect(anySentence('数据合格的有 4 个账号。', asksUserToCheckAccounts)).toBe(false);
   });
 });

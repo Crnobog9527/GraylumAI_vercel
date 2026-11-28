@@ -68,7 +68,9 @@ BEGIN
        AND p_evidence->'classification'->'qualified'='false'::jsonb
        AND p_evidence->'classification'->>'excluded' IN ('FOLLOWERS_MISSING','FOLLOWERS_BELOW_MIN','NO_PUBLISH_TIME','INACTIVE_30_DAYS','NO_POSTS',
        -- 0268 too few posts
-       'TOO_FEW_POSTS')),false)
+       'TOO_FEW_POSTS',
+       -- Owner 2026-11-28 (H): the account's recent posts do not name the niche of the confirmed keywords
+       'OFF_TOPIC')),false)
     THEN RAISE EXCEPTION 'RESEARCH_FETCH_INVALID';END IF;
   END IF;
   -- A sent attempt ends in any state; an attempt never sent can only end as a (free) failure.

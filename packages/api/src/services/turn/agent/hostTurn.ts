@@ -17,7 +17,9 @@ export const RESEARCH_REFRESH_NOTE = 'The user pressed Refresh for this benchmar
 /** RT-6: fixed host text for the session's selection cards and benchmark table; never model-written. */
 export const RESEARCH_CARDS_NOTE = 'Host records of this session, newest last. A card with confirmationId null still waits for the ' +
   'user: do not search for it. Use ids only from here. benchmarks counts host-verified qualified accounts; numbers are host data. ' +
-  'YouTube followers are approximate (YouTube publishes rounded counts): write them as 约 X 万 and say YouTube only shows approximate counts.';
+  'YouTube followers are approximate (YouTube publishes rounded counts): write them as 约 X 万 and say YouTube only shows approximate counts. ' +
+  'name is the account\'s display name from the candidate card: call the account by it. excluded OFF_TOPIC: the host found that the ' +
+  'account\'s recent posts do not name the niche of the confirmed keywords; it is not a benchmark.';
 /**
  * BENCHMARK-SHORTFALL (Owner 2026-10-20, choice B): fixed host text for the shortfall choice; never model-written.
  * rounds counts completed benchmark searches of this session; the host itself shows the card when it is due.
@@ -37,7 +39,8 @@ export const researchContextSchema = z.object({
   note: z.literal(RESEARCH_CARDS_NOTE),
   cards: z.array(researchCard).max(3),
   benchmarks: z.object({required: z.number().int().min(3).max(12), qualified: z.number().int().min(0).max(30),
-    rows: z.array(researchAccount.extend({category: z.enum(['head_reference', 'imitable', 'fast_rising']).nullable(),
+    rows: z.array(researchAccount.extend({name: z.string().min(1).max(40).optional(),
+      category: z.enum(['head_reference', 'imitable', 'fast_rising']).nullable(),
       qualified: z.boolean(), excluded: z.string().max(64).nullable(), followers: benchmarkNumber,
       medianViews: benchmarkNumber, engagementRate: benchmarkNumber, lastPublishedAt: z.string().max(40).nullable()}).strict()).max(12),
   }).strict(),

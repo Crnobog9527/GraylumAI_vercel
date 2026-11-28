@@ -1,8 +1,10 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { accountMetrics, suppliedWholeHistory, type EvidenceItem } from '../benchmark/metrics';
-import { classifyAccount, qualifyFetchedAccount } from '../benchmark/classify';
-import { topicRelevance } from '../benchmark/relevance';
+import { classifyAccount, excludeOffTopic, qualifyFetchedAccount } from '../benchmark/classify';
+import { offTopic, topicRelevance } from '../benchmark/relevance';
+import { judgedKeywords, relevanceBasis } from '../benchmark/relevanceBasis';
 import { authorizeBenchmarkFetch } from '../tools/authorize';
+import { swallow } from '../../../lib/swallow';
 import { shortfallNotice } from './shortfall';
 import { toolEnvelope } from '../tools/envelope';
 import type { ResearchToolArgs } from '../tools/schemas';
@@ -27,6 +29,27 @@ async function savedSubcall(ctx: ResearchToolContext, operationId: string): Prom
     ...(typeof saved.nextCursor === 'string' ? { nextCursor: saved.nextCursor } : {}) } };
 }
 
+/** Newest post titles handed to the coach per account, each cut to this many characters. */
+const VIEW_TITLES = 8;
+const VIEW_TITLE_CHARS = 60;
+
+/** The account's display name and newest distinct post titles, one line each. */
+function accountView(profile: EvidenceItem, posts: EvidenceItem[]): { name?: string; recentTitles?: string } {
+  const name = typeof profile.fields.name === 'string' && profile.fields.name.trim() ? profile.fields.name.trim().slice(0, 40) : undefined;
+  const titles = [...new Set(posts.map(post => post.fields.title).filter((title): title is string => typeof title === 'string')
+    .map(title => Array.from(title.replace(/\s+/g, ' ').trim()).slice(0, VIEW_TITLE_CHARS).join('')).filter(Boolean))].slice(0, VIEW_TITLES);
+  return { ...(name ? { name } : {}), ...(titles.length ? { recentTitles: titles.join(' ｜ ') } : {}) };
+}
+
+/**
+ * Owner 2026-11-28 (I, pay4 seq 28/30/32): three replies running asked the user to open the accounts and check them. The host already
+ * has each account's name and newest titles: the coach judges from them first, asks the user at most once, and records "未核实".
+ */
+export const FETCH_JUDGE_NEXT_STEP = '每个账号的昵称（name）和最近作品标题（recentTitles）是系统取到的。先用它们给出你自己的判断：'
+  + '这个账号做的是不是和用户同一类的内容、像不像用户要找的那类账号，并说依据是哪几条标题。标题看不出来的，直接写"未核实"。'
+  + '不要让用户自己点开主页去核实。最多问用户一次补充；用户说看不出来，或者没有回答，就按"未核实"记下，以后不再追问。'
+  + 'excluded 为 OFF_TOPIC 的账号，作品和用户确认的关键词对不上，不算合格对标。';
+
 export async function benchmarkFetch(ctx: ResearchToolContext, args: ResearchToolArgs<'benchmark_fetch'>,
   budget: ToolAllowance): Promise<string> {
   // A user_message source without an id names the message this reply answers (this execution's own input).
@@ -38,6 +61,12 @@ export async function benchmarkFetch(ctx: ResearchToolContext, args: ResearchToo
   // Read at most once per call, and only when an account was really fetched; a read failure only drops the label.
   let sessionKeywords: Promise<string[]> | undefined;
   const keywords = () => (sessionKeywords ??= (ctx.store.sessionKeywords?.() ?? Promise.resolve([])).catch(() => []));
+  // A candidate is judged by the keywords of the round that found it (review of #2063); without that record, the session's.
+  let round: Promise<string[]> | undefined;
+  const source = args.source;
+  const roundKeywords = () => (round ??= (source.kind === 'candidate' && ctx.store.roundKeywords
+    ? swallow('research_round_keywords_read_failed', ctx.store.roundKeywords(source.confirmationId), null, { category: 'api' })
+    : Promise.resolve(null)).then(found => found ?? keywords()));
   let stopReason: string | null = null;
   let stopBudget = false;
   for (const account of authorization.accounts) {
@@ -47,6 +76,8 @@ export async function benchmarkFetch(ctx: ResearchToolContext, args: ResearchToo
       continue;
     }
     const refreshId = args.source.kind === 'refresh' ? args.source.refreshId : undefined;
+    // Before a refresh claims the fetch: the claim replaces the evidence that holds the account's basis.
+    const basis = await relevanceBasis(ctx.store, args.source, account, roundKeywords);
     let claim = await ctx.store.fetchClaim(account.platform, account.account, refreshId);
     // A balance pause left this answer's own attempt in progress: continue it after the top-up (BILL-PAYG, 0279).
     if (!claim.claimed && claim.state === 'in_progress') {
@@ -141,12 +172,18 @@ export async function benchmarkFetch(ctx: ResearchToolContext, args: ResearchToo
       // Whole history only when the profile's own post count shows nothing is left (Owner 2026-10-16, A: new accounts).
       const metrics = accountMetrics({ profile, posts, followersItem: results[routes.followersFrom]?.[0],
         complete: suppliedWholeHistory(results.account_profile?.[0], posts) }, ctx.now());
-      const classification = qualifyFetchedAccount(metrics, classifyAccount(metrics, ctx.config.recentGrowth, ctx.now()));
-      // BENCHMARK-COVERAGE: how much of the account is on the confirmed niche (a label, never a qualification rule).
-      const relevance = topicRelevance(posts, await keywords());
-      const evidence = { ...account, metrics, classification, ...(relevance ? { relevance } : {}), fetchedAt: ctx.now().toISOString() };
+      // Owner 2026-11-28 (H, pay4): an account that plainly makes other content than the confirmed niche never qualifies. An account
+      // the user sent the link of is the user's own pick and is judged on its numbers only (relevanceBasis.ts).
+      const judged = judgedKeywords(basis);
+      const classification = excludeOffTopic(qualifyFetchedAccount(metrics, classifyAccount(metrics, ctx.config.recentGrowth, ctx.now())),
+        offTopic({ name: typeof profile.fields.name === 'string' ? profile.fields.name : null, posts, keywords: judged }));
+      // BENCHMARK-COVERAGE: how much of the account is on the niche (by what it is judged by; a label only for a user pick).
+      const relevance = topicRelevance(posts, basis.kind === 'keywords' ? judged : await keywords());
+      const evidence = { ...account, metrics, classification, ...(relevance ? { relevance } : {}), relevanceBasis: basis,
+        fetchedAt: ctx.now().toISOString() };
       await ctx.store.fetchFinish(claim.fetchId, claim.attempt, 'succeeded', evidence);
-      rows.push({ fields: { ...account, evidence: JSON.stringify(evidence) }, missing: metrics.missing });
+      // What the coach judges the account by (pay4 2026-11-28, I): its name and newest post titles, for this reply only (not saved).
+      rows.push({ fields: { ...account, ...accountView(profile, posts), evidence: JSON.stringify(evidence) }, missing: metrics.missing });
     } catch (error) {
       // A failure after dispatch can conceal a supplier response. Never make this attempt retryable.
       // Keep an unsent prepared attempt recoverable (including its original refresh grant). A balance pause keeps the
@@ -162,5 +199,6 @@ export async function benchmarkFetch(ctx: ResearchToolContext, args: ResearchToo
   const shortfall = stopReason ? undefined : await shortfallNotice(ctx);
   return toolEnvelope({ status: stopReason && rows.length === 0 ? (stopBudget ? 'budget_exhausted' : 'unavailable')
     : partial ? 'partial' : 'ok', reason: stopReason ?? (partial ? 'ACCOUNT_DATA_INCOMPLETE' : null), items: rows,
+    ...(rows.some(row => typeof row.fields.recentTitles === 'string') ? { nextStep: FETCH_JUDGE_NEXT_STEP } : {}),
     ...(shortfall ? { shortfall } : {}) });
 }
