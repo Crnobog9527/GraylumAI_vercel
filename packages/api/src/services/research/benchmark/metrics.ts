@@ -106,6 +106,17 @@ export function distinctPosts(posts: EvidenceItem[]): EvidenceItem[] {
   });
 }
 
+/** The newest dated post among these, with the same time rules as accountMetrics (a post further in the future counts as undated). */
+export function newestPublished(posts: EvidenceItem[], now: Date): AccountMetrics['lastPublishedAt'] {
+  const time = timeAt(now.getTime());
+  let newest: { post: EvidenceItem; at: number } | null = null;
+  for (const post of posts) {
+    const at = time(post);
+    if (at !== null && (newest === null || at > newest.at)) newest = { post, at };
+  }
+  return newest ? { value: new Date(newest.at).toISOString(), refs: [newest.post.ref] } : { value: null, refs: [] };
+}
+
 export function accountMetrics(evidence: AccountEvidence, now: Date): AccountMetrics {
   const time = timeAt(now.getTime());
   const posts = newestPosts(distinctPosts(evidence.posts), time);

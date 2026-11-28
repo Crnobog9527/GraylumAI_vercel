@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
 import { aggregateAuthors, classifyAccount, searchActivity, selectCandidates, type ScoredAccount } from '../benchmark/classify';
-import { accountMetrics, distinctPosts, type EvidenceItem } from '../benchmark/metrics';
+import { accountMetrics, distinctPosts, newestPublished, type EvidenceItem } from '../benchmark/metrics';
 import { offTopic } from '../benchmark/relevance';
 import { BENCHMARK_ROUTE_KINDS } from '../vendors/config';
 import { authorizeDiscoverStart } from '../tools/authorize';
@@ -382,6 +382,24 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
     const spent = coverage.platforms[key.slice(0, key.indexOf(':')) as SocialPlatform];
     if (spent) spent.offTopic = (spent.offTopic ?? 0) + 1;
   }
+  // Review of #2067: a candidate's newest found post is read from every post of it this round found, not only the ones it had when
+  // it was screened (a later page may find a newer one), so the card's order and "可能停更" go by all of them. No lookup is repeated.
+  const newestOf = new Map<string, EvidenceItem[]>();
+  for (const [platform, entries] of posts) {
+    for (const post of entries) {
+      const account = typeof post.fields.authorId === 'string' ? canonicalAccount(platform, post.fields.authorId) : null;
+      if (!account) continue;
+      const own = newestOf.get(`${platform}:${account}`);
+      if (own) own.push(post); else newestOf.set(`${platform}:${account}`, [post]);
+    }
+  }
+  found.forEach((a, i) => {
+    const newest = newestPublished(newestOf.get(a.key) ?? [], ctx.now());
+    const known = a.metrics.lastPublishedAt.value === null ? Number.NEGATIVE_INFINITY : Date.parse(a.metrics.lastPublishedAt.value);
+    if (newest.value === null || Date.parse(newest.value) <= known) return;
+    found[i] = { ...a, metrics: { ...a.metrics, lastPublishedAt: newest,
+      missing: a.metrics.missing.filter(field => field !== 'lastPublishedAt') } };
+  });
   const resumable = stopReason === 'ROUND_LIMIT';
   // Which replies this round took (each reply once, also when one is replayed) and, while it waits for its next reply, the
   // reply that stopped it: the stream's own "goes on" signal is lost by a page reload, this is not (research_user_unfinished_round).
