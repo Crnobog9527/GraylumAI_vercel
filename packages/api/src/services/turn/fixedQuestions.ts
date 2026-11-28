@@ -173,3 +173,29 @@ export function fixedQuestionCard(chosen: ChosenQuestion, message: string): Ques
   return questionToolCardSchema.parse({ question: chosen.question, options: [...chosen.options], recommended: null, message,
     recommendationReason: null });
 }
+
+/** Fixed host text when the keyword card is held back (Owner 2026-11-28, J); never model-written. */
+export const KEYWORDS_BEFORE_STEP = '关键词卡在对标那一步、用户选好想参考哪一类账号之后才出。现在不要出关键词卡，也不要说已经发了；'
+  + '告诉用户到对标那一步会先问想参考哪一类账号，再请用户确认搜索关键词。';
+export const KEYWORDS_BEFORE_KIND = '先问用户想参考哪一类账号（宿主会在你的回复下出选项卡），用户选好后再出关键词卡。现在不要出关键词卡，'
+  + '也不要说已经发了。';
+
+/*
+ * Owner 2026-11-28 (J, pay4 seq 20/22): the keyword card came at the end of step 1, before step 2 asked which kind of account the user
+ * wants to learn from. The host holds the card back until that question was shown: never on a step before the benchmark step, and on
+ * the benchmark step only once the kind card was shown in this round, the search has started, the findings are written, or the step
+ * does not ask it (an import, mode manual). Returns the host text for the coach while it is held, else null.
+ */
+export function keywordCardHeld(input: { host: HostTurnContext; history: readonly HistoryItem[]; roundId: string; mode: unknown }): string | null {
+  const { host } = input;
+  const benchmarkStep = host.checklist.findIndex(step => step.fields.some(field => field.id === 'benchmark_findings'));
+  const current = host.checklist.findIndex(step => step.id === host.stepId);
+  if (benchmarkStep < 0 || current < 0 || current > benchmarkStep) return null;
+  if (current < benchmarkStep) return KEYWORDS_BEFORE_STEP;
+  const kind = FIXED_QUESTIONS.find(q => q.id === 'benchmark_kind')!;
+  const findings = host.checklist[current]!.fields.find(field => field.id === 'benchmark_findings');
+  const research = host.research;
+  const started = Boolean(research && (research.cards.length > 0 || research.benchmarks.qualified > 0));
+  const shown = Object.values(kind.question).some(text => askedInRound(input.history, input.roundId).has(text));
+  return input.mode !== 'mentor' || started || findings?.status !== 'missing' || shown ? null : KEYWORDS_BEFORE_KIND;
+}

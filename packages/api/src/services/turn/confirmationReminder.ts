@@ -56,6 +56,22 @@ export const asksToReplyContinue = (sentence: string) => REPLY_CONTINUE.test(sen
 export const SEARCH_GOES_ON: Record<ReplyLocale, string> = { 'zh-Hans': '还在接着搜，搜完会直接告诉你。',
   'zh-Hant': '還在接著搜，搜完會直接告訴你。', en: "Still searching. I'll tell you as soon as it's done." };
 
+/*
+ * Owner 2026-11-28 (I, pay4 seq 28/30/32): three replies running asked the user to open the benchmark accounts and check them
+ * themselves. The coach is given what the host fetched to judge by (benchmarkFetch.ts) and may ask once; after a saved reply of the
+ * step asked, the host drops a sentence that asks again. A sentence asking for profile links is another request and is kept.
+ */
+const CHECK_ACCOUNTS = new RegExp(['(点开|點開|打开|打開|点进|點進|翻一下|翻翻|去看|看一眼|看看)[^。！？\\n]{0,16}(主页|主頁|账号|帳號|简介|簡介)',
+  '(主页|主頁)[^。！？\\n]{0,10}(看一眼|看看|核实|核實)',
+  '\\b(you (could|can|might)|please|could you)\\b[^.!?]{0,20}\\b(open|visit|check|look at)\\b[^.!?]{0,30}\\b(profiles?|accounts?)\\b'].join('|'), 'i');
+const LINKS = /链接|鏈接|\blinks?\b/i;
+/** A sentence that asks the user to open the accounts and check them. */
+export const asksUserToCheckAccounts = (sentence: string) => CHECK_ACCOUNTS.test(sentence) && !LINKS.test(sentence);
+
+/** Whether any whole sentence of a saved reply passes `test`. */
+export const anySentence = (text: string, test: (sentence: string) => boolean) => sentences(text, true).done.some(test)
+  || test(sentences(text, true).rest);
+
 /** Whether this turn drops repeated requests: the host marked it, and the user did not just ask to go on. */
 export const dropsConfirmationReminder = (asked: boolean, words: string) => asked && !ASSENT.test(words);
 

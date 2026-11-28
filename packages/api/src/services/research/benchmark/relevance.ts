@@ -1,9 +1,10 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 // BENCHMARK-COVERAGE PR-5 (plan §2.6): does an account keep making content on the confirmed niche? Code-computed from the
-// fetched posts' titles (captions, hashtags included) against the session's confirmed keywords; never a model guess.
-// A label for the benchmark table and its order only: it never decides whether an account qualifies (a new rule would
-// need an Owner decision).
+// fetched posts' titles (captions, hashtags included) against the niche of the session's confirmed keywords (nicheTerms.ts);
+// never a model guess. Owner 2026-11-28 ("现在修" H, pay4): an account that plainly makes other content is not a benchmark, so the
+// same count also keeps it off the candidate card and from qualifying (offTopic below).
 import { distinctPosts, type EvidenceItem } from './metrics';
+import { nicheTerms } from './nicheTerms';
 
 export interface TopicRelevance {
   /** Share of analyzed posts whose title names one of the keywords (0–1). */
@@ -46,37 +47,44 @@ function hasWord(title: string, word: string): boolean {
   return new RegExp(`(?<![a-z0-9])${escape(word)}(?:e?s)?(?![a-z0-9])`).test(title);
 }
 
-/** A keyword is named when every one of its words appears in the title (any order). */
+/** A term is named when every one of its words appears in the text (any order). */
 function names(title: string, keyword: string): boolean {
   const words = normalize(keyword).split(' ').filter(Boolean);
   return words.length > 0 && words.every(word => hasWord(title, word));
-}
-
-/**
- * Character pairs that two or more of the confirmed Chinese keywords share ("晚餐" in 上班族快手晚餐 and 工作日晚餐): the niche's
- * core term, which a title can name alone ("打工人晚餐｜青椒肉丝") without repeating a whole phrase.
- */
-function coreTerms(terms: readonly string[]): string[] {
-  const seen = new Map<string, number>();
-  for (const term of terms) {
-    for (const pair of new Set(normalize(term).split(' ').filter(word => CJK.test(word)).flatMap(pairsOf))) {
-      if (CJK.test(pair[0]) && CJK.test(pair[1])) seen.set(pair, (seen.get(pair) ?? 0) + 1);
-    }
-  }
-  return [...seen].filter(([, count]) => count >= 2).map(([pair]) => pair);
 }
 
 /** null without keywords or without titled posts: nothing to say, not "low". */
 export function topicRelevance(posts: EvidenceItem[], keywords: readonly string[]): TopicRelevance | null {
   // Counted over the same distinct posts as the account's other metrics.
   const titled = distinctPosts(posts).slice(0, 30).map(post => post.fields.title).filter((title): title is string => typeof title === 'string');
-  const terms = keywords.map(keyword => keyword.trim()).filter(Boolean);
+  const terms = nicheTerms(keywords);
   if (terms.length === 0 || titled.length === 0) return null;
-  const core = coreTerms(terms);
-  const matched = titled.filter(title => {
-    const text = normalize(title);
-    return terms.some(keyword => names(text, keyword)) || core.some(pair => text.includes(pair));
-  }).length;
+  const matched = titled.filter(title => namesNiche(title, terms)).length;
   const value = Math.round((matched / titled.length) * 1000) / 1000;
   return { value, matched, analyzed: titled.length, level: value >= 0.5 ? 'high' : value >= 0.2 ? 'medium' : 'low' };
+}
+
+/** Whether a title or an account name names one of the niche terms. */
+function namesNiche(text: string, terms: readonly string[]): boolean {
+  const normalized = normalize(text);
+  return terms.some(term => names(normalized, term));
+}
+
+/** Below this share of its analyzed posts naming the niche, a fetched account plainly makes other content. */
+export const ON_TOPIC_MIN_SHARE = 0.1;
+
+/**
+ * Whether an account plainly makes content off the confirmed niche (Owner 2026-11-28, H): its titled posts are known, its name does
+ * not name the niche, and fewer than ON_TOPIC_MIN_SHARE of the posts do (in discovery, where only the posts the keyword search
+ * found are known, none of them). Without the niche, a name or titled posts there is nothing to judge by: never off topic.
+ */
+export function offTopic(input: { name?: string | null; posts: EvidenceItem[]; keywords: readonly string[]; minShare?: number }): boolean {
+  const terms = nicheTerms(input.keywords);
+  if (terms.length === 0) return false;
+  if (typeof input.name === 'string' && namesNiche(input.name, terms)) return false;
+  const titled = distinctPosts(input.posts).slice(0, 30).map(post => post.fields.title)
+    .filter((title): title is string => typeof title === 'string' && title.trim().length > 0);
+  if (titled.length === 0) return false;
+  const matched = titled.filter(title => namesNiche(title, terms)).length;
+  return matched === 0 || matched / titled.length < (input.minShare ?? ON_TOPIC_MIN_SHARE);
 }

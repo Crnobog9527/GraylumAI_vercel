@@ -435,6 +435,47 @@ it('RUNTIME: Owner 2026-11-27: a repeated request for the confirmation card is n
   expect(JSON.stringify(second.bodies.find(b => b.model === ORGANIZER)!.messages)).not.toContain('确认卡片');
 });
 
+// Owner 2026-11-28 (I, pay4 seq 28/30/32): once a reply of the step asked the user to open the benchmark accounts and check them,
+// a sentence asking again is dropped from what is shown and saved.
+it('RUNTIME: Owner 2026-11-28: a second request to open the accounts and check them is not shown or saved', async () => {
+  const f = await setup();
+  const quiet = JSON.stringify({ inputKind: 'answer', patches: [], notes: [] });
+  const seq28 = '你可以点开这几个账号主页看一眼，告诉我哪几个是杭州本地、做皮具手作体验课的。';
+  const first = transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, quiet)
+    : prose('gen-reply-' + n, '数据合格的有 4 个。' + seq28));
+  await turn(f, { text: '我选好了对标账号', transport: first.fn });
+  const seq32 = '最稳妥的做法是：你点开账号主页，看一眼简介和近期作品，再告诉我哪几个是杭州本地、做体验课的。';
+  const second = transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, quiet)
+    : prose('gen-reply-' + n, '这 4 个账号的身份还没核实。\n' + seq32 + '\n看不出来，我就在结论里保留"身份未核实"这一条。'));
+  const out = await turn(f, { text: '单看账号名，我不能确认它们是不是杭州皮具手作体验课。', transport: second.fn });
+  const result = out.events.at(-1) as Extract<TurnEvent, { type: 'result' }>;
+  expect(result.type, JSON.stringify(out.events)).toBe('result');
+  const shown = out.events.filter(e => e.type === 'text').map(e => (e as { delta: string }).delta).join('');
+  const saved = (await db.query("select content from session_messages where session_id=$1 and role='assistant' order by seq", [f.session])).rows;
+  expect(saved[0].content).toContain('点开这几个账号主页');
+  for (const text of [shown, JSON.parse(result.body).message, saved[1].content]) {
+    expect(text).toContain('身份还没核实');
+    expect(text).toContain('身份未核实');
+    expect(text).not.toContain('点开');
+  }
+});
+
+// Owner 2026-11-28 (J, pay4 seq 20/22): on the benchmark step the keyword card waits for the question which kind of account to learn
+// from; the coach's call is refused with the host's text and no card is made.
+it('RUNTIME: Owner 2026-11-28: no keyword card before the question which kind of account to learn from', async () => {
+  const f = await setup({ benchmarkStep: true });
+  await researchOn();
+  const t = transport((body, n) => body.model === ORGANIZER ? organized('gen-org-' + n, JSON.stringify({ inputKind: 'answer', patches: [], notes: [] }))
+    : n === 1 ? toolCall('gen-reply-1', 'propose_keywords', { keywords: ['杭州皮具手作', '皮具体验课', '皮革DIY'] })
+      : prose('gen-reply-' + n, '先选想参考哪一类账号。'));
+  const out = await turn(f, { text: '我没有对标账号，请按杭州本地皮具手作体验课的方向找。', transport: t.fn, research: tiktokVendors() });
+  expect(out.events.at(-1)?.type, JSON.stringify(out.events)).toBe('result');
+  expect(out.events.some(e => e.type === 'research_card')).toBe(false);
+  expect(JSON.stringify(t.bodies.filter(b => b.model === MENTOR)[1]!.messages)).toContain('KEYWORDS_NOT_YET');
+  const listed = await rest().rpc('research_user_cards', { a: f.actor, s: f.session });
+  expect(listed.data).toEqual([]);
+});
+
 it('RUNTIME: CORE-PATH-V2 V2-5: a module the draft is not bound to is refused before anything is frozen or sent', async () => {
   const f = await setup();
   const other = randomUUID();

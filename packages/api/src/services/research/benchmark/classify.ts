@@ -11,7 +11,9 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 export type BenchmarkCategory = 'head_reference' | 'imitable' | 'fast_rising';
 export type ExclusionReason =
   | 'FOLLOWERS_MISSING' | 'FOLLOWERS_BELOW_MIN' | 'NO_PUBLISH_TIME' | 'INACTIVE_30_DAYS' | 'NO_POSTS' | 'TOO_FEW_POSTS'
-  | 'ACTIVE_CHECK_PENDING';
+  | 'ACTIVE_CHECK_PENDING'
+  /** Owner 2026-11-28 (H): the account plainly makes content off the confirmed niche (relevance.ts offTopic). */
+  | 'OFF_TOPIC';
 
 export type Classification =
   | { category: BenchmarkCategory; qualified: boolean; excluded: null }
@@ -71,6 +73,15 @@ export function classifyAccount(
 export function qualifyFetchedAccount(metrics: AccountMetrics, classification: Classification): Classification {
   if (!classification.qualified || metrics.postsAnalyzed >= BENCHMARK_RULES.postsMin || metrics.wholeHistory) return classification;
   return { category: null, qualified: false, excluded: 'TOO_FEW_POSTS' };
+}
+
+/**
+ * An account whose content is plainly off the confirmed niche is neither a benchmark nor a head reference (Owner 2026-11-28, H:
+ * "明显不相关的不进候选，或者至少不能判为合格"). An account already excluded keeps its own reason.
+ */
+export function excludeOffTopic(classification: Classification, offTopic: boolean): Classification {
+  if (!offTopic || classification.excluded !== null) return classification;
+  return { category: null, qualified: false, excluded: 'OFF_TOPIC' };
 }
 
 export interface ScoredAccount {

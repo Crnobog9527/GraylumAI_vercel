@@ -42,6 +42,26 @@ async function read(admin: SupabaseClient, name: string, args: Record<string, un
   return result.data;
 }
 
+const option = z.object({ platform: z.enum(SOCIAL_PLATFORMS), account: z.string(), label: z.string() }).passthrough();
+/**
+ * Each candidate account's display name, from the labels the host put on its candidate cards (discovery.ts). The benchmark rows carry
+ * only account ids, so without it the coach could not tell the user which account a row is (pay4 2026-11-28, seq 32).
+ */
+function candidateNames(cards: Array<z.infer<typeof card>>): Map<string, string> {
+  const names = new Map<string, string>();
+  for (const item of cards.filter(c => c.kind === 'candidates')) {
+    for (const entry of Array.isArray(item.options) ? item.options : []) {
+      const parsed = option.safeParse(entry);
+      if (!parsed.success) continue;
+      // A label that is only the account id (no display name) names nothing.
+      const label = (parsed.data.label.split(' · ')[0] ?? '').trim();
+      const name = Array.from(label).slice(0, 40).join('').trim();
+      if (name && label !== parsed.data.account) names.set(`${parsed.data.platform}:${parsed.data.account}`, name);
+    }
+  }
+  return names;
+}
+
 /** The flow's state as the model sees it, from what was read; `discoveryOf` names a confirmed candidate card's discovery. */
 export async function researchContextFrom(input: { cards: unknown; benchmarks: unknown; shortfall: unknown;
   discoveryOf: (cardId: string, confirmationId: string) => Promise<string | null> }): Promise<Research> {
@@ -58,12 +78,15 @@ export async function researchContextFrom(input: { cards: unknown; benchmarks: u
     out.push({ kind: 'candidates', cardId: item.cardId, confirmationId: item.confirmationId, discoveryId,
       accounts: confirmed ? z.array(account).parse(item.items).map(a => ({ platform: a.platform, account: a.account })) : [] });
   }
+  // Names from every candidate card of the session, not only the newest cards shown.
+  const names = candidateNames(z.array(card).parse(input.cards));
   const table = benchmarkReportFacts(input.benchmarks);
   const rows = table.serialized ? z.array(row).parse(JSON.parse(table.serialized)) : [];
   const qualified = new Set(rows.filter(r => r.qualified).map(r => `${r.platform}:${r.account}`)).size;
   // Qualified rows first, so a cut keeps what counts toward the report.
   const shown = [...rows.filter(r => r.qualified), ...rows.filter(r => !r.qualified)].slice(0, MAX_ROWS).map(r => ({
-    platform: r.platform, account: r.account, category: r.category, qualified: r.qualified, excluded: r.excluded,
+    platform: r.platform, account: r.account, ...(names.has(`${r.platform}:${r.account}`) ? { name: names.get(`${r.platform}:${r.account}`) } : {}),
+    category: r.category, qualified: r.qualified, excluded: r.excluded,
     followers: r.followers, medianViews: r.medianViews, engagementRate: r.engagementRate, lastPublishedAt: r.lastPublishedAt }));
   const parsed = input.shortfall === null ? null : shortfallRead.safeParse(input.shortfall);
   return researchContextSchema.parse({ note: RESEARCH_CARDS_NOTE, cards: out,

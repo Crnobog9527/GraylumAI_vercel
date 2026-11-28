@@ -68,11 +68,16 @@ const CONFIRMATION_REQUEST = /确认卡|確認卡|confirmation card/i;
  * then records what the user adds without asking again (agentTurnPrompt.ts). Only replies of the same step and round count.
  */
 export function confirmationAsked(history: readonly HistoryItem[], stepId: string, roundId: string): boolean {
+  return askedInStep(history, stepId, roundId, message => CONFIRMATION_REQUEST.test(message));
+}
+
+/** Whether a saved reply of this step and round says `asks` (its message as shown). */
+export function askedInStep(history: readonly HistoryItem[], stepId: string, roundId: string, asks: (message: string) => boolean): boolean {
   return history.some(item => {
     if (item.role !== 'assistant') return false;
     let saved: { stepId?: unknown; roundId?: unknown };
     try { saved = JSON.parse(item.content) as typeof saved; } catch { return false; }
-    return saved?.stepId === stepId && saved.roundId === roundId && CONFIRMATION_REQUEST.test(readAgentTurnBody(item.content).message);
+    return saved?.stepId === stepId && saved.roundId === roundId && asks(readAgentTurnBody(item.content).message);
   });
 }
 

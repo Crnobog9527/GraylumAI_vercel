@@ -25,6 +25,8 @@ interface Script {
   /** Further pages: authors by keyword and cursor; none = no next page. */
   nextPage?: (keyword: string, cursor: string) => { authors: string[]; next?: string } | undefined;
   firstCursor?: string;
+  /** A found post's title by its author (default "one video", on the niche of KEYWORDS). */
+  title?: (author: string) => string;
   leads?: (keyword: string) => string[];
   followers?: number;
   /** Web search results (Parallel); configured only when given. */
@@ -69,7 +71,7 @@ function fixture(platform: SocialPlatform, script: Script, kinds: SocialKind[] =
         maxUnitsPerCall: '1' }] : [])] });
   const sent: SupplierRequest[] = [];
   const post = (author: string, n: number): ResearchItem => ({ fields: { id: `${author}-v${n}`, ...(author ? { authorId: author } : {}), author: `Name ${author}`,
-    title: 'video', publishedAt: now.toISOString(), views: 1000, likes: 10, comments: 1, shares: 1 }, missing: [] });
+    title: script.title?.(author) ?? 'one video', publishedAt: now.toISOString(), views: 1000, likes: 10, comments: 1, shares: 1 }, missing: [] });
   subcall.mockImplementation(async (context, request) => {
     const operationId = context.newId();
     sent.push(request);
@@ -123,6 +125,23 @@ describe('deeper discovery layers', () => {
     const envelope = await f.run();
     expect(f.kindsSent()).toEqual([...Array(3).fill('keyword_posts'), ...Array(8).fill('account_profile')]);
     expect(envelope.candidateCard).toMatchObject({ shown: true, selectable: 8 });
+  });
+
+  // Owner 2026-11-28 (H, pay4): an author whose found posts never name the confirmed niche is not looked up (not paid for) and never
+  // reaches the card; the authors that do name it fill it.
+  it('passes over authors whose found posts are off the niche, without a lookup, and fills the card with the others', async () => {
+    // Each first page: three authors on the niche ("onea1" titled "one video") and three off it ("off0x0" titled "cooking video").
+    const f = fixture('tiktok', { firstPage: keyword => Array.from({ length: 6 }, (_, i) => (i % 2
+      ? `${keyword}a${i}` : `off${KEYWORDS.indexOf(keyword)}x${i}`)),
+    title: author => (author.startsWith('off') ? 'cooking video' : `${author.replace(/a\d$/, '')} video`) });
+    const envelope = await f.run();
+    const looked = f.sent.filter(r => r.vendor === 'tikhub' && r.call.kind === 'account_profile')
+      .map(r => r.vendor === 'tikhub' ? r.call.account : '');
+    expect(looked).toHaveLength(8);
+    expect(looked.some(account => account!.startsWith('off'))).toBe(false);
+    expect(envelope.candidateCard).toMatchObject({ shown: true, selectable: 8 });
+    expect(envelope.coverage.platforms.tiktok.offTopic).toBeGreaterThan(0);
+    expect((envelope.items as Array<{ fields: { account: string } }>).some(item => item.fields.account.startsWith('off'))).toBe(false);
   });
 
   it('too few first-page authors: searches for accounts with each keyword and screens the leads until there are eight', async () => {

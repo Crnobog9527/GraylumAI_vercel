@@ -60,6 +60,8 @@ export interface PlatformCoverage {
   capReached: boolean;
   /** Every layer this platform supports was searched to its end (not stopped by the ceiling or this reply's allowance). */
   exhausted: boolean;
+  /** Authors passed over without a lookup: none of the posts the search found names the confirmed niche (Owner 2026-11-28, H). */
+  offTopic?: number;
 }
 export interface DiscoveryCoverage { keywords: number; platforms: Partial<Record<SocialPlatform, PlatformCoverage>> }
 

@@ -2,6 +2,7 @@
 import { z } from 'zod';
 import { aggregateAuthors, classifyAccount, selectCandidates, type ScoredAccount } from '../benchmark/classify';
 import { accountMetrics, type EvidenceItem } from '../benchmark/metrics';
+import { offTopic } from '../benchmark/relevance';
 import { BENCHMARK_ROUTE_KINDS } from '../vendors/config';
 import { authorizeDiscoverStart } from '../tools/authorize';
 import { canonicalAccount } from '../tools/accountLinks';
@@ -274,6 +275,14 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
   const screen = async (platform: SocialPlatform, authorId: string, label: string | null, authorPosts: EvidenceItem[]) => {
     const account = canonicalAccount(platform, authorId);
     if (!account || screened.has(`${platform}:${account}`)) return;
+    // Owner 2026-11-28 (H, pay4): an author none of whose found posts names the confirmed niche is no candidate, and is not looked up
+    // (nor paid for). Decided from the replayed search pages only, so a continued round passes over the same authors.
+    if (offTopic({ name: label, posts: authorPosts, keywords: d.keywords })) {
+      screened.add(`${platform}:${account}`);
+      const spent = coverage.platforms[platform];
+      if (spent) spent.offTopic = (spent.offTopic ?? 0) + 1;
+      return;
+    }
     const request = authorLookup(ctx, platform, account, authorPosts);
     if (!request) { complete = false; return; }
     const kind = cacheKind(request);

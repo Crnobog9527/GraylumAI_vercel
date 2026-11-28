@@ -2,7 +2,8 @@
 import { describe, expect, it } from 'vitest';
 import { agentTurnBody } from '../../shared/agentTurn';
 import { captureHostContext, type CaptureState } from '../opc/captureContext';
-import { FIXED_QUESTIONS, fixedCardChoice, fixedQuestionCard, fixedQuestionFor, laterFixedQuestions, organizerWrote } from './fixedQuestions';
+import { FIXED_QUESTIONS, fixedCardChoice, fixedQuestionCard, fixedQuestionFor, KEYWORDS_BEFORE_KIND, KEYWORDS_BEFORE_STEP, keywordCardHeld,
+  laterFixedQuestions, organizerWrote } from './fixedQuestions';
 import { mentorReplyBody } from './mentorInput';
 import type { HistoryItem } from './db';
 
@@ -142,5 +143,43 @@ describe('Owner 2026-11-27 option C: which fixed question the host asks, and whe
     expect(laterFixedQuestions({ ...at('再说说吧。'), history: after }).map(q => q.fixed.id)).toEqual(['filming']);
     // A turn without the user's words (a later step's opening, a refresh of the current question) is not an answer.
     expect(laterFixedQuestions(at('')).map(q => q.fixed.id)).toEqual(['filming']);
+  });
+});
+
+describe('Owner 2026-11-28 (J, pay4 seq 20/22): the keyword card waits for the question which kind of account to learn from', () => {
+  const step2Reply = (seq: number, body: string, roundId = 'r1'): HistoryItem =>
+    ({ seq, role: 'assistant', content: mentorReplyBody(body, 'step-2', roundId), contentHash: 'a'.repeat(64) });
+  const kind = FIXED_QUESTIONS.find(q => q.id === 'benchmark_kind')!;
+  const kindCard = agentTurnBody('我们进入第二步：诊断与平台对标。', fixedQuestionCard({ fixed: kind,
+    question: kind.question['zh-Hans'], options: kind.options['zh-Hans'] }, '我们进入第二步：诊断与平台对标。'));
+  const held = (h: ReturnType<typeof host>, history: HistoryItem[] = [], mode: unknown = 'mentor') =>
+    keywordCardHeld({ host: h, history, roundId: 'r1', mode });
+
+  it('pay4 seq 19-20: on step 1 the user asked to search, and the card is held until the benchmark step', () => {
+    // seq 19: "我目前没有对标抖音账号，也没有主页链接，请按杭州本地皮具手作体验课的方向找。" with step 1 still open.
+    expect(held(host('step-1', before('resources')))).toBe(KEYWORDS_BEFORE_STEP);
+  });
+
+  it('pay4 seq 22: the step opens with the kind question, and the card comes only once that card was shown', () => {
+    // The opening of step 2 (seq 22) asks the kind question: no keyword card in that reply.
+    expect(held(host('step-2', {}, { opening: true }))).toBe(KEYWORDS_BEFORE_KIND);
+    expect(held(host('step-2'))).toBe(KEYWORDS_BEFORE_KIND);
+    // seq 23 "本地同行" answers the card under seq 22: the coach may now propose the keywords.
+    expect(held(host('step-2'), [step2Reply(22, kindCard)])).toBeNull();
+    // A card of another round does not count.
+    expect(held(host('step-2'), [step2Reply(22, kindCard, 'r0')])).toBe(KEYWORDS_BEFORE_KIND);
+  });
+
+  it('never holds a search that already started, written findings, an import, or a later step', () => {
+    const searching = { ...host('step-2'), research: { note: 'n', cards: [{ kind: 'keywords' as const,
+      cardId: '10000000-0000-4000-8000-000000000001', confirmationId: null, keywords: [] }],
+      benchmarks: { required: 3, qualified: 0, rows: [] } } } as unknown as ReturnType<typeof host>;
+    expect(held(searching)).toBeNull();
+    expect(held(host('step-2', { benchmark_findings: '已有结论' }))).toBeNull();
+    expect(held(host('step-2'), [], 'manual')).toBeNull();
+    const later = captureHostContext([...steps, { id: 'step-3', title: '定位' }], { 'step-1': state(STEP1, 'user_fact', {}),
+      'step-2': state(STEP2, 'agent_proposal', {}), 'step-3': state(['positioning'], 'agent_proposal', {}) }, 'step-3', false, undefined,
+    { 'step-1': true, 'step-2': true });
+    expect(held(later)).toBeNull();
   });
 });
