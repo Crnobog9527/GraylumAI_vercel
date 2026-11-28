@@ -4,6 +4,7 @@ import { classifyAccount, excludeOffTopic, qualifyFetchedAccount } from '../benc
 import { offTopic, topicRelevance } from '../benchmark/relevance';
 import { judgedKeywords, relevanceBasis } from '../benchmark/relevanceBasis';
 import { authorizeBenchmarkFetch } from '../tools/authorize';
+import { swallow } from '../../../lib/swallow';
 import { shortfallNotice } from './shortfall';
 import { toolEnvelope } from '../tools/envelope';
 import type { ResearchToolArgs } from '../tools/schemas';
@@ -64,7 +65,8 @@ export async function benchmarkFetch(ctx: ResearchToolContext, args: ResearchToo
   let round: Promise<string[]> | undefined;
   const source = args.source;
   const roundKeywords = () => (round ??= (source.kind === 'candidate' && ctx.store.roundKeywords
-    ? ctx.store.roundKeywords(source.confirmationId).catch(() => null) : Promise.resolve(null)).then(found => found ?? keywords()));
+    ? swallow('research_round_keywords_read_failed', ctx.store.roundKeywords(source.confirmationId), null, { category: 'api' })
+    : Promise.resolve(null)).then(found => found ?? keywords()));
   let stopReason: string | null = null;
   let stopBudget = false;
   for (const account of authorization.accounts) {

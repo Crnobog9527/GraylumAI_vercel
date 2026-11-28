@@ -3,6 +3,7 @@
 // (review of #2063). A candidate is judged against the keywords of the search round that found it, not the session's other rounds;
 // an account the user sent the link of is the user's own pick and is judged on its numbers only, also when it is refreshed.
 import { z } from 'zod';
+import { swallow } from '../../../lib/swallow';
 import type { ResearchToolArgs } from '../tools/schemas';
 import type { RuntimeResearchStore } from '../runtime/store';
 import type { SocialPlatform } from '../vendors/types';
@@ -21,7 +22,9 @@ export async function relevanceBasis(store: RuntimeResearchStore, source: Resear
   account: { platform: SocialPlatform; account: string }, roundKeywords: () => Promise<string[]>): Promise<RelevanceBasis> {
   if (source.kind === 'user_message') return { kind: 'user_pick' };
   if (source.kind === 'candidate') return { kind: 'keywords', keywords: await roundKeywords() };
-  const prior = await store.priorEvidence?.(account.platform, account.account).catch(() => null) ?? null;
+  const read = store.priorEvidence?.(account.platform, account.account);
+  // An unreadable prior evidence judges nothing (unjudged): a refresh never newly disqualifies on a failed read.
+  const prior = read ? await swallow('research_prior_evidence_read_failed', read, null, { category: 'api' }) : null;
   const parsed = saved.safeParse(prior?.relevanceBasis);
   return parsed.success ? parsed.data : { kind: 'unjudged' };
 }
