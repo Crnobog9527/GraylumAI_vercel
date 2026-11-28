@@ -160,6 +160,30 @@ describe('deeper discovery layers', () => {
     expect(f.sent.some(r => r.vendor === 'tikhub' && r.call.kind === 'account_profile' && r.call.account === 'late')).toBe(true);
   });
 
+  // Review of #2063: an author passed over for its first page's posts is judged again when a later page finds one of its posts on the
+  // niche; only the profile lookup is once per account.
+  it('looks up an author whose first-page posts are off the niche once a next page finds its post on it', async () => {
+    const f = fixture('tiktok', { firstPage: keyword => (keyword === 'one' ? ['sweet', 'p1', 'p2', 'p3'] : []), firstCursor: '20',
+      nextPage: (_keyword, cursor) => (cursor === '20' ? { authors: ['sweet', 'n1'] } : undefined),
+      title: (author, n) => (author === 'sweet' && n < 100 ? 'dessert box' : 'one video') });
+    const envelope = await f.run();
+    const looked = f.sent.filter(r => r.vendor === 'tikhub' && r.call.kind === 'account_profile')
+      .map(r => r.vendor === 'tikhub' ? r.call.account : '');
+    expect(looked).toEqual(['p1', 'p2', 'p3', 'n1', 'sweet']);
+    expect(envelope.coverage.platforms.tiktok.offTopic).toBeUndefined();
+    expect((envelope.items as Array<{ fields: { account: string } }>).map(item => item.fields.account)).toContain('sweet');
+  });
+
+  it('still passes over an author whose later posts stay off the niche, also when an account search names it again', async () => {
+    const f = fixture('tiktok', { firstPage: keyword => (keyword === 'one' ? ['sweet', 'p1', 'p2', 'p3'] : []), firstCursor: '20',
+      nextPage: (_keyword, cursor) => (cursor === '20' ? { authors: ['sweet', 'n1'] } : undefined), leads: () => ['sweet'],
+      title: author => (author === 'sweet' ? 'dessert box' : 'one video') },
+    ['keyword_posts', 'account_profile', 'account_posts', 'account_search']);
+    const envelope = await f.run();
+    expect(f.sent.some(r => r.vendor === 'tikhub' && r.call.kind === 'account_profile' && r.call.account === 'sweet')).toBe(false);
+    expect(envelope.coverage.platforms.tiktok.offTopic).toBe(1);
+  });
+
   it('too few first-page authors: searches for accounts with each keyword and screens the leads until there are eight', async () => {
     const f = fixture('tiktok', { firstPage: keyword => [`${keyword}a`], leads: keyword => [`${keyword}l1`, `${keyword}l2`, `${keyword}l3`] },
       ['keyword_posts', 'account_profile', 'account_posts', 'account_search']);

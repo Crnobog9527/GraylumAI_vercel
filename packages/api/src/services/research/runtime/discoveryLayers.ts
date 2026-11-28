@@ -89,6 +89,8 @@ export interface DeepenInput {
   /** A card can show (candidatesMin selectable): the speculative web layer only runs while it cannot. */
   cardable: () => boolean;
   isStopped: () => boolean;
+  /** An author passed over so far because none of its found posts names the niche: a next page that finds it again re-judges it. */
+  unmatched?: (platform: SocialPlatform, authorId: string) => boolean;
 }
 
 /**
@@ -133,8 +135,13 @@ export async function deepen(input: DeepenInput): Promise<void> {
         const newcomers = [...new Set(found.map(post => post.fields.authorId)
           .filter((id): id is string => typeof id === 'string' && !seen.has(id)))];
         next.push({ keyword, cursor: result.nextCursor, fresh: newcomers.length });
-        await warm(newcomers.map(authorId => ({ platform, authorId, authorPosts: entries.filter(post => post.fields.authorId === authorId) })));
-        for (const authorId of newcomers) {
+        // Review of #2063: an author passed over for its earlier posts is screened again with this page's posts among them.
+        const unmatched = input.unmatched ?? (() => false);
+        const returning = [...new Set(found.map(post => post.fields.authorId)
+          .filter((id): id is string => typeof id === 'string' && seen.has(id) && unmatched(platform, id)))];
+        const screenNow = [...newcomers, ...returning];
+        await warm(screenNow.map(authorId => ({ platform, authorId, authorPosts: entries.filter(post => post.fields.authorId === authorId) })));
+        for (const authorId of screenNow) {
           if (done()) return;
           const own = entries.filter(post => post.fields.authorId === authorId);
           const label = own.map(post => post.fields.author).find((name): name is string => typeof name === 'string') ?? null;
