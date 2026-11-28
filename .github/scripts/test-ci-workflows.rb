@@ -211,8 +211,14 @@ class CIWorkflowsTest < Minitest::Test
     pull = steps.index { |step| step['name'] == 'Pull pinned service images' }
     refute_nil pull
     assert_operator pull, :<, steps.index { |step| step['run'] == command }
+    # Six shards. The turn-budget check does not depend on the shard's suites, so it runs once, in shard 1; it is the only step
+    # with a condition, and the Unit Tests gate (tested above) still needs this whole job to succeed.
+    assert_equal 6, shards.length
+    budget = steps.select { |step| step['run'] == 'node scripts/check-turn-budget.mjs --ci' }
+    assert_equal 1, budget.length
+    assert_equal 'matrix.shard == 1', budget.first.fetch('if')
     steps.each do |step|
-      refute step.key?('if'), step['name']
+      refute step.key?('if'), step['name'] unless step.equal?(budget.first)
       refute step.key?('continue-on-error'), step['name']
       refute step.key?('env'), step['name']
     end
