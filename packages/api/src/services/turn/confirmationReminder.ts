@@ -65,6 +65,10 @@ const CHECK_ACCOUNTS = new RegExp(['(点开|點開|打开|打開|点进|點進|�
   '(主页|主頁)[^。！？\\n]{0,10}(看一眼|看看|核实|核實)',
   '\\b(you (could|can|might)|please|could you)\\b[^.!?]{0,20}\\b(open|visit|check|look at)\\b[^.!?]{0,30}\\b(profiles?|accounts?)\\b'].join('|'), 'i');
 const LINKS = /链接|鏈接|\blinks?\b/i;
+/** What the reply says when it was nothing but that request again (review of #2063): what could not be checked stays unverified. */
+export const UNVERIFIED_NOTED: Record<ReplyLocale, string> = { 'zh-Hans': '没能核实的账号，我会在结论里标成"未核实"。',
+  'zh-Hant': '沒能核實的帳號，我會在結論裡標成「未核實」。', en: "I'll mark any account I could not verify as unverified." };
+
 /** A sentence that asks the user to open the accounts and check them. */
 export const asksUserToCheckAccounts = (sentence: string) => CHECK_ACCOUNTS.test(sentence) && !LINKS.test(sentence);
 

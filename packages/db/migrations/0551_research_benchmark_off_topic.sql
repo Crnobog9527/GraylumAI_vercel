@@ -1,0 +1,114 @@
+-- 0551 (BENCHMARK-COVERAGE, Owner 2026-11-28 "现在修" H, pay4 Douyin run): a fetched benchmark whose recent posts do not name the
+-- niche of the confirmed keywords is not a benchmark. The host classifies it {category:null, qualified:false, excluded:'OFF_TOPIC'}
+-- (packages/api/src/services/research/benchmark/relevance.ts offTopic); this lets that one new exclusion through the evidence check
+-- of research_account_fetch_finish and the research_benchmarks.excluded constraint. No column, no row and no other rule changes.
+--
+-- Compatibility: the old application never writes OFF_TOPIC, so it works on the new database unchanged. The new application on
+-- the old database fails such a fetch with RESEARCH_FETCH_INVALID: apply this migration before merging and deploying the code.
+-- Repeatable: the constraint is dropped if it exists and added again with the same definition; CREATE OR REPLACE gives the same
+-- function on reapplication and keeps its permissions.
+-- Recovery: re-create research_account_fetch_finish from 0435 (its definition before this migration), then put the constraint
+-- back without OFF_TOPIC only after checking that research_benchmarks holds no OFF_TOPIC row
+-- (SELECT count(*) FROM research_benchmarks WHERE excluded='OFF_TOPIC' must be 0; such rows are unqualified benchmarks and may be
+-- deleted only as discardable test data, or the constraint stays). Prefer reverting the application code, which never writes
+-- OFF_TOPIC again, and leaving this migration in place.
+
+ALTER TABLE public.research_benchmarks DROP CONSTRAINT IF EXISTS research_benchmarks_excluded_check;
+ALTER TABLE public.research_benchmarks ADD CONSTRAINT research_benchmarks_excluded_check CHECK (excluded IN ('FOLLOWERS_MISSING',
+  'FOLLOWERS_BELOW_MIN','NO_PUBLISH_TIME','INACTIVE_30_DAYS','NO_POSTS','TOO_FEW_POSTS','EVIDENCE_UNVERIFIED','OFF_TOPIC'));
+
+-- research_account_fetch_finish(uuid,uuid,uuid,text,jsonb)
+CREATE OR REPLACE FUNCTION public.research_account_fetch_finish(a uuid, p_fetch uuid, p_attempt uuid, p_state text, p_evidence jsonb)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE f research_account_fetches; metric text;
+BEGIN
+  -- A success must carry its evidence: a paid result without it could be neither reused nor refreshed.
+  IF p_state NOT IN ('succeeded','unknown','failed','failed_charged') OR (p_state='succeeded' AND jsonb_typeof(p_evidence) IS DISTINCT FROM 'object')
+  THEN RAISE EXCEPTION 'RESEARCH_FETCH_INVALID';END IF;
+  IF p_state='succeeded' THEN
+    SELECT * INTO f FROM research_account_fetches WHERE id=p_fetch AND actor_id=a;
+    -- The host cache is accountMetrics + classification; query/source/call records remain in research_operations.
+    IF p_evidence->>'platform' IS DISTINCT FROM f.platform
+     OR research_account_key(f.platform,p_evidence->>'account') IS DISTINCT FROM research_account_key(f.platform,f.account)
+     OR jsonb_typeof(p_evidence->'fetchedAt') IS DISTINCT FROM 'string'
+     OR NOT pg_input_is_valid(p_evidence->>'fetchedAt','timestamp with time zone')
+     OR jsonb_typeof(p_evidence->'metrics') IS DISTINCT FROM 'object'
+     OR jsonb_typeof(p_evidence->'metrics'->'postsAnalyzed') IS DISTINCT FROM 'number'
+     OR jsonb_typeof(p_evidence->'metrics'->'missing') IS DISTINCT FROM 'array'
+     OR jsonb_typeof(p_evidence->'metrics'->'wholeHistory') IS DISTINCT FROM 'boolean'
+     OR jsonb_typeof(p_evidence->'classification'->'qualified') IS DISTINCT FROM 'boolean'
+     OR NOT coalesce(p_evidence->'classification' ?& ARRAY['category','excluded'],false)
+    THEN RAISE EXCEPTION 'RESEARCH_FETCH_INVALID';END IF;
+    FOREACH metric IN ARRAY ARRAY['followers','medianViews','engagementRate','postsPerWeek','lastPublishedAt','earliestPublishedAt'] LOOP
+      IF jsonb_typeof(p_evidence->'metrics'->metric) IS DISTINCT FROM 'object'
+       OR NOT (p_evidence->'metrics'->metric ? 'value')
+       OR jsonb_typeof(p_evidence->'metrics'->metric->'refs') IS DISTINCT FROM 'array'
+      THEN RAISE EXCEPTION 'RESEARCH_FETCH_INVALID';END IF;
+    END LOOP;
+    IF (p_evidence->'metrics'->>'postsAnalyzed')::numeric NOT BETWEEN 0 AND 30
+     OR trunc((p_evidence->'metrics'->>'postsAnalyzed')::numeric)<>(p_evidence->'metrics'->>'postsAnalyzed')::numeric
+     OR NOT isfinite((p_evidence->>'fetchedAt')::timestamptz)
+     OR EXISTS(SELECT 1 FROM jsonb_array_elements(p_evidence->'metrics'->'missing') x
+       WHERE jsonb_typeof(x)<>'string' OR x#>>'{}' NOT IN ('followers','medianViews','engagementRate','postsPerWeek','lastPublishedAt'))
+    THEN RAISE EXCEPTION 'RESEARCH_FETCH_INVALID';END IF;
+    FOREACH metric IN ARRAY ARRAY['followers','medianViews','engagementRate','postsPerWeek','lastPublishedAt','earliestPublishedAt'] LOOP
+      IF EXISTS(SELECT 1 FROM jsonb_array_elements(p_evidence->'metrics'->metric->'refs') x
+         WHERE jsonb_typeof(x)<>'string' OR length(btrim(x#>>'{}'))=0)
+       OR ((p_evidence->'metrics'->metric->'value'='null'::jsonb)
+         IS DISTINCT FROM (jsonb_array_length(p_evidence->'metrics'->metric->'refs')=0))
+      THEN RAISE EXCEPTION 'RESEARCH_FETCH_INVALID';END IF;
+      IF p_evidence->'metrics'->metric->'value'<>'null'::jsonb THEN
+        IF metric IN ('lastPublishedAt','earliestPublishedAt') THEN
+          IF jsonb_typeof(p_evidence->'metrics'->metric->'value')<>'string'
+           OR NOT pg_input_is_valid(p_evidence->'metrics'->metric->>'value','timestamp with time zone')
+          THEN RAISE EXCEPTION 'RESEARCH_FETCH_INVALID';END IF;
+          IF NOT isfinite((p_evidence->'metrics'->metric->>'value')::timestamptz)
+          THEN RAISE EXCEPTION 'RESEARCH_FETCH_INVALID';END IF;
+        ELSE
+          IF jsonb_typeof(p_evidence->'metrics'->metric->'value')<>'number'
+          THEN RAISE EXCEPTION 'RESEARCH_FETCH_INVALID';END IF;
+          IF (p_evidence->'metrics'->metric->>'value')::numeric NOT BETWEEN 0 AND 1.7976931348623157e308
+          THEN RAISE EXCEPTION 'RESEARCH_FETCH_INVALID';END IF;
+        END IF;
+      END IF;
+    END LOOP;
+    -- Classification is a tagged union: a known category with no exclusion, or an unqualified exclusion.
+    IF NOT coalesce((p_evidence->'classification'->>'category' IN ('head_reference','imitable','fast_rising')
+       AND p_evidence->'classification'->'excluded'='null'::jsonb
+       AND (p_evidence->'classification'->>'category'<>'head_reference' OR p_evidence->'classification'->'qualified'='false'::jsonb))
+      OR (p_evidence->'classification'->'category'='null'::jsonb
+       AND p_evidence->'classification'->'qualified'='false'::jsonb
+       AND p_evidence->'classification'->>'excluded' IN ('FOLLOWERS_MISSING','FOLLOWERS_BELOW_MIN','NO_PUBLISH_TIME','INACTIVE_30_DAYS','NO_POSTS',
+       -- 0268 too few posts
+       'TOO_FEW_POSTS',
+       -- Owner 2026-11-28 (H): the account's recent posts do not name the niche of the confirmed keywords
+       'OFF_TOPIC')),false)
+    THEN RAISE EXCEPTION 'RESEARCH_FETCH_INVALID';END IF;
+  END IF;
+  -- A sent attempt ends in any state; an attempt never sent can only end as a (free) failure.
+  UPDATE research_account_fetches SET state=p_state,evidence=p_evidence,updated_at=clock_timestamp(),
+    last_success=CASE WHEN p_state='succeeded' THEN p_evidence ELSE last_success END,
+    last_success_execution_id=CASE WHEN p_state='succeeded' THEN execution_id ELSE last_success_execution_id END,
+    last_success_turn_id=CASE WHEN p_state='succeeded' THEN turn_id ELSE last_success_turn_id END
+  WHERE id=p_fetch AND actor_id=a AND attempt=p_attempt AND (state='in_progress' OR (state='prepared' AND p_state='failed'));
+  IF NOT FOUND AND NOT EXISTS(SELECT 1 FROM research_account_fetches WHERE id=p_fetch AND actor_id=a AND attempt=p_attempt
+    AND state=p_state AND evidence IS NOT DISTINCT FROM p_evidence) THEN RAISE EXCEPTION 'RESEARCH_FETCH_CONFLICT';END IF;
+  -- 0411: the whole verification of this account just completed (this is the only place a fetch ends as succeeded). When the
+  -- answer that ran it did so for links the user pasted (a succeeded supplier operation of that answer for this account, whose
+  -- source is user_message), keep that answer in pasted_executions. The list only ever grows: a later refresh re-claims the
+  -- row and moves its execution_id and state, but never takes this record away. research_benchmark_rounds counts it.
+  IF p_state='succeeded' THEN
+    UPDATE research_account_fetches u SET pasted_executions=array_append(u.pasted_executions,u.execution_id)
+    WHERE u.id=p_fetch AND u.actor_id=a AND u.attempt=p_attempt AND u.state='succeeded' AND u.execution_id IS NOT NULL
+      AND NOT (u.execution_id=ANY(u.pasted_executions))
+      AND EXISTS(SELECT 1 FROM research_plans p JOIN research_operations o ON o.plan_id=p.id
+        WHERE p.execution_id=u.execution_id AND p.actor_id=a AND p.session_id=u.session_id AND p.erased_at IS NULL
+          AND o.erased_at IS NULL AND o.state='succeeded' AND o.result->'args'->'source'->>'kind'='user_message'
+          AND o.result->'call'->>'platform'=u.platform
+          AND research_account_key(u.platform,o.result->'call'->>'query')=research_account_key(u.platform,u.account));
+  END IF;
+END $function$;

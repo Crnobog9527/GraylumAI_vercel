@@ -39,7 +39,7 @@ import { savedSteps } from './tools/toolStage';
 import { createRuntimeBudget } from './settings/budget';
 import { REPLY_CUT, REPLY_CUT_FAILURE, shownSoFar } from './shownReply';
 import { anySentence, asksForConfirmationCard, asksToReplyContinue, asksUserToCheckAccounts, dropsConfirmationReminder, replySentenceFilter,
-  SEARCH_GOES_ON } from './confirmationReminder';
+  SEARCH_GOES_ON, UNVERIFIED_NOTED } from './confirmationReminder';
 import { FIXED_QUESTION_NOTE, LATER_QUESTIONS_NOTE, fixedCardChoice, fixedQuestionCard, fixedQuestionFor, laterFixedQuestions,
   keywordCardHeld, organizerWrote } from './fixedQuestions';
 import { benchmarkReady, benchmarkToolBytes, turnBenchmarkTools, type BenchmarkDeps } from './tools/benchmark';
@@ -337,9 +337,10 @@ export async function runMentorTurn(deps: MentorDeps, input: MentorInput, emit: 
     shownText += tail;
     if (tail) emit({ type: 'text', delta: tail });
     // A reply of a search that goes on, that was nothing but a request to reply "continue", says only that the search goes on
-    // (review of #2062): never the request kept as the saved reply.
-    if (continuing && !shownText.trim() && text.trim()) {
-      shownText = SEARCH_GOES_ON[effectiveReplyLocale(opened.replyLanguage)];
+    // (review of #2062); one that was nothing but a repeated request to check the accounts says what is left unverified (review of
+    // #2063). Never the request kept as the saved reply.
+    if ((continuing || checkAsked) && !shownText.trim() && text.trim()) {
+      shownText = (continuing ? SEARCH_GOES_ON : UNVERIFIED_NOTED)[effectiveReplyLocale(opened.replyLanguage)];
       emit({ type: 'text', delta: shownText });
     }
     // A reply that was nothing but the request again keeps it (no empty reply); otherwise what was shown is the reply. Without a
