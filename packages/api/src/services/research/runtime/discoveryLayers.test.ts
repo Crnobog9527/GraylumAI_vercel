@@ -28,6 +28,8 @@ interface Script {
   /** A found post's title by its author (default "one video", on the niche of KEYWORDS). */
   title?: (author: string, n: number) => string;
   leads?: (keyword: string) => string[];
+  /** A found post's publish time by its author and position (default now; next pages count from 100). */
+  publishedAt?: (author: string, n: number) => string;
   followers?: number;
   /** Web search results (Parallel); configured only when given. */
   web?: (query: string) => ResearchItem[];
@@ -71,7 +73,7 @@ function fixture(platform: SocialPlatform, script: Script, kinds: SocialKind[] =
         maxUnitsPerCall: '1' }] : [])] });
   const sent: SupplierRequest[] = [];
   const post = (author: string, n: number): ResearchItem => ({ fields: { id: `${author}-v${n}`, ...(author ? { authorId: author } : {}), author: `Name ${author}`,
-    title: script.title?.(author, n) ?? 'one video', publishedAt: now.toISOString(), views: 1000, likes: 10, comments: 1, shares: 1 }, missing: [] });
+    title: script.title?.(author, n) ?? 'one video', publishedAt: script.publishedAt?.(author, n) ?? now.toISOString(), views: 1000, likes: 10, comments: 1, shares: 1 }, missing: [] });
   subcall.mockImplementation(async (context, request) => {
     const operationId = context.newId();
     sent.push(request);
@@ -182,6 +184,43 @@ describe('deeper discovery layers', () => {
     const envelope = await f.run();
     expect(f.sent.some(r => r.vendor === 'tikhub' && r.call.kind === 'account_profile' && r.call.account === 'sweet')).toBe(false);
     expect(envelope.coverage.platforms.tiktok.offTopic).toBe(1);
+  });
+
+  // Owner 2026-11-28 ("按 A 修", pay1): a candidate whose newest found post is older than the 30 days of INACTIVE_30_DAYS goes to the end
+  // of the card and reads "可能停更"; it stays selectable (the search sees only some of its posts).
+  it('orders the card by each candidate\'s newest found post and marks one older than 30 days "可能停更"', async () => {
+    const day = 86_400_000;
+    const when: Record<string, string> = { old: '2021-05-01T00:00:00Z', edge: new Date(now.getTime() - 31 * day).toISOString(),
+      mid: new Date(now.getTime() - 29 * day).toISOString(), new: new Date(now.getTime() - day).toISOString() };
+    const f = fixture('tiktok', { firstPage: keyword => (keyword === 'one' ? ['old', 'edge', 'mid', 'new'] : []), leads: () => ['lead'],
+      publishedAt: author => when[author] ?? now.toISOString() }, ['keyword_posts', 'account_profile', 'account_posts', 'account_search']);
+    const envelope = await f.run();
+    const options = (f.store.createCard as ReturnType<typeof vi.fn>).mock.calls[0]![1].options as Array<{ account: string; label: string;
+      selectable: boolean }>;
+    // The lead was found by an account search, without posts: its activity is unknown, so it sits between the recent and the old.
+    expect(options.map(o => o.account)).toEqual(['new', 'mid', 'lead', 'edge', 'old']);
+    expect(options.map(o => o.label.split(' · ')[1])).toEqual(['活跃度待核对', '活跃度待核对', '活跃度待核对', '可能停更', '可能停更']);
+    expect(options.every(o => o.selectable)).toBe(true);
+    const status = Object.fromEntries((envelope.items as Array<{ fields: { account: string; activityStatus: string } }>)
+      .map(item => [item.fields.account, item.fields.activityStatus]));
+    expect(status).toMatchObject({ old: '可能停更', edge: '可能停更', mid: '活跃度待核对', lead: '活跃度待核对' });
+  });
+
+  // Review of #2067: the card goes by every post of the candidate the round found, not the ones it had when it was screened.
+  it('does not mark a candidate "可能停更" when a later page finds a recent post of it', async () => {
+    const f = fixture('tiktok', { firstPage: keyword => (keyword === 'one' ? ['oldie', 'p1', 'p2'] : []), firstCursor: '20',
+      nextPage: (_keyword, cursor) => (cursor === '20' ? { authors: ['oldie', 'n1'] } : undefined),
+      publishedAt: (author, n) => (author === 'oldie' && n < 100 ? '2021-05-01T00:00:00Z' : now.toISOString()) });
+    const envelope = await f.run();
+    // oldie is looked up once, from its first-page posts; its newer post on page 2 costs no second lookup.
+    expect(f.sent.filter(r => r.vendor === 'tikhub' && r.call.kind === 'account_profile' && r.call.account === 'oldie')).toHaveLength(1);
+    const options = (f.store.createCard as ReturnType<typeof vi.fn>).mock.calls[0]![1].options as Array<{ account: string; label: string }>;
+    expect(options.find(o => o.account === 'oldie')?.label).toMatch(/ · 活跃度待核对$/);
+    const oldie = (envelope.items as Array<{ fields: { account: string; activityStatus: string } }>).find(item => item.fields.account === 'oldie');
+    expect(oldie?.fields.activityStatus).toBe('活跃度待核对');
+    // The round saves the refreshed time too, so a follow-up card reads it the same way.
+    const saved = f.discoveries.get(discoveryId)!.cursor.accounts as Array<{ account: string; metrics: { lastPublishedAt: { value: string } } }>;
+    expect(saved.find(a => a.account === 'oldie')?.metrics.lastPublishedAt.value).toBe(now.toISOString());
   });
 
   it('too few first-page authors: searches for accounts with each keyword and screens the leads until there are eight', async () => {

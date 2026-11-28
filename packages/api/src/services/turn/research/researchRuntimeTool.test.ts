@@ -701,10 +701,11 @@ describe('durable benchmark discovery and free follow-up', () => {
     expect(result.status).toBe('ok');
     expect(result.items).toHaveLength(8);
     expect(result.items?.[0]?.fields.category).toBe('activity_pending');
-    expect(result.items?.[0]?.fields.activityStatus).toBe('活跃度待核对');
+    // Owner 2026-11-28 ("按 A 修"): a newest found post older than 30 days reads "可能停更", still selectable and still decided by the fetch.
+    expect(result.items?.[0]?.fields.activityStatus).toBe('可能停更');
     const card = f.store.createCard.mock.calls[0]?.[1];
     expect(card?.options.filter(option => option.selectable)).toHaveLength(8);
-    expect(card?.options[0]?.label).toContain('活跃度待核对');
+    expect(card?.options[0]?.label).toContain('可能停更');
   });
 
   it('reuses the stored first card verbatim when discovery recovery finds its stable card id', async () => {
