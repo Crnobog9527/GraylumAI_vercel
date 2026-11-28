@@ -153,6 +153,13 @@ describe('deeper discovery layers', () => {
     expect(envelope.coverage.platforms.tiktok.offTopic).toBeUndefined();
   });
 
+  it('looks up an author whose only found post on the niche is its 31st (review of #2063)', async () => {
+    const f = fixture('tiktok', { firstPage: keyword => (keyword === 'one' ? Array(31).fill('late') : []),
+      title: (_author, n) => (n === 30 ? 'one video' : 'cooking video') });
+    await f.run();
+    expect(f.sent.some(r => r.vendor === 'tikhub' && r.call.kind === 'account_profile' && r.call.account === 'late')).toBe(true);
+  });
+
   it('too few first-page authors: searches for accounts with each keyword and screens the leads until there are eight', async () => {
     const f = fixture('tiktok', { firstPage: keyword => [`${keyword}a`], leads: keyword => [`${keyword}l1`, `${keyword}l2`, `${keyword}l3`] },
       ['keyword_posts', 'account_profile', 'account_posts', 'account_search']);

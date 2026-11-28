@@ -78,11 +78,14 @@ export const ON_TOPIC_MIN_SHARE = 0.1;
  * not name the niche, and fewer than ON_TOPIC_MIN_SHARE of the posts do (in discovery, where only the posts the keyword search
  * found are known, none of them). Without the niche, a name or titled posts there is nothing to judge by: never off topic.
  */
-export function offTopic(input: { name?: string | null; posts: EvidenceItem[]; keywords: readonly string[]; minShare?: number }): boolean {
+export function offTopic(input: { name?: string | null; posts: EvidenceItem[]; keywords: readonly string[]; minShare?: number;
+  /** Discovery reads every post the search found (review of #2063); a fetch reads the account's newest 30, like its metrics. */
+  allPosts?: boolean }): boolean {
   const terms = nicheTerms(input.keywords);
   if (terms.length === 0) return false;
   if (typeof input.name === 'string' && namesNiche(input.name, terms)) return false;
-  const titled = distinctPosts(input.posts).slice(0, 30).map(post => post.fields.title)
+  const distinct = distinctPosts(input.posts);
+  const titled = (input.allPosts ? distinct : distinct.slice(0, 30)).map(post => post.fields.title)
     .filter((title): title is string => typeof title === 'string' && title.trim().length > 0);
   if (titled.length === 0) return false;
   const matched = titled.filter(title => namesNiche(title, terms)).length;

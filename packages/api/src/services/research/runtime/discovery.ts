@@ -277,8 +277,9 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
     if (!account || screened.has(`${platform}:${account}`)) return;
     // Owner 2026-11-28 (H, pay4): an author not one of whose found posts names the confirmed niche is no candidate, and is not looked up
     // (nor paid for). Decided from the replayed search pages only, so a continued round passes over the same authors.
-    // Zero matches only: the search's posts are a sample, not the account's newest posts (the one-in-ten rule is the fetch's).
-    if (offTopic({ name: label, posts: authorPosts, keywords: d.keywords, minShare: 0 })) {
+    // Zero matches among all its found posts only: they are a sample, not the account's newest posts (the one-in-ten rule and the
+    // newest 30 are the fetch's).
+    if (offTopic({ name: label, posts: authorPosts, keywords: d.keywords, minShare: 0, allPosts: true })) {
       screened.add(`${platform}:${account}`);
       const spent = coverage.platforms[platform];
       if (spent) spent.offTopic = (spent.offTopic ?? 0) + 1;

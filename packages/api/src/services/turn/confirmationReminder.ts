@@ -65,12 +65,18 @@ const CHECK_ACCOUNTS = new RegExp(['(点开|點開|打开|打開|点进|點進|�
   '(主页|主頁)[^。！？\\n]{0,10}(看一眼|看看|核实|核實)',
   '\\b(you (could|can|might)|please|could you)\\b[^.!?]{0,20}\\b(open|visit|check|look at)\\b[^.!?]{0,30}\\b(profiles?|accounts?)\\b'].join('|'), 'i');
 const LINKS = /链接|鏈接|\blinks?\b/i;
+// Review of #2063: only a request to the user counts. It speaks to the user; a sentence that says the user need not ("不用你点开…")
+// or reports the coach's own look ("我打开账号主页看了，它做的是甜品") is the coach's judgment and is kept.
+const TO_USER = /你|您|(请|請|麻烦|麻煩)|\b(you|please)\b/i;
+const NEED_NOT = new RegExp(['(不用|不必|无需|無需|不需要|用不着|用不著|别|別)[^。！？\\n]{0,6}(点开|點開|打开|打開|点进|點進|去看|看|翻)',
+  "\\b(no need|(do not|don'?t|needn'?t) (need to )?(open|visit|check|look))\\b"].join('|'), 'i');
 /** What the reply says when it was nothing but that request again (review of #2063): what could not be checked stays unverified. */
 export const UNVERIFIED_NOTED: Record<ReplyLocale, string> = { 'zh-Hans': '没能核实的账号，我会在结论里标成"未核实"。',
   'zh-Hant': '沒能核實的帳號，我會在結論裡標成「未核實」。', en: "I'll mark any account I could not verify as unverified." };
 
 /** A sentence that asks the user to open the accounts and check them. */
-export const asksUserToCheckAccounts = (sentence: string) => CHECK_ACCOUNTS.test(sentence) && !LINKS.test(sentence);
+export const asksUserToCheckAccounts = (sentence: string) => CHECK_ACCOUNTS.test(sentence) && !LINKS.test(sentence)
+  && TO_USER.test(sentence) && !NEED_NOT.test(sentence);
 
 /** Whether any whole sentence of a saved reply passes `test`. */
 export const anySentence = (text: string, test: (sentence: string) => boolean) => sentences(text, true).done.some(test)

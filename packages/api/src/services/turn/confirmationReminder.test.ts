@@ -105,6 +105,24 @@ describe('Owner 2026-11-28 (I, pay4 seq 28/30/32): the user is asked once to ope
     }
   });
 
+  // Review of #2063: only a request to the user is dropped; the coach's own judgment stays, or "未核实" would replace it.
+  it('keeps a sentence that says the user need not check, in Simplified and Traditional characters and in English', () => {
+    for (const sentence of ['不用你点开账号主页，我已经从标题看出它做的是甜品。', '不用你點開帳號主頁，我已經從標題看出它做的是甜品。',
+      '你不需要再去看主页了，我按作品标题判断。', "You don't need to open their profiles: the titles show desserts."]) {
+      expect(asksUserToCheckAccounts(sentence)).toBe(false);
+    }
+  });
+
+  it('keeps the coach reporting its own look at an account', () => {
+    for (const sentence of ['我打开账号主页核实了，云朵泡芙实际做甜品，不是皮具。', '我看了主页，它做的是甜品，不是皮具。',
+      '我點開帳號主頁看了，它做的是甜品。']) {
+      expect(asksUserToCheckAccounts(sentence)).toBe(false);
+    }
+    const filter = replySentenceFilter(() => true, asksUserToCheckAccounts);
+    const reply = '我打开账号主页核实了，云朵泡芙实际做甜品，不是皮具。\n不用你点开账号主页，结论我写成"不相关"。';
+    expect(filter.push(reply) + filter.flush()).toBe(reply);
+  });
+
   it('a reply after the first request has the request dropped and the rest kept, also when streamed in pieces', () => {
     const reply = `数据合格的有 4 个账号。\n${SEQ32}\n看不出来，我就在结论里保留"身份未核实"这一条。`;
     const filter = replySentenceFilter(() => true, asksUserToCheckAccounts);

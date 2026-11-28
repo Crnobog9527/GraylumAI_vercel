@@ -84,6 +84,13 @@ describe('the niche of the confirmed keywords decides what is off topic (Owner 2
     expect(offTopic({ name: '云朵泡芙', keywords: ['杭州周末去哪玩'], posts: titles('甜品便当') })).toBe(false);
   });
 
+  // Review of #2063: discovery reads every post the search found; the newest 30 are the fetch's sample.
+  it('discovery keeps an author whose only post on the niche is its 31st found post', () => {
+    const found = Array.from({ length: 31 }, (_, i) => post(i === 30 ? '皮具制作' : '今天的甜品'));
+    expect(offTopic({ keywords, posts: found, minShare: 0, allPosts: true })).toBe(false);
+    expect(offTopic({ keywords, posts: found, minShare: 0 })).toBe(true);
+  });
+
   it('a fetched account needs at least one in ten of its posts on the niche', () => {
     const posts = (on: number) => Array.from({ length: 20 }, (_, i) => post(i < on ? '皮具卡包教程' : '今天的甜品'));
     expect(offTopic({ keywords, posts: posts(1) })).toBe(true);
